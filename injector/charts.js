@@ -33,8 +33,8 @@ var CHART_COLORS = {
     fuelPressure:   '#ffd54f',
     fuelPressAim:   '#a0a0b0',
     threshold:      '#dc3545',
-    gridlines:      'rgba(255,255,255,0.1)',
-    text:           '#cccccc'
+    gridlines:      '#333333',
+    text:           '#ffffff'
 };
 
 // ---------------------------------------------------------------------------
@@ -70,7 +70,7 @@ function addResetZoomButton(canvas, key) {
     var btn = document.createElement('button');
     btn.className = 'reset-zoom-btn';
     btn.textContent = 'Reset Zoom';
-    btn.style.cssText = 'position:absolute;top:8px;right:12px;padding:3px 8px;font-size:11px;background:#0f3460;color:#e0e0e0;border:1px solid #4a9eff;border-radius:3px;cursor:pointer;z-index:10;';
+    btn.style.cssText = 'position:absolute;top:8px;right:12px;padding:3px 8px;font-size:11px;background:#222222;color:#ffffff;border:1px solid #E31837;border-radius:3px;cursor:pointer;z-index:10;';
     btn.onclick = function() {
         if (chartInstances[key]) {
             chartInstances[key].resetZoom();

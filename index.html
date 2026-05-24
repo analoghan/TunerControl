@@ -13,8 +13,8 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: #1a1a2e;
-            color: #e0e0e0;
+            background: #0a0a0a;
+            color: #ffffff;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
@@ -27,6 +27,13 @@
             margin-bottom: 3rem;
         }
 
+        .logo {
+            display: block;
+            margin: 0 auto 1.5rem;
+            max-width: 200px;
+            height: auto;
+        }
+
         h1 {
             font-size: 2.5rem;
             color: #ffffff;
@@ -35,7 +42,7 @@
 
         .description {
             font-size: 1.1rem;
-            color: #a0a0b0;
+            color: #b0b0b0;
             max-width: 600px;
             line-height: 1.5;
         }
@@ -50,8 +57,8 @@
 
         .card {
             display: block;
-            background: #16213e;
-            border: 1px solid #0f3460;
+            background: #1a1a1a;
+            border: 1px solid #333333;
             border-radius: 12px;
             padding: 2rem;
             text-decoration: none;
@@ -61,8 +68,8 @@
 
         .card:hover {
             transform: translateY(-4px);
-            border-color: #4a9eff;
-            box-shadow: 0 8px 24px rgba(74, 158, 255, 0.15);
+            border-color: #E31837;
+            box-shadow: 0 8px 24px rgba(227, 24, 55, 0.2);
         }
 
         .card h2 {
@@ -73,15 +80,14 @@
 
         .card p {
             font-size: 0.95rem;
-            color: #a0a0b0;
+            color: #b0b0b0;
             line-height: 1.4;
         }
     </style>
 </head>
 <body>
     <header>
-        <h1>TunerControl</h1>
-        <p class="description">Browser-based engine tuning analysis tools for MoTeC M1 ECU data. Select a tool below to get started.</p>
+        <img src="TunerControlLogo.png" alt="TunerControl" class="logo">
     </header>
 
     <nav class="nav-cards">

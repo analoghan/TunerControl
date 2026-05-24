@@ -27,9 +27,9 @@
 // ---------------------------------------------------------------------------
 
 var FP_COLORS = {
-    background:     '#1a2744',
-    text:           '#e0e0e0',
-    gridlines:      '#2a3a5e',
+    background:     '#222222',
+    text:           '#ffffff',
+    gridlines:      '#333333',
     pressure:       '#ffb74d',
     aim:            '#90a4ae',
     error:          '#4a9eff',
@@ -68,7 +68,7 @@ function addResetZoomButton(canvas, key) {
     var btn = document.createElement('button');
     btn.className = 'reset-zoom-btn';
     btn.textContent = 'Reset Zoom';
-    btn.style.cssText = 'position:absolute;top:8px;right:12px;padding:3px 8px;font-size:11px;background:#0f3460;color:#e0e0e0;border:1px solid #4a9eff;border-radius:3px;cursor:pointer;z-index:10;';
+    btn.style.cssText = 'position:absolute;top:8px;right:12px;padding:3px 8px;font-size:11px;background:#222222;color:#ffffff;border:1px solid #E31837;border-radius:3px;cursor:pointer;z-index:10;';
     btn.onclick = function() {
         if (_chartInstances[key]) {
             _chartInstances[key].resetZoom();
