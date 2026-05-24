@@ -1,0 +1,394 @@
+/*
+ * ve-table/styles.css — Layout and colour-coding for the VE Table Tuning Tool.
+ * Dark theme consistent with the TunerControl landing page and injector tool.
+ */
+
+/* === Reset and base === */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #e0e0e0;
+  background: #1a1a2e;
+}
+
+/* === App container === */
+
+.app-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+  background: #16213e;
+  border-radius: 8px;
+  border: 1px solid #0f3460;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+/* === Top navigation === */
+
+.top-nav {
+  margin-bottom: 20px;
+}
+
+.top-nav a {
+  color: #4a9eff;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.top-nav a:hover {
+  text-decoration: underline;
+  color: #7ab8ff;
+}
+
+/* === Form section === */
+
+.form-section {
+  margin-bottom: 20px;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.file-row label {
+  min-width: 120px;
+  font-weight: 500;
+  color: #c0c0d0;
+}
+
+.file-row input[type="file"] {
+  color: #e0e0e0;
+}
+
+.file-row input[type="file"]::file-selector-button {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #ffffff;
+  background: #0f3460;
+  border: 1px solid #4a9eff;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.file-row input[type="file"]::file-selector-button:hover {
+  background: #1a4a7a;
+}
+
+.file-row input[type="number"] {
+  background: #1a2744;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  color: #e0e0e0;
+  padding: 6px 10px;
+}
+
+.filename-display {
+  font-size: 0.85rem;
+  color: #a0a0b0;
+  font-style: italic;
+}
+
+.button-row {
+  margin-top: 16px;
+}
+
+/* === Process button === */
+
+#process-btn {
+  padding: 10px 28px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: #4a9eff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+#process-btn:hover:not(:disabled) {
+  background: #3580d4;
+}
+
+#process-btn:disabled {
+  background: #2a3a5e;
+  color: #6a7a9a;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* === Progress bar === */
+
+.progress-section {
+  margin-bottom: 20px;
+}
+
+.progress-bar-track {
+  position: relative;
+  width: 100%;
+  height: 22px;
+  background: #0f3460;
+  border-radius: 11px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4a9eff, #00c9a7);
+  border-radius: 11px;
+  transition: width 0.3s ease;
+}
+
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 0.85rem;
+  color: #a0a0b0;
+}
+
+#progress-pct {
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+/* === Error banner === */
+
+.error-banner {
+  background: rgba(220, 53, 69, 0.15);
+  border: 1px solid #dc3545;
+  border-radius: 4px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  color: #ff6b7a;
+  font-weight: 500;
+}
+
+/* === Warning banner === */
+
+.warning-banner {
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  color: #ffd54f;
+}
+
+.warning-item {
+  margin-bottom: 4px;
+}
+
+.warning-item:last-child {
+  margin-bottom: 0;
+}
+
+/* === Results section === */
+
+.results-section {
+  margin-top: 16px;
+}
+
+.stats-line {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #c0c0d0;
+}
+
+.no-data-message {
+  padding: 16px;
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  color: #ffd54f;
+}
+
+/* === Download buttons === */
+
+.download-buttons {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.download-buttons button {
+  padding: 8px 20px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #ffffff;
+  background: #4a9eff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.download-buttons button:hover {
+  background: #3580d4;
+}
+
+/* === Table toggle buttons === */
+
+.table-toggle {
+  display: flex;
+  gap: 0;
+  margin-bottom: 12px;
+}
+
+.toggle-btn {
+  padding: 8px 20px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border: 1px solid #4a9eff;
+  background: #16213e;
+  color: #4a9eff;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.toggle-btn:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.toggle-btn:last-child {
+  border-radius: 0 4px 4px 0;
+  border-left: none;
+}
+
+.toggle-btn.active {
+  background: #4a9eff;
+  color: #ffffff;
+}
+
+.toggle-btn:hover:not(.active) {
+  background: #1a2744;
+}
+
+/* === Table label === */
+
+.table-label {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #a0a0b0;
+}
+
+/* === Correction table — horizontally scrollable === */
+
+.table-container {
+  overflow-x: auto;
+  margin-top: 12px;
+}
+
+.correction-table {
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.correction-table th,
+.correction-table td {
+  padding: 4px 8px;
+  border: 1px solid #0f3460;
+  text-align: center;
+  min-width: 48px;
+}
+
+.correction-table thead th {
+  background: #0f3460;
+  color: #e0e0e0;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.correction-table tbody th {
+  background: #0f3460;
+  color: #e0e0e0;
+  font-weight: 600;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+/* === Cell colour coding (dark theme adapted) === */
+
+.correction-table td.positive,
+td.positive {
+  background: rgba(40, 167, 69, 0.25);
+  color: #6fdc8c;
+  font-weight: 600;
+}
+
+.correction-table td.negative,
+td.negative {
+  background: rgba(220, 53, 69, 0.25);
+  color: #ff6b7a;
+  font-weight: 600;
+}
+
+.correction-table td.zero,
+td.zero {
+  background: rgba(255, 193, 7, 0.1);
+  color: #ffd54f;
+}
+
+.correction-table td.below-threshold,
+td.below-threshold {
+  background: #1a2744;
+  color: #6a7a9a;
+}
+
+/* === Hidden state === */
+
+[hidden] {
+  display: none !important;
+}
+
+/* === Responsive === */
+
+@media (max-width: 600px) {
+  body {
+    padding: 12px;
+  }
+
+  .app-container {
+    padding: 16px;
+  }
+
+  h1 {
+    font-size: 1.3rem;
+  }
+
+  .file-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  #process-btn {
+    width: 100%;
+  }
+}

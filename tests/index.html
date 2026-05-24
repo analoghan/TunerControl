@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>VE Table Tuning — Test Suite</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #fafafa;
+      color: #333;
+    }
+    h1 { margin-top: 0; }
+    #summary {
+      font-size: 1.2em;
+      margin: 16px 0;
+      padding: 12px;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+    #summary.all-pass { background: #c8e6c9; color: #1b5e20; }
+    #summary.has-fail { background: #ffcdd2; color: #b71c1c; }
+    #summary.running  { background: #fff9c4; color: #666; }
+    .group {
+      margin: 12px 0;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .group-header {
+      padding: 10px 14px;
+      font-weight: bold;
+      background: #f5f5f5;
+      border-bottom: 1px solid #ddd;
+    }
+    .test-result {
+      padding: 6px 14px 6px 28px;
+      border-bottom: 1px solid #f0f0f0;
+      font-family: monospace;
+      font-size: 0.9em;
+    }
+    .test-result:last-child { border-bottom: none; }
+    .test-result.pass { color: #1b5e20; }
+    .test-result.pass::before { content: "✓ "; font-weight: bold; }
+    .test-result.fail { color: #b71c1c; background: #fff5f5; }
+    .test-result.fail::before { content: "✗ "; font-weight: bold; }
+    .error-detail {
+      margin: 4px 0 4px 20px;
+      padding: 6px 10px;
+      background: #ffebee;
+      border-left: 3px solid #b71c1c;
+      font-size: 0.85em;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .no-tests {
+      padding: 10px 14px;
+      color: #999;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <h1>VE Table Tuning — Test Suite</h1>
+  <div id="summary" class="running">Running tests…</div>
+  <div id="results"></div>
+
+  <!-- Load worker.js as a regular script so its functions are in global scope -->
+  <script src="../ve-table/worker.js"></script>
+  <!-- Load injector worker.js for injector analysis tests -->
+  <script src="../injector/worker.js"></script>
+
+  <!-- Load fast-check from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/fast-check@3.22.0/lib/bundle.js"></script>
+
+  <!-- Test framework and runner -->
+  <script>
+    // =========================================================================
+    // Minimal test framework
+    // =========================================================================
+
+    const __testResults = [];
+    let __currentGroup = null;
+
+    /**
+     * Group tests under a descriptive name.
+     */
+    function describe(name, fn) {
+      __currentGroup = name;
+      try {
+        fn();
+      } catch (e) {
+        __testResults.push({
+          group: name,
+          name: '(group setup error)',
+          pass: false,
+          error: e.message || String(e),
+        });
+      }
+      __currentGroup = null;
+    }
+
+    /**
+     * Define a single test case.
+     * Supports both synchronous and async test functions.
+     */
+    function it(name, fn) {
+      const group = __currentGroup || '(ungrouped)';
+      __testResults.push({ group, name, fn, pass: null, error: null });
+    }
+
+    // Alias
+    const test = it;
+
+    // =========================================================================
+    // Assertion helpers
+    // =========================================================================
+
+    const assert = {
+      /**
+       * Assert that a value is truthy.
+       */
+      ok(value, msg) {
+        if (!value) {
+          throw new Error(msg || `Expected truthy value, got: ${JSON.stringify(value)}`);
+        }
+      },
+
+      /**
+       * Assert strict equality (===).
+       */
+      equal(actual, expected, msg) {
+        if (actual !== expected) {
+          throw new Error(
+            msg || `Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+          );
+        }
+      },
+
+      /**
+       * Assert deep equality (JSON-based for simplicity).
+       */
+      deepEqual(actual, expected, msg) {
+        const a = JSON.stringify(actual);
+        const b = JSON.stringify(expected);
+        if (a !== b) {
+          throw new Error(msg || `Deep equality failed.\nExpected: ${b}\nActual:   ${a}`);
+        }
+      },
+
+      /**
+       * Assert that two numbers are within a tolerance.
+       */
+      closeTo(actual, expected, tolerance, msg) {
+        if (typeof actual !== 'number' || typeof expected !== 'number') {
+          throw new Error(msg || `closeTo requires numbers. Got actual=${actual}, expected=${expected}`);
+        }
+        if (Number.isNaN(actual) && Number.isNaN(expected)) return; // NaN == NaN for testing
+        const diff = Math.abs(actual - expected);
+        if (diff > tolerance) {
+          throw new Error(
+            msg || `Expected ${actual} to be within ${tolerance} of ${expected} (diff: ${diff})`
+          );
+        }
+      },
+
+      /**
+       * Assert that a function throws an error.
+       * Optionally checks that the error message contains a substring.
+       */
+      throws(fn, msgSubstring, msg) {
+        let threw = false;
+        let error = null;
+        try {
+          fn();
+        } catch (e) {
+          threw = true;
+          error = e;
+        }
+        if (!threw) {
+          throw new Error(msg || 'Expected function to throw, but it did not');
+        }
+        if (msgSubstring && error && !String(error.message || error).includes(msgSubstring)) {
+          throw new Error(
+            msg || `Expected error to contain "${msgSubstring}", got: "${error.message || error}"`
+          );
+        }
+      },
+
+      /**
+       * Assert that a value is NaN.
+       */
+      isNaN(value, msg) {
+        if (!Number.isNaN(value)) {
+          throw new Error(msg || `Expected NaN, got: ${value}`);
+        }
+      },
+
+      /**
+       * Assert that a value is not NaN.
+       */
+      isNotNaN(value, msg) {
+        if (Number.isNaN(value)) {
+          throw new Error(msg || `Expected a non-NaN value, got NaN`);
+        }
+      },
+
+      /**
+       * Assert that actual > expected.
+       */
+      greaterThan(actual, expected, msg) {
+        if (!(actual > expected)) {
+          throw new Error(msg || `Expected ${actual} > ${expected}`);
+        }
+      },
+
+      /**
+       * Assert that actual < expected.
+       */
+      lessThan(actual, expected, msg) {
+        if (!(actual < expected)) {
+          throw new Error(msg || `Expected ${actual} < ${expected}`);
+        }
+      },
+    };
+
+    // =========================================================================
+    // fast-check integration helper
+    // =========================================================================
+
+    /**
+     * Run a fast-check property inside a test.
+     * Usage: property('name', arbitrary, (value) => { ... assert ... })
+     */
+    function property(name, arb, predicate, opts) {
+      const group = __currentGroup || '(ungrouped)';
+      const fn = () => {
+        const fc = window.fc;
+        if (!fc) throw new Error('fast-check not loaded');
+        const params = Object.assign({ numRuns: 100 }, opts || {});
+        fc.assert(fc.property(arb, predicate), params);
+      };
+      __testResults.push({ group, name, fn, pass: null, error: null });
+    }
+
+    // =========================================================================
+    // Test runner
+    // =========================================================================
+
+    async function runAllTests() {
+      for (const result of __testResults) {
+        if (!result.fn) continue; // group setup errors already recorded
+        try {
+          const ret = result.fn();
+          // Support async tests
+          if (ret && typeof ret.then === 'function') {
+            await ret;
+          }
+          result.pass = true;
+        } catch (e) {
+          result.pass = false;
+          result.error = e.message || String(e);
+        }
+      }
+      renderResults();
+    }
+
+    function renderResults() {
+      const resultsEl = document.getElementById('results');
+      const summaryEl = document.getElementById('summary');
+
+      const passed = __testResults.filter(r => r.pass === true).length;
+      const failed = __testResults.filter(r => r.pass === false).length;
+      const total = passed + failed;
+
+      if (total === 0) {
+        summaryEl.textContent = 'No tests found. Test modules may not have been implemented yet.';
+        summaryEl.className = 'running';
+        return;
+      }
+
+      summaryEl.textContent = `${passed} passed, ${failed} failed (${total} total)`;
+      summaryEl.className = failed > 0 ? 'has-fail' : 'all-pass';
+
+      // Group results by group name
+      const groups = new Map();
+      for (const r of __testResults) {
+        if (!groups.has(r.group)) groups.set(r.group, []);
+        groups.get(r.group).push(r);
+      }
+
+      let html = '';
+      for (const [groupName, tests] of groups) {
+        html += `<div class="group">`;
+        html += `<div class="group-header">${escapeHtml(groupName)}</div>`;
+        if (tests.length === 0) {
+          html += `<div class="no-tests">No tests in this group</div>`;
+        }
+        for (const t of tests) {
+          const cls = t.pass ? 'pass' : 'fail';
+          html += `<div class="test-result ${cls}">${escapeHtml(t.name)}</div>`;
+          if (!t.pass && t.error) {
+            html += `<div class="error-detail">${escapeHtml(t.error)}</div>`;
+          }
+        }
+        html += `</div>`;
+      }
+      resultsEl.innerHTML = html;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // =========================================================================
+    // Load test modules and run
+    // =========================================================================
+
+    /**
+     * Dynamically load a test module script.
+     * Each test file should call describe/it/test/property to register tests.
+     */
+    function loadTestScript(src) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = resolve;
+        script.onerror = () => {
+          // Non-fatal: test file may not be implemented yet
+          console.warn(`Could not load test file: ${src}`);
+          resolve();
+        };
+        document.body.appendChild(script);
+      });
+    }
+
+    async function main() {
+      // Load all test modules in order
+      const testModules = [
+        'test-log-parser.js',
+        'test-ve-parser.js',
+        'test-bin-assigner.js',
+        'test-correction-calculator.js',
+        'test-hit-counter.js',
+        'test-output-builder.js',
+        'test-properties.js',
+        'test-channel-resolution.js',
+        'test-injector-stats.js',
+        'test-pw-stability.js',
+        'test-closed-loop.js',
+        'test-injection-timing.js',
+        'test-fuel-pressure.js',
+        'test-downsample.js',
+      ];
+
+      for (const mod of testModules) {
+        await loadTestScript(mod);
+      }
+
+      // Run all registered tests
+      await runAllTests();
+    }
+
+    // Start when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', main);
+    } else {
+      main();
+    }
+  </script>
+</body>
+</html>

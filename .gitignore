@@ -1,0 +1,10 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data files (session logs and analysis outputs)
+files/
+analysis/
+
+# Misc
+0

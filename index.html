@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TunerControl</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 3rem 1rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            color: #ffffff;
+            margin-bottom: 0.75rem;
+        }
+
+        .description {
+            font-size: 1.1rem;
+            color: #a0a0b0;
+            max-width: 600px;
+            line-height: 1.5;
+        }
+
+        .nav-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            max-width: 700px;
+            width: 100%;
+        }
+
+        .card {
+            display: block;
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 12px;
+            padding: 2rem;
+            text-decoration: none;
+            color: inherit;
+            transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            border-color: #4a9eff;
+            box-shadow: 0 8px 24px rgba(74, 158, 255, 0.15);
+        }
+
+        .card h2 {
+            font-size: 1.3rem;
+            color: #ffffff;
+            margin-bottom: 0.5rem;
+        }
+
+        .card p {
+            font-size: 0.95rem;
+            color: #a0a0b0;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>TunerControl</h1>
+        <p class="description">Browser-based engine tuning analysis tools for MoTeC M1 ECU data. Select a tool below to get started.</p>
+    </header>
+
+    <nav class="nav-cards">
+        <a href="ve-table/index.html" class="card">
+            <h2>VE Table Tuning</h2>
+            <p>Analyze and correct volumetric efficiency tables using MoTeC log data and existing VE maps.</p>
+        </a>
+        <a href="injector/index.html" class="card">
+            <h2>Injector Characterization</h2>
+            <p>Lean spike analysis, injector pulsewidth stability, DI fuel pressure, injection timing, and closed-loop fuel trim diagnostics.</p>
+        </a>
+        <a href="knock/index.html" class="card">
+            <h2>Knock Analyzer</h2>
+            <p>Per-cylinder knock event detection, operating condition correlation, and timing adjustment recommendations from MoTeC log data.</p>
+        </a>
+        <a href="idle/index.html" class="card">
+            <h2>Idle Behavior Analyzer</h2>
+            <p>Deceleration idle hang detection, settle time analysis, and mass flow correlation from MoTeC log data.</p>
+        </a>
+    </nav>
+</body>
+</html>

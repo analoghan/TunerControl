@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Knock Analyzer — TunerControl</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../index.html" aria-label="Back to TunerControl landing page">&larr; Back to TunerControl</a>
+    </nav>
+
+    <h1>Knock Analyzer</h1>
+
+    <!-- File Input Section -->
+    <section class="file-section" aria-label="File selection">
+      <div class="file-row">
+        <label for="csv-input">MoTeC Log File:</label>
+        <input type="file" id="csv-input" accept=".csv,.ld" aria-describedby="file-error">
+      </div>
+      <div class="threshold-row">
+        <label for="threshold-input">Knock Threshold (%):</label>
+        <input type="number" id="threshold-input" value="5" min="0" max="100" step="0.1" aria-describedby="threshold-error">
+        <span id="threshold-error" class="error-message" role="alert" hidden></span>
+      </div>
+      <div class="button-row">
+        <button id="analyze-btn" disabled aria-label="Analyze selected log file">Analyze</button>
+      </div>
+      <div id="file-error" class="error-message" role="alert" hidden></div>
+    </section>
+
+    <!-- Progress Section -->
+    <section id="progress-section" class="progress-section" aria-label="Analysis progress" hidden>
+      <div class="progress-bar-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
+      </div>
+      <div class="progress-text">
+        <span id="progress-pct">0%</span>
+        <span id="progress-phase"></span>
+      </div>
+    </section>
+
+    <!-- Report Section -->
+    <section id="report-section" class="report-section" aria-label="Analysis report" hidden>
+      <div id="channel-mapping" class="report-block">
+        <h2>Channel Mapping</h2>
+        <div id="channel-info" class="channel-info"></div>
+      </div>
+
+      <div id="warnings-area" class="report-block warnings-area" hidden>
+        <h2>Warnings</h2>
+        <ul id="warnings-list"></ul>
+      </div>
+
+      <div id="report-diagnostics" class="report-block">
+        <h2>Diagnostic Summary</h2>
+        <div id="diagnostics-content" class="report-content"></div>
+      </div>
+
+      <div id="report-cylinder-distribution" class="report-block">
+        <h2>Per-Cylinder Knock Distribution</h2>
+        <div id="cylinder-distribution-content" class="report-content"></div>
+      </div>
+
+      <div id="report-timing-recommendations" class="report-block">
+        <h2>Timing Adjustment Recommendations</h2>
+        <div id="timing-recommendations-content" class="report-content"></div>
+      </div>
+    </section>
+
+    <!-- Charts Section -->
+    <section id="charts-section" class="charts-section" aria-label="Analysis charts" hidden>
+      <h2>Charts</h2>
+      <div class="chart-grid">
+        <div class="chart-panel">
+          <h3>Per-Cylinder Knock Count</h3>
+          <canvas id="chart-cylinder-bar" width="800" height="400" aria-label="Per-cylinder knock count bar chart"></canvas>
+        </div>
+        <div class="chart-panel">
+          <h3>Knock Level vs RPM</h3>
+          <canvas id="chart-knock-rpm-scatter" width="800" height="400" aria-label="Knock level versus RPM scatter chart"></canvas>
+        </div>
+        <div class="chart-panel">
+          <h3>Knock Heatmap (RPM × Load)</h3>
+          <canvas id="chart-knock-heatmap" width="800" height="400" aria-label="Knock event heatmap by RPM and load"></canvas>
+        </div>
+        <div class="chart-panel">
+          <h3>Ignition Timing vs RPM</h3>
+          <canvas id="chart-timing-rpm-scatter" width="800" height="400" aria-label="Ignition timing versus RPM scatter chart"></canvas>
+        </div>
+        <div class="chart-panel">
+          <h3>Timing Retard Time Series</h3>
+          <canvas id="chart-timing-retard-ts" width="800" height="400" aria-label="Timing retard time series chart"></canvas>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="../lib/hammer.min.js"></script>
+  <script src="../lib/chart.umd.min.js"></script>
+  <script src="../lib/chartjs-plugin-zoom.min.js"></script>
+  <script src="charts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

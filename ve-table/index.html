@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VE Table Tuning Tool</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../index.html">&larr; Back to TunerControl</a>
+    </nav>
+
+    <h1>VE Table Tuning Tool</h1>
+
+    <!-- File inputs -->
+    <div class="form-section">
+      <div class="file-row">
+        <label for="log-input">MoTeC Log File:</label>
+        <input type="file" id="log-input" accept=".csv,.ld" />
+        <span id="log-filename" class="filename-display">No file selected</span>
+      </div>
+
+      <div class="file-row">
+        <label for="ve-input">VE Table CSV:</label>
+        <input type="file" id="ve-input" accept=".csv" />
+        <span id="ve-filename" class="filename-display">No file selected</span>
+      </div>
+
+      <div class="file-row">
+        <label for="hit-threshold">Min Hit Count:</label>
+        <input type="number" id="hit-threshold" min="1" value="50" style="width: 80px;" />
+        <span class="filename-display">Cells need more than this many samples to be included</span>
+      </div>
+
+      <div class="file-row">
+        <label for="min-coolant-temp">Min Coolant Temp (°C):</label>
+        <input type="number" id="min-coolant-temp" min="0" max="120" value="55" step="1" style="width: 80px;" />
+        <span class="filename-display">Discard samples below this coolant temperature</span>
+      </div>
+
+      <div class="file-row">
+        <label for="min-run-time">Min Run Time (s):</label>
+        <input type="number" id="min-run-time" min="0" max="600" value="60" step="1" style="width: 80px;" />
+        <span class="filename-display">Discard samples before this many seconds from log start</span>
+      </div>
+
+      <div class="button-row">
+        <button id="process-btn" disabled>Process</button>
+      </div>
+    </div>
+
+    <!-- Error banner -->
+    <div id="error-container" class="error-banner" hidden></div>
+
+    <!-- Warning banner -->
+    <div id="warning-container" class="warning-banner" hidden></div>
+
+    <!-- Progress bar -->
+    <div id="progress-container" class="progress-section" hidden>
+      <div class="progress-bar-track">
+        <div id="progress-bar" class="progress-bar-fill" style="width: 0%"></div>
+      </div>
+      <div class="progress-labels">
+        <span id="progress-pct">0%</span>
+        <span id="progress-rows"></span>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="results-container" class="results-section" hidden>
+      <p id="stats-line" class="stats-line"></p>
+
+      <div id="no-data-msg" class="no-data-message" hidden>
+        No valid samples were processed. No cells exceeded the hit threshold.
+      </div>
+
+      <div id="download-btns" class="download-buttons" hidden>
+        <button id="download-diff-btn">Download VE_Difference.csv</button>
+        <button id="download-new-btn">Download VE_New_Values.csv</button>
+      </div>
+
+      <div id="table-toggle" class="table-toggle" hidden>
+        <button id="show-corrections-btn" class="toggle-btn active">Correction %</button>
+        <button id="show-hits-btn" class="toggle-btn">Hit Counts</button>
+      </div>
+
+      <h3 id="table-label" class="table-label" hidden></h3>
+      <div id="table-container" class="table-container"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
