@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DI Fuel Pressure Deep Dive — TunerControl</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../index.html" aria-label="Back to TunerControl landing page">&larr; Back to TunerControl</a>
+    </nav>
+
+    <h1>DI Fuel Pressure Deep Dive</h1>
+
+    <!-- File Input Section -->
+    <section class="file-section" aria-label="File selection">
+      <div class="file-row">
+        <label for="csv-input">MoTeC Log File:</label>
+        <input type="file" id="csv-input" accept=".csv,.ld" aria-describedby="file-error">
+      </div>
+      <div class="button-row">
+        <button id="analyze-btn" disabled aria-label="Analyze selected log file">Analyze</button>
+      </div>
+      <div id="file-error" class="error-message" role="alert" hidden></div>
+    </section>
+
+    <!-- Progress Section -->
+    <section id="progress-section" class="progress-section" aria-label="Analysis progress" hidden>
+      <div class="progress-bar-track" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
+      </div>
+      <div class="progress-text">
+        <span id="progress-pct">0%</span>
+        <span id="progress-phase"></span>
+      </div>
+    </section>
+
+    <!-- Report Section -->
+    <section id="report-section" class="report-section" aria-label="Analysis report" hidden>
+      <div id="channel-mapping" class="report-block">
+        <h2>Channel Mapping</h2>
+        <div id="channel-info" class="channel-info"></div>
+      </div>
+
+      <div id="warnings-area" class="report-block warnings-area" hidden>
+        <h2>Warnings</h2>
+        <ul id="warnings-list"></ul>
+      </div>
+
+      <div id="report-summary" class="report-block">
+        <h2>Fuel Pressure Summary</h2>
+        <div id="summary-content" class="report-content"></div>
+      </div>
+
+      <div id="report-diagnostics" class="report-block">
+        <h2>Diagnostic Messages</h2>
+        <div id="diagnostics-content" class="report-content"></div>
+      </div>
+    </section>
+
+    <!-- Charts Section -->
+    <section id="charts-section" class="charts-section" aria-label="Analysis charts" hidden>
+      <h2>Charts</h2>
+      <div class="chart-grid">
+        <div class="chart-panel chart-panel-full">
+          <h3>Pressure vs Aim Timeline</h3>
+          <canvas id="chart-pressure-aim" aria-label="Fuel pressure vs aim timeline with tolerance band"></canvas>
+        </div>
+        <div class="chart-panel chart-panel-full">
+          <h3>Pressure Error Timeline</h3>
+          <canvas id="chart-error-timeline" aria-label="Pressure error over time with tolerance band"></canvas>
+        </div>
+        <div class="chart-panel">
+          <h3>Error vs RPM</h3>
+          <canvas id="chart-error-rpm" aria-label="Pressure error vs RPM scatter plot"></canvas>
+        </div>
+        <div class="chart-panel">
+          <h3>Error vs Injector Duty Cycle</h3>
+          <canvas id="chart-error-duty" aria-label="Pressure error vs injector duty cycle scatter plot"></canvas>
+        </div>
+        <div class="chart-panel">
+          <h3>Error vs Fuel Flow</h3>
+          <canvas id="chart-error-flow" aria-label="Pressure error vs fuel flow scatter plot"></canvas>
+        </div>
+        <div class="chart-panel">
+          <h3>Transient Response Overlay</h3>
+          <canvas id="chart-transient" aria-label="Transient response events overlaid at t=0"></canvas>
+        </div>
+        <div class="chart-panel chart-panel-full">
+          <h3>Error Distribution</h3>
+          <canvas id="chart-error-histogram" aria-label="Error distribution histogram"></canvas>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="../lib/hammer.min.js"></script>
+  <script src="../lib/chart.umd.min.js"></script>
+  <script src="../lib/chartjs-plugin-zoom.min.js"></script>
+  <script src="charts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
