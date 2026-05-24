@@ -277,7 +277,7 @@ function parseDataRows(lines, dataStart, numCols, progressCallback) {
 var CHANNEL_MAP = {
     fuel_press:         ['Fuel Pressure Direct Bank 1', 'Fuel Pressure Direct'],
     fuel_press_aim:     ['Fuel Pressure Direct Bank 1 Aim', 'Fuel Pressure Direct Aim'],
-    fuel_press_control: ['Fuel Pressure Direct Bank 1 Control', 'Fuel Pressure Direct Control'],
+    fuel_press_control: ['Fuel Pressure Direct Bank 1 Control', 'Fuel Pressure Direct Control', 'Fuel Pressure Direct Bank 1 Cont'],
     rpm:                ['Engine Speed'],
     inj_duty:           ['Fuel Injector Primary Duty Cycle'],
     fuel_flow:          ['Fuel Flow'],
