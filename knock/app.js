@@ -337,6 +337,9 @@ function renderReport(analysis) {
  * @param {Object} chartData.timingCorrelation - TimingCorrelation object
  */
 function renderCharts(chartData) {
+    // Show the charts section BEFORE rendering so Chart.js can measure dimensions
+    chartsSection.hidden = false;
+
     // Get canvas elements
     var cylinderBarCanvas = document.getElementById('chart-cylinder-bar');
     var knockRpmScatterCanvas = document.getElementById('chart-knock-rpm-scatter');
@@ -350,9 +353,6 @@ function renderCharts(chartData) {
     renderKnockHeatmap(knockHeatmapCanvas, chartData.heatmapData);
     renderTimingVsRpmScatter(timingRpmScatterCanvas, chartData.knockEvents);
     renderTimingRetardTimeSeries(timingRetardTsCanvas, chartData.retardTimeSeries);
-
-    // Show the charts section after all charts are rendered
-    chartsSection.hidden = false;
 }
 
 // ---------------------------------------------------------------------------

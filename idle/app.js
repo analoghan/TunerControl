@@ -486,6 +486,9 @@ function renderCoolantCorrelation(correlation) {
 // ---------------------------------------------------------------------------
 
 function renderCharts(chartData, analysis) {
+    // Show charts section BEFORE rendering so Chart.js can measure dimensions
+    chartsSection.hidden = false;
+
     var rpmTimelineCanvas = document.getElementById('chart-rpm-timeline');
     var decelOverlayCanvas = document.getElementById('chart-decel-overlay');
     var settleDistCanvas = document.getElementById('chart-settle-dist');
@@ -497,8 +500,6 @@ function renderCharts(chartData, analysis) {
     renderSettleDistribution(settleDistCanvas, analysis.events);
     renderMapEvents(mapEventsCanvas, analysis.events);
     renderMassFlowComparison(massFlowCanvas, analysis.events);
-
-    chartsSection.hidden = false;
 }
 
 // ---------------------------------------------------------------------------
