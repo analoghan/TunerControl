@@ -20,7 +20,7 @@ const THRESHOLDS = {
     OPTIMAL_TIMING_START: 240,  // dBTDC - optimal injection window start
     OPTIMAL_TIMING_END: 320,    // dBTDC - optimal injection window end
     COMPRESSION_STROKE: 180,    // dBTDC - compression stroke boundary
-    MAX_CHART_POINTS: 150000,   // Maximum points for chart rendering
+    MAX_CHART_POINTS: 5000,     // Maximum points for chart rendering (Chart.js performance limit)
 };
 
 /**

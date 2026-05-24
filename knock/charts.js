@@ -250,7 +250,7 @@ function renderCylinderBarChart(canvas, distribution) {
             }]
         },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 legend: darkLegendOptions(false),
@@ -347,7 +347,7 @@ function renderKnockVsRpmScatter(canvas, events) {
             }]
         },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 legend: darkLegendOptions(true),
@@ -455,7 +455,7 @@ function renderKnockHeatmap(canvas, heatmapData) {
             }]
         },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 legend: darkLegendOptions(true),
@@ -571,7 +571,7 @@ function renderTimingVsRpmScatter(canvas, events) {
             ]
         },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 legend: Object.assign(darkLegendOptions(true), {
@@ -664,7 +664,7 @@ function renderTimingRetardTimeSeries(canvas, retardData) {
             }]
         },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             parsing: false,
             plugins: {

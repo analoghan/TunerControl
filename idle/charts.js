@@ -232,7 +232,7 @@ function renderRpmTimeline(canvas, chartData, events) {
         type: 'line',
         data: { datasets: datasets },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             parsing: false,
             plugins: {
@@ -332,7 +332,7 @@ function renderDecelOverlay(canvas, events) {
         type: 'line',
         data: { datasets: datasets },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             parsing: false,
             plugins: {
@@ -453,7 +453,7 @@ function renderSettleDistribution(canvas, events) {
         },
 
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 legend: darkLegendOptions(true),
@@ -546,7 +546,7 @@ function renderMapEvents(canvas, events) {
         type: 'line',
         data: { datasets: datasets },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             parsing: false,
             plugins: {
@@ -679,7 +679,7 @@ function renderMassFlowComparison(canvas, events) {
         type: 'line',
         data: { datasets: datasets },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             parsing: false,
             plugins: {

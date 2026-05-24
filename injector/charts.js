@@ -106,6 +106,17 @@ function getZoomConfig() {
 }
 
 /**
+ * Returns common performance options for large datasets.
+ */
+function getPerformanceOptions() {
+    return {
+        animation: false,
+        parsing: false,
+        normalized: true
+    };
+}
+
+/**
  * Returns common dark-theme scale options.
  * @param {string} xTitle - X axis label
  * @param {string} yTitle - Y axis label
@@ -244,7 +255,7 @@ function renderLambdaTimeSeries(canvas, data) {
         type: 'scatter',
         data: { datasets: datasets },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 zoom: getZoomConfig(),
@@ -294,7 +305,7 @@ function renderPWTimeSeries(canvas, data) {
         type: 'scatter',
         data: { datasets: datasets },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 zoom: getZoomConfig(),
@@ -365,7 +376,7 @@ function renderLambdaVsPWScatter(canvas, data) {
         type: 'scatter',
         data: { datasets: datasets },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 zoom: getZoomConfig(),
@@ -436,7 +447,7 @@ function renderFuelPressureTimeSeries(canvas, data) {
         type: 'scatter',
         data: { datasets: datasets },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 zoom: getZoomConfig(),
@@ -527,7 +538,7 @@ function renderPWHistogram(canvas, data) {
             datasets: datasets
         },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 zoom: getZoomConfig(),
@@ -693,7 +704,7 @@ function renderLambdaRPMDensity(canvas, data) {
         type: 'bubble',
         data: { datasets: datasets },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 zoom: getZoomConfig(),
@@ -751,7 +762,7 @@ function renderTimingVsRPMScatter(canvas, data) {
         type: 'scatter',
         data: { datasets: datasets },
         options: {
-            responsive: true,
+            responsive: true, animation: false,
             maintainAspectRatio: true,
             plugins: {
                 zoom: getZoomConfig(),
