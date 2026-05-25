@@ -39,25 +39,29 @@ h1 {
 
 /* === Help button === */
 
-.help-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  font-size: 0.85rem;
-  font-weight: 700;
+.help-link-btn {
+  display: inline-block;
+  padding: 10px 28px;
+  font-size: 1rem;
+  font-weight: 600;
   color: #ffffff;
-  background: #E31837;
-  border-radius: 50%;
+  background: #222222;
+  border: 1px solid #E31837;
+  border-radius: 4px;
   text-decoration: none;
-  vertical-align: middle;
-  margin-left: 8px;
+  cursor: pointer;
   transition: background 0.2s;
 }
 
-.help-btn:hover {
-  background: #ff2d4a;
+.help-link-btn:hover {
+  background: #333333;
+}
+
+.button-row {
+  margin-top: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
 }
 
 /* === Top navigation === */
@@ -137,10 +141,6 @@ h1 {
   font-size: 0.85rem;
   color: #b0b0b0;
   font-style: italic;
-}
-
-.button-row {
-  margin-top: 16px;
 }
 
 /* === Process button === */
