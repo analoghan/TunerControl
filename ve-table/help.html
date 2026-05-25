@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VE Table Tuning Tool — Help</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .help-content {
+      line-height: 1.7;
+    }
+    .help-content h2 {
+      color: #E31837;
+      margin-top: 32px;
+      margin-bottom: 8px;
+      font-size: 1.3rem;
+      border-bottom: 1px solid #333333;
+      padding-bottom: 6px;
+    }
+    .help-content h3 {
+      color: #ffffff;
+      margin-top: 20px;
+      margin-bottom: 6px;
+      font-size: 1.05rem;
+    }
+    .help-content p, .help-content li {
+      color: #cccccc;
+      font-size: 0.95rem;
+    }
+    .help-content ul {
+      padding-left: 20px;
+    }
+    .help-content li {
+      margin-bottom: 6px;
+    }
+    .help-content code {
+      background: #222222;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 0.9em;
+      color: #ff9800;
+    }
+    .help-content .example-box {
+      background: #111111;
+      border: 1px solid #333333;
+      border-radius: 6px;
+      padding: 16px;
+      margin: 12px 0;
+    }
+    .help-content .example-box p {
+      margin: 4px 0;
+    }
+    .help-content .tip {
+      background: rgba(76, 175, 80, 0.1);
+      border-left: 3px solid #4caf50;
+      padding: 10px 14px;
+      margin: 12px 0;
+      border-radius: 0 4px 4px 0;
+    }
+    .help-content .warning {
+      background: rgba(255, 152, 0, 0.1);
+      border-left: 3px solid #ff9800;
+      padding: 10px 14px;
+      margin: 12px 0;
+      border-radius: 0 4px 4px 0;
+    }
+    .toc {
+      background: #111111;
+      border: 1px solid #333333;
+      border-radius: 6px;
+      padding: 16px 24px;
+      margin-bottom: 24px;
+    }
+    .toc ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      columns: 2;
+    }
+    .toc li {
+      margin-bottom: 6px;
+    }
+    .toc a {
+      color: #E31837;
+      text-decoration: none;
+    }
+    .toc a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html" aria-label="Back to VE Table Tool">&larr; Back to VE Table Tool</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>VE Table Tuning Tool — Help</h1>
+    <p>This tool analyzes MoTeC log data against your current VE table to compute per-cell corrections that bring your actual air/fuel ratio in line with your targets.</p>
+
+    <nav class="toc">
+      <ul>
+        <li><a href="#quick-start">Quick Start</a></li>
+        <li><a href="#inputs">Input Files</a></li>
+        <li><a href="#filters">Filter Settings</a></li>
+        <li><a href="#correction-logic">How Corrections Work</a></li>
+        <li><a href="#scaling">Scaling Factor</a></li>
+        <li><a href="#outlier">Outlier Filtering</a></li>
+        <li><a href="#tps">TPS Rate Filter</a></li>
+        <li><a href="#views">Display Views</a></li>
+        <li><a href="#3d-plot">3D Surface Plot</a></li>
+        <li><a href="#clipboard">Copy to Clipboard</a></li>
+        <li><a href="#outputs">Output Files</a></li>
+        <li><a href="#workflow">Recommended Workflow</a></li>
+      </ul>
+    </nav>
+
+    <!-- Quick Start -->
+    <h2 id="quick-start">Quick Start</h2>
+    <ol>
+      <li>Export a log from MoTeC i2 as CSV, or use the raw <code>.ld</code> file directly.</li>
+      <li>Export your current VE table from MoTeC M1 Tune as a CSV (M1 v2 format).</li>
+      <li>Load both files into the tool and click <strong>Process</strong>.</li>
+      <li>Review the correction table — positive values mean "add fuel," negative means "remove fuel."</li>
+      <li>Download the <code>VE_New_Values.csv</code> and import it back into M1 Tune.</li>
+    </ol>
+
+    <!-- Input Files -->
+    <h2 id="inputs">Input Files</h2>
+
+    <h3>MoTeC Log File (.csv or .ld)</h3>
+    <p>The tool accepts either a CSV export from MoTeC i2 or a raw <code>.ld</code> binary log file. Required channels:</p>
+    <ul>
+      <li><strong>Engine Speed</strong> — RPM for binning into the VE table columns</li>
+      <li><strong>Inlet Manifold Pressure</strong> — MAP (kPa) for binning into VE table rows</li>
+      <li><strong>Exhaust Lambda Bank 1 / Bank 2</strong> — actual measured lambda (or "Exhaust Lambda" as fallback)</li>
+      <li><strong>Fuel Mixture Aim</strong> — target lambda the ECU is commanding</li>
+    </ul>
+    <p>Optional channels (used if present):</p>
+    <ul>
+      <li><strong>Fuel Closed Loop Control Bank 1/2 Trim</strong> — closed-loop trim already applied by the ECU</li>
+      <li><strong>Coolant Temperature</strong> — for the coolant temperature filter</li>
+      <li><strong>Throttle Position</strong> — for the TPS rate-of-change filter</li>
+    </ul>
+
+    <h3>VE Table CSV (M1 v2 format)</h3>
+    <p>This is the CSV exported from MoTeC M1 Tune. The tool expects the standard M1 v2 header format:</p>
+    <div class="example-box">
+      <p><code>M1,v2</code></p>
+      <p><code>Body,%</code></p>
+      <p><code>Cols,rpm,Eng Speed</code></p>
+      <p><code>Rows,kPa,Inlet Man Pres</code></p>
+      <p><code>,1000,1500,2000,...</code> (RPM breakpoints)</p>
+      <p><code>30,45.2,46.1,...</code> (MAP breakpoint + VE values)</p>
+    </div>
+
+    <!-- Filter Settings -->
+    <h2 id="filters">Filter Settings</h2>
+
+    <h3>Min Hit Count (default: 50)</h3>
+    <p>A cell must have <em>more than</em> this many valid samples to produce a correction. Cells below this threshold are greyed out and left unchanged in the output. Higher values give more statistical confidence but require more log data.</p>
+    <div class="tip">
+      <strong>Tip:</strong> For a first pass with limited data, try 20–30. For a final tune, use 50–100+.
+    </div>
+
+    <h3>Min Coolant Temp (default: 55°C)</h3>
+    <p>Discards all samples where coolant temperature is below this value. This ensures you're only analyzing data from a fully warmed-up engine where fueling is in its normal operating mode.</p>
+
+    <h3>Min Run Time (default: 60s)</h3>
+    <p>Discards all samples from the first N seconds of the log. This filters out cold-start enrichment and initial sensor stabilization.</p>
+
+    <h3>Min Change Amount (default: 0 = disabled)</h3>
+    <p>If a cell's average correction is smaller than this absolute value, it gets zeroed out. Useful for ignoring noise — if you set this to 1.0, any cell recommending less than ±1% change will be left alone.</p>
+    <div class="example-box">
+      <p><strong>Example:</strong> Set to <code>2.0</code> — a cell with a correction of +1.5% becomes 0 (no change). A cell with +3.2% is kept as-is.</p>
+    </div>
+
+    <!-- Correction Logic -->
+    <h2 id="correction-logic">How Corrections Work</h2>
+    <p>For each valid log sample, the tool computes:</p>
+    <div class="example-box">
+      <p><code>correction = ((lambda_target / lambda_actual) - 1) × 100 + CL_trim_avg</code></p>
+    </div>
+    <ul>
+      <li><strong>Positive correction</strong> → engine is running lean → VE table needs to be increased (add fuel)</li>
+      <li><strong>Negative correction</strong> → engine is running rich → VE table needs to be decreased (remove fuel)</li>
+    </ul>
+    <p>Each sample is binned to the nearest RPM/MAP cell in your VE table. The final correction for each cell is the average of all samples that landed in it.</p>
+
+    <div class="warning">
+      <strong>Important:</strong> The closed-loop trim (CL_trim) is included in the calculation. This accounts for corrections the ECU has already made, giving you the <em>total</em> error including what closed-loop is compensating for.
+    </div>
+
+    <!-- Scaling Factor -->
+    <h2 id="scaling">Scaling Factor</h2>
+    <p>Default: <code>100%</code> (apply the full recommended correction).</p>
+    <p>Set this lower to apply only a fraction of the correction. This is a common conservative tuning practice — apply 50–75% per iteration to avoid overshooting, especially on a first pass or when you're unsure about data quality.</p>
+    <div class="example-box">
+      <p><strong>Example:</strong> A cell shows +6% correction. With scaling at 75%, the applied correction becomes +4.5%.</p>
+    </div>
+    <div class="tip">
+      <strong>Tip:</strong> Use 100% when you have high-quality data (lots of hits, low std dev, steady-state driving). Use 50–75% on early iterations or when the std dev is high.
+    </div>
+
+    <!-- Outlier Filtering -->
+    <h2 id="outlier">Outlier Filtering</h2>
+    <p>Default: <code>0</code> (disabled).</p>
+    <p>When enabled, the tool performs a two-pass analysis:</p>
+    <ol>
+      <li><strong>First pass:</strong> Bins all samples and computes the mean and standard deviation for each cell.</li>
+      <li><strong>Second pass:</strong> Discards any sample whose correction is more than Nσ (standard deviations) from its cell's mean, then recomputes the final averages.</li>
+    </ol>
+    <p>This removes transient spikes (tip-in/tip-out, sensor glitches, momentary misfires) that would otherwise skew the average.</p>
+    <div class="example-box">
+      <p><strong>Example:</strong> Set to <code>2.0</code> — a cell with mean correction +3% and std dev 1.5% will discard any sample with correction outside the range [-0%, +6%].</p>
+    </div>
+    <div class="tip">
+      <strong>Recommended values:</strong> 2.0–3.0σ. Lower values are more aggressive (discard more data). Start with 2.5 if unsure.
+    </div>
+
+    <!-- TPS Rate Filter -->
+    <h2 id="tps">TPS Rate Filter</h2>
+    <p>Default: <code>0</code> (disabled).</p>
+    <p>Discards samples where the throttle position is changing faster than the specified rate (%/second). During rapid throttle changes, lambda readings lag reality due to sensor response time and fuel transport delay. Filtering these out gives you only steady-state data where the lambda reading accurately reflects the VE table's contribution.</p>
+    <div class="example-box">
+      <p><strong>Example:</strong> Set to <code>50</code> — any sample where TPS is changing faster than 50%/second is discarded.</p>
+    </div>
+    <div class="tip">
+      <strong>Recommended values:</strong> 30–100 %/s depending on how aggressive your driving style is. Lower values are stricter (more steady-state only). For track data with lots of transients, try 50. For street driving, 100 may be sufficient.
+    </div>
+    <div class="warning">
+      <strong>Note:</strong> This filter requires the "Throttle Position" channel in your log. If it's not present, the filter is automatically disabled and a warning is shown.
+    </div>
+
+    <!-- Display Views -->
+    <h2 id="views">Display Views</h2>
+    <p>After processing, four table views are available via the toggle buttons:</p>
+
+    <h3>Correction %</h3>
+    <p>The primary output. Shows how much to adjust each VE cell. Green = add fuel, red = remove fuel, grey = insufficient data.</p>
+
+    <h3>New VE Values</h3>
+    <p>Shows the complete recommended VE table with corrections already applied. Cells that changed are highlighted; unchanged cells are greyed out. Useful for a quick visual sanity check that the resulting table looks smooth.</p>
+
+    <h3>Hit Counts</h3>
+    <p>Shows how many valid samples landed in each cell. Green cells exceeded the hit threshold and contributed to corrections. This helps you identify areas of the map with insufficient data coverage — you may need more driving time at those RPM/MAP combinations.</p>
+
+    <h3>Std Dev</h3>
+    <p>Shows the standard deviation of corrections within each cell. This indicates data quality and confidence:</p>
+    <ul>
+      <li><strong>Green (≤1.0)</strong> — tight clustering, high confidence in the correction</li>
+      <li><strong>Yellow (≤3.0)</strong> — moderate spread, correction is reasonable but not perfect</li>
+      <li><strong>Red (&gt;3.0)</strong> — high variance, treat this correction with skepticism. Consider enabling the outlier filter or gathering more data.</li>
+    </ul>
+
+    <!-- 3D Surface Plot -->
+    <h2 id="3d-plot">3D Surface Plot</h2>
+    <p>A 3D wireframe surface visualization appears below the table. It renders the selected data (corrections, new VE values, or std dev) as a color-coded surface over the RPM × MAP grid.</p>
+    <h3>Controls</h3>
+    <ul>
+      <li><strong>Drag</strong> — rotate the view (left-right = yaw, up-down = pitch)</li>
+      <li><strong>Scroll wheel</strong> — zoom in/out</li>
+      <li><strong>Data dropdown</strong> — switch between Correction %, New VE Values, or Std Dev</li>
+      <li><strong>Reset View</strong> — return to the default viewing angle</li>
+    </ul>
+    <div class="tip">
+      <strong>Tip:</strong> The 3D view is especially useful for spotting discontinuities or spikes in the correction map that might indicate bad data in a specific cell. A smooth surface suggests consistent, trustworthy corrections.
+    </div>
+
+    <!-- Copy to Clipboard -->
+    <h2 id="clipboard">Copy to Clipboard</h2>
+    <p>The "Copy Table to Clipboard" button copies whichever table view is currently displayed as tab-separated values. This pastes cleanly into:</p>
+    <ul>
+      <li>Microsoft Excel</li>
+      <li>Google Sheets</li>
+      <li>LibreOffice Calc</li>
+      <li>Any text editor (as a tab-delimited table)</li>
+    </ul>
+    <p>The button briefly shows "Copied!" as confirmation. Switch between views (Correction %, New VE Values, etc.) and copy whichever one you need.</p>
+
+    <!-- Output Files -->
+    <h2 id="outputs">Output Files</h2>
+
+    <h3>VE_Difference.csv</h3>
+    <p>A simple grid showing the correction percentage for each cell. Cells below the hit threshold are empty. This is useful for record-keeping or importing into a spreadsheet for further analysis.</p>
+
+    <h3>VE_New_Values.csv</h3>
+    <p>A complete M1 v2 format VE table with corrections applied. This file can be imported directly back into MoTeC M1 Tune to replace your current VE table. Cells that didn't meet the hit threshold retain their original values unchanged.</p>
+
+    <!-- Recommended Workflow -->
+    <h2 id="workflow">Recommended Workflow</h2>
+    <ol>
+      <li><strong>Gather data:</strong> Drive the car through as many RPM/MAP combinations as possible. Steady-state cruising, part-throttle acceleration, and highway driving all contribute. Aim for at least 5–10 minutes of varied driving after warmup.</li>
+      <li><strong>First pass (conservative):</strong>
+        <ul>
+          <li>Set scaling factor to 75%</li>
+          <li>Set outlier filter to 2.5σ</li>
+          <li>Set TPS rate to 50 %/s</li>
+          <li>Set min change to 1.0%</li>
+        </ul>
+      </li>
+      <li><strong>Review results:</strong> Check the Std Dev view. If many cells show red (&gt;3σ), your data may have too many transients — try lowering the TPS rate filter or gathering more steady-state data.</li>
+      <li><strong>Apply and re-log:</strong> Import the new VE table, drive again, and re-analyze. Each iteration should show smaller corrections as the table converges.</li>
+      <li><strong>Final pass (full correction):</strong> Once corrections are consistently small (±1–2%), switch to 100% scaling and lower the min change threshold to capture the remaining fine adjustments.</li>
+      <li><strong>Convergence:</strong> You're done when the correction table shows mostly zeros or very small values across the operating range you care about.</li>
+    </ol>
+
+    <div class="tip">
+      <strong>Pro tip:</strong> Keep your VE_Difference.csv files from each iteration. Comparing them shows how quickly the table is converging and whether any cells are oscillating (which might indicate a sensor issue or a cell that spans too wide an operating range).
+    </div>
+
+  </div>
+</body>
+</html>
