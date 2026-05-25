@@ -1344,6 +1344,14 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
                 }
             }
 
+            const correctionGrid = {
+                mapBreakpoints: veTable.mapBreakpoints,
+                rpmBreakpoints: veTable.rpmBreakpoints,
+                cells: finalCells,
+                totalSamples,
+                cellsAboveThreshold,
+            };
+
             // 6b. Build newValuesGrid for display (original VE * (1 + correction/100))
             const newValuesGrid = [];
             for (let mapIdx = 0; mapIdx < veTable.mapBreakpoints.length; mapIdx++) {

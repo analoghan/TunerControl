@@ -108,6 +108,7 @@
         <li><a href="#scaling">Scaling Factor</a></li>
         <li><a href="#outlier">Outlier Filtering</a></li>
         <li><a href="#tps">TPS Rate Filter</a></li>
+        <li><a href="#smoothing">Correction Smoothing</a></li>
         <li><a href="#views">Display Views</a></li>
         <li><a href="#3d-plot">3D Surface Plot</a></li>
         <li><a href="#clipboard">Copy to Clipboard</a></li>
@@ -231,6 +232,27 @@
     </div>
     <div class="warning">
       <strong>Note:</strong> This filter requires the "Throttle Position" channel in your log. If it's not present, the filter is automatically disabled and a warning is shown.
+    </div>
+
+    <!-- Smoothing -->
+    <h2 id="smoothing">Correction Smoothing</h2>
+    <p>Default: <code>0</code> (disabled).</p>
+    <p>Applies a Gaussian spatial smoothing filter to the correction grid after all other processing is complete. Each cell's correction is blended with its neighbors using distance-weighted averaging. This produces a smoother correction map that avoids abrupt cell-to-cell jumps.</p>
+    <p>The value controls the Gaussian sigma (blur radius):</p>
+    <ul>
+      <li><strong>0</strong> — disabled (no smoothing)</li>
+      <li><strong>0.5–1.5</strong> — light smoothing, reduces noise while preserving local detail</li>
+      <li><strong>2–3</strong> — moderate smoothing, good for noisy data</li>
+      <li><strong>4+</strong> — heavy smoothing, flattens most local variation</li>
+    </ul>
+    <div class="example-box">
+      <p><strong>How it works:</strong> For each cell above the hit threshold, the tool computes a weighted average of that cell and its neighbors (within a radius of ~2× the sigma value). Neighbors that are below the hit threshold are excluded — they don't contribute to or receive smoothing.</p>
+    </div>
+    <div class="tip">
+      <strong>When to use:</strong> Smoothing is most useful when your Std Dev view shows moderate-to-high variance across many cells, or when the correction map has isolated spikes that look like noise rather than real fueling errors. Start with 1.0 and increase if the map still looks noisy.
+    </div>
+    <div class="warning">
+      <strong>Caution:</strong> Over-smoothing can mask real cell-to-cell differences in VE (e.g., around cam changeover points or resonance effects). If your engine has known sharp transitions in the VE map, keep smoothing low or disabled in those regions.
     </div>
 
     <!-- Display Views -->
