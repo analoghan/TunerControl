@@ -37,6 +37,29 @@ h1 {
   color: #ffffff;
 }
 
+/* === Help button === */
+
+.help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #ffffff;
+  background: #E31837;
+  border-radius: 50%;
+  text-decoration: none;
+  vertical-align: middle;
+  margin-left: 8px;
+  transition: background 0.2s;
+}
+
+.help-btn:hover {
+  background: #ff2d4a;
+}
+
 /* === Top navigation === */
 
 .top-nav {
@@ -282,6 +305,9 @@ h1 {
 
 .toggle-btn:last-child {
   border-radius: 0 4px 4px 0;
+}
+
+.toggle-btn + .toggle-btn {
   border-left: none;
 }
 
@@ -374,6 +400,70 @@ td.below-threshold {
 
 [hidden] {
   display: none !important;
+}
+
+/* === 3D Surface section === */
+
+.surface-section {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #333333;
+}
+
+.surface-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.surface-controls label {
+  color: #b0b0b0;
+  font-weight: 500;
+}
+
+.surface-controls select {
+  background: #222222;
+  border: 1px solid #333333;
+  border-radius: 4px;
+  color: #ffffff;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+#reset-view-btn {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #ffffff;
+  background: #222222;
+  border: 1px solid #E31837;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#reset-view-btn:hover {
+  background: #333333;
+}
+
+#surface-canvas {
+  display: block;
+  background: #111111;
+  border: 1px solid #333333;
+  border-radius: 4px;
+  max-width: 100%;
+  cursor: grab;
+}
+
+#surface-canvas:active {
+  cursor: grabbing;
+}
+
+/* === Copy button feedback === */
+
+#copy-table-btn.copied {
+  background: #4caf50;
 }
 
 /* === Responsive === */

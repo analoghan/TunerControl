@@ -383,6 +383,7 @@ function renderResults(msg) {
         downloadBtns.hidden = true;
         tableToggle.hidden = true;
         tableLabel.hidden = true;
+        document.getElementById('surface-section').hidden = true;
         return;
     }
 
@@ -395,9 +396,11 @@ function renderResults(msg) {
     // Wire up download buttons
     const downloadDiffBtn = document.getElementById('download-diff-btn');
     const downloadNewBtn = document.getElementById('download-new-btn');
+    const copyTableBtn = document.getElementById('copy-table-btn');
 
     downloadDiffBtn.onclick = () => downloadCsv(diffCsv, 'VE_Difference.csv');
     downloadNewBtn.onclick = () => downloadCsv(newValuesCsv, 'VE_New_Values.csv');
+    copyTableBtn.onclick = () => copyCurrentTableToClipboard();
 
     // Wire up table toggle buttons
     const showCorrectionsBtn = document.getElementById('show-corrections-btn');
@@ -439,6 +442,11 @@ function renderResults(msg) {
 
     // Default: show corrections table
     renderCorrectionTable(correctionGrid, tableContainer, tableLabel);
+
+    // Show 3D surface section and initialize
+    const surfaceSection = document.getElementById('surface-section');
+    surfaceSection.hidden = false;
+    initSurface3D(msg);
 }
 
 /**
@@ -686,4 +694,312 @@ function renderStdDevTable(correctionGrid, tableContainer, tableLabel) {
     }
     table.appendChild(tbody);
     tableContainer.appendChild(table);
+}
+
+
+// ---------------------------------------------------------------------------
+// Copy to Clipboard
+// ---------------------------------------------------------------------------
+
+/**
+ * Copies the currently displayed table to the clipboard as tab-separated values.
+ * This format pastes cleanly into Excel, Google Sheets, etc.
+ */
+function copyCurrentTableToClipboard() {
+    const tableContainer = document.getElementById('table-container');
+    const table = tableContainer.querySelector('table');
+    if (!table) return;
+
+    const rows = [];
+    const allRows = table.querySelectorAll('tr');
+    for (let i = 0; i < allRows.length; i++) {
+        const cells = allRows[i].querySelectorAll('th, td');
+        const rowData = [];
+        for (let j = 0; j < cells.length; j++) {
+            rowData.push(cells[j].textContent);
+        }
+        rows.push(rowData.join('\t'));
+    }
+
+    const text = rows.join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('copy-table-btn');
+        const originalText = btn.textContent;
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.classList.remove('copied');
+        }, 2000);
+    }).catch(() => {
+        // Fallback for older browsers or file:// protocol
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+
+        const btn = document.getElementById('copy-table-btn');
+        const originalText = btn.textContent;
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.classList.remove('copied');
+        }, 2000);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// 3D Surface Plot
+// ---------------------------------------------------------------------------
+
+let surfaceState = null; // Holds current 3D state for rotation/zoom
+
+/**
+ * Initializes the 3D surface plot with the processing results.
+ */
+function initSurface3D(msg) {
+    // Replace canvas to clear old event listeners
+    const oldCanvas = document.getElementById('surface-canvas');
+    const canvas = oldCanvas.cloneNode(false);
+    oldCanvas.parentNode.replaceChild(canvas, oldCanvas);
+
+    const ctx = canvas.getContext('2d');
+
+    surfaceState = {
+        rotX: -0.6,   // pitch (radians)
+        rotZ: 0.8,    // yaw (radians)
+        zoom: 1.0,
+        dragging: false,
+        lastX: 0,
+        lastY: 0,
+        msg: msg,
+    };
+
+    function getDataGrid() {
+        const { correctionGrid, newValuesGrid } = surfaceState.msg;
+        const { cells } = correctionGrid;
+        const mode = document.getElementById('surface-data-select').value;
+
+        const grid = [];
+        for (let m = 0; m < cells.length; m++) {
+            const row = [];
+            for (let r = 0; r < cells[m].length; r++) {
+                const cell = cells[m][r];
+                if (mode === 'corrections') {
+                    row.push(cell.correction !== null ? cell.correction : 0);
+                } else if (mode === 'newValues') {
+                    row.push(newValuesGrid[m][r]);
+                } else if (mode === 'stddev') {
+                    row.push(cell.stddev !== null && cell.stddev !== undefined ? cell.stddev : 0);
+                }
+            }
+            grid.push(row);
+        }
+        return grid;
+    }
+
+    function render() {
+        const { correctionGrid } = surfaceState.msg;
+        const { mapBreakpoints, rpmBreakpoints } = correctionGrid;
+        const dataGrid = getDataGrid();
+
+        const width = canvas.width;
+        const height = canvas.height;
+        ctx.clearRect(0, 0, width, height);
+
+        // Find data range for color mapping
+        let minVal = Infinity, maxVal = -Infinity;
+        for (let m = 0; m < dataGrid.length; m++) {
+            for (let r = 0; r < dataGrid[m].length; r++) {
+                const v = dataGrid[m][r];
+                if (v < minVal) minVal = v;
+                if (v > maxVal) maxVal = v;
+            }
+        }
+        if (minVal === maxVal) { minVal -= 1; maxVal += 1; }
+
+        const numRows = dataGrid.length;
+        const numCols = dataGrid[0] ? dataGrid[0].length : 0;
+        if (numRows === 0 || numCols === 0) return;
+
+        // Normalize coordinates to [-1, 1] range
+        const cosX = Math.cos(surfaceState.rotX);
+        const sinX = Math.sin(surfaceState.rotX);
+        const cosZ = Math.cos(surfaceState.rotZ);
+        const sinZ = Math.sin(surfaceState.rotZ);
+
+        // Project 3D point to 2D (isometric-style)
+        function project(x, y, z) {
+            // Rotate around Z axis (yaw)
+            const x1 = x * cosZ - y * sinZ;
+            const y1 = x * sinZ + y * cosZ;
+            const z1 = z;
+
+            // Rotate around X axis (pitch)
+            const y2 = y1 * cosX - z1 * sinX;
+            const z2 = y1 * sinX + z1 * cosX;
+
+            // Simple perspective projection
+            const scale = surfaceState.zoom * Math.min(width, height) * 0.3;
+            const px = width / 2 + x1 * scale;
+            const py = height / 2 - y2 * scale;
+
+            return { px, py, depth: z2 };
+        }
+
+        // Map value to color
+        function valueToColor(v, alpha) {
+            const t = (v - minVal) / (maxVal - minVal); // 0 to 1
+            // Blue (cold/low) -> Green (mid) -> Red (hot/high)
+            let r, g, b;
+            if (t < 0.5) {
+                const s = t * 2;
+                r = Math.round(0 + s * 76);
+                g = Math.round(100 + s * 155);
+                b = Math.round(200 - s * 100);
+            } else {
+                const s = (t - 0.5) * 2;
+                r = Math.round(76 + s * 179);
+                g = Math.round(255 - s * 155);
+                b = Math.round(100 - s * 100);
+            }
+            return `rgba(${r},${g},${b},${alpha})`;
+        }
+
+        // Build faces (quads) with depth sorting
+        const faces = [];
+        for (let m = 0; m < numRows - 1; m++) {
+            for (let r = 0; r < numCols - 1; r++) {
+                // Normalize grid positions to [-1, 1]
+                const x0 = (r / (numCols - 1)) * 2 - 1;
+                const x1n = ((r + 1) / (numCols - 1)) * 2 - 1;
+                const y0 = (m / (numRows - 1)) * 2 - 1;
+                const y1n = ((m + 1) / (numRows - 1)) * 2 - 1;
+
+                // Z values normalized to [-0.5, 0.5]
+                const z00 = ((dataGrid[m][r] - minVal) / (maxVal - minVal) - 0.5);
+                const z10 = ((dataGrid[m][r + 1] - minVal) / (maxVal - minVal) - 0.5);
+                const z01 = ((dataGrid[m + 1][r] - minVal) / (maxVal - minVal) - 0.5);
+                const z11 = ((dataGrid[m + 1][r + 1] - minVal) / (maxVal - minVal) - 0.5);
+
+                const p00 = project(x0, y0, z00);
+                const p10 = project(x1n, y0, z10);
+                const p01 = project(x0, y1n, z01);
+                const p11 = project(x1n, y1n, z11);
+
+                const avgDepth = (p00.depth + p10.depth + p01.depth + p11.depth) / 4;
+                const avgVal = (dataGrid[m][r] + dataGrid[m][r + 1] + dataGrid[m + 1][r] + dataGrid[m + 1][r + 1]) / 4;
+
+                faces.push({
+                    points: [p00, p10, p11, p01],
+                    depth: avgDepth,
+                    color: valueToColor(avgVal, 0.8),
+                    wireColor: valueToColor(avgVal, 1.0),
+                });
+            }
+        }
+
+        // Sort faces back-to-front (painter's algorithm)
+        faces.sort((a, b) => a.depth - b.depth);
+
+        // Draw faces
+        for (let i = 0; i < faces.length; i++) {
+            const face = faces[i];
+            ctx.beginPath();
+            ctx.moveTo(face.points[0].px, face.points[0].py);
+            for (let j = 1; j < face.points.length; j++) {
+                ctx.lineTo(face.points[j].px, face.points[j].py);
+            }
+            ctx.closePath();
+            ctx.fillStyle = face.color;
+            ctx.fill();
+            ctx.strokeStyle = face.wireColor;
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+        }
+
+        // Draw axes labels
+        ctx.fillStyle = '#b0b0b0';
+        ctx.font = '12px sans-serif';
+
+        // RPM axis label
+        const rpmLabel = project(0, -1.2, -0.5);
+        ctx.fillText('RPM →', rpmLabel.px - 20, rpmLabel.py);
+
+        // MAP axis label
+        const mapLabel = project(-1.2, 0, -0.5);
+        ctx.fillText('MAP →', mapLabel.px - 20, mapLabel.py);
+
+        // Draw color legend
+        const legendX = width - 80;
+        const legendY = 30;
+        const legendH = 120;
+        for (let i = 0; i < legendH; i++) {
+            const t = 1 - (i / legendH);
+            const val = minVal + t * (maxVal - minVal);
+            ctx.fillStyle = valueToColor(val, 1.0);
+            ctx.fillRect(legendX, legendY + i, 15, 1);
+        }
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(maxVal.toFixed(1), legendX + 20, legendY + 10);
+        ctx.fillText(((minVal + maxVal) / 2).toFixed(1), legendX + 20, legendY + legendH / 2 + 4);
+        ctx.fillText(minVal.toFixed(1), legendX + 20, legendY + legendH);
+    }
+
+    // Mouse interaction for rotation
+    canvas.addEventListener('mousedown', (e) => {
+        surfaceState.dragging = true;
+        surfaceState.lastX = e.clientX;
+        surfaceState.lastY = e.clientY;
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        if (!surfaceState.dragging) return;
+        const dx = e.clientX - surfaceState.lastX;
+        const dy = e.clientY - surfaceState.lastY;
+        surfaceState.rotZ += dx * 0.01;
+        surfaceState.rotX += dy * 0.01;
+        // Clamp pitch
+        surfaceState.rotX = Math.max(-Math.PI / 2, Math.min(0.1, surfaceState.rotX));
+        surfaceState.lastX = e.clientX;
+        surfaceState.lastY = e.clientY;
+        render();
+    });
+
+    canvas.addEventListener('mouseup', () => { surfaceState.dragging = false; });
+    canvas.addEventListener('mouseleave', () => { surfaceState.dragging = false; });
+
+    // Scroll to zoom
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        surfaceState.zoom *= e.deltaY > 0 ? 0.9 : 1.1;
+        surfaceState.zoom = Math.max(0.3, Math.min(3.0, surfaceState.zoom));
+        render();
+    });
+
+    // Data selector change — clone to remove old listeners
+    const oldSelect = document.getElementById('surface-data-select');
+    const newSelect = oldSelect.cloneNode(true);
+    oldSelect.parentNode.replaceChild(newSelect, oldSelect);
+    newSelect.addEventListener('change', () => { render(); });
+
+    // Reset view button — clone to remove old listeners
+    const oldResetBtn = document.getElementById('reset-view-btn');
+    const newResetBtn = oldResetBtn.cloneNode(true);
+    oldResetBtn.parentNode.replaceChild(newResetBtn, oldResetBtn);
+    newResetBtn.addEventListener('click', () => {
+        surfaceState.rotX = -0.6;
+        surfaceState.rotZ = 0.8;
+        surfaceState.zoom = 1.0;
+        render();
+    });
+
+    // Initial render
+    render();
 }

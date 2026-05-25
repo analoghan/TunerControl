@@ -13,7 +13,7 @@
       <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
     </nav>
 
-    <h1>VE Table Tuning Tool</h1>
+    <h1>VE Table Tuning Tool <a href="help.html" class="help-btn" aria-label="Help and documentation">?</a></h1>
 
     <!-- File inputs -->
     <div class="form-section">
@@ -104,6 +104,7 @@
       <div id="download-btns" class="download-buttons" hidden>
         <button id="download-diff-btn">Download VE_Difference.csv</button>
         <button id="download-new-btn">Download VE_New_Values.csv</button>
+        <button id="copy-table-btn">Copy Table to Clipboard</button>
       </div>
 
       <div id="table-toggle" class="table-toggle" hidden>
@@ -115,6 +116,21 @@
 
       <h3 id="table-label" class="table-label" hidden></h3>
       <div id="table-container" class="table-container"></div>
+
+      <!-- 3D Surface Plot -->
+      <div id="surface-section" class="surface-section" hidden>
+        <h3 class="table-label">3D Surface Plot — Drag to rotate, scroll to zoom</h3>
+        <div class="surface-controls">
+          <label for="surface-data-select">Data:</label>
+          <select id="surface-data-select">
+            <option value="corrections">Correction %</option>
+            <option value="newValues">New VE Values</option>
+            <option value="stddev">Std Dev</option>
+          </select>
+          <button id="reset-view-btn">Reset View</button>
+        </div>
+        <canvas id="surface-canvas" width="700" height="500"></canvas>
+      </div>
     </div>
   </div>
 
