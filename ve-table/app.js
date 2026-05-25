@@ -29,6 +29,7 @@ const minChangeAmountInput = document.getElementById('min-change-amount');
 const scalingFactorInput = document.getElementById('scaling-factor');
 const outlierStddevInput = document.getElementById('outlier-stddev');
 const maxTpsRateInput = document.getElementById('max-tps-rate');
+const smoothingAmountInput = document.getElementById('smoothing-amount');
 
 // ---------------------------------------------------------------------------
 // State
@@ -316,7 +317,8 @@ processBtn.addEventListener('click', async () => {
     const scalingFactor = parseFloat(scalingFactorInput.value) || 100;
     const outlierStddev = parseFloat(outlierStddevInput.value) || 0;
     const maxTpsRate = parseFloat(maxTpsRateInput.value) || 0;
-    const payload = { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate };
+    const smoothing = parseFloat(smoothingAmountInput.value) || 0;
+    const payload = { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing };
     if (isLd) {
         worker.postMessage(Object.assign({ type: 'process_ld', logBuffer: logData }, payload));
     } else {

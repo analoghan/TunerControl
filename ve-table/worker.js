@@ -999,7 +999,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
         if (!msg || (msg.type !== 'process' && msg.type !== 'process_ld')) return;
 
         try {
-            const { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate } = msg;
+            const { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing } = msg;
             const threshold = (typeof hitThreshold === 'number' && hitThreshold >= 1) ? hitThreshold : HIT_THRESHOLD;
             const coolantThreshold = (typeof minCoolantTemp === 'number') ? minCoolantTemp : 55;
             const runTimeThreshold = (typeof minRunTime === 'number') ? minRunTime : 60;
@@ -1007,6 +1007,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
             const scalePct = (typeof scalingFactor === 'number' && scalingFactor > 0 && scalingFactor <= 100) ? scalingFactor / 100 : 1.0;
             const outlierSigma = (typeof outlierStddev === 'number' && outlierStddev > 0) ? outlierStddev : 0;
             const tpsRateLimit = (typeof maxTpsRate === 'number' && maxTpsRate > 0) ? maxTpsRate : 0;
+            const smoothingSigma = (typeof smoothing === 'number' && smoothing > 0) ? smoothing : 0;
 
             // 1. Parse VE table
             const veTable = parseVETable(veText);
@@ -1278,13 +1279,70 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
                 finalCells.push(row);
             }
 
-            const correctionGrid = {
-                mapBreakpoints: veTable.mapBreakpoints,
-                rpmBreakpoints: veTable.rpmBreakpoints,
-                cells: finalCells,
-                totalSamples,
-                cellsAboveThreshold,
-            };
+            // 6c. Apply Gaussian smoothing to corrections (if enabled)
+            if (smoothingSigma > 0 && cellsAboveThreshold > 0) {
+                // Build a kernel radius based on sigma (cover 3σ in each direction)
+                const radius = Math.ceil(smoothingSigma * 2);
+                const numRows = finalCells.length;
+                const numCols = finalCells[0] ? finalCells[0].length : 0;
+
+                // Pre-compute Gaussian weights for the kernel
+                const kernelSize = radius * 2 + 1;
+                const kernel = [];
+                for (let dy = -radius; dy <= radius; dy++) {
+                    const kRow = [];
+                    for (let dx = -radius; dx <= radius; dx++) {
+                        const dist2 = dx * dx + dy * dy;
+                        kRow.push(Math.exp(-dist2 / (2 * smoothingSigma * smoothingSigma)));
+                    }
+                    kernel.push(kRow);
+                }
+
+                // Apply smoothing: only smooth cells that are above threshold,
+                // only sample from neighbors that are above threshold
+                const smoothedCorrections = [];
+                for (let m = 0; m < numRows; m++) {
+                    const row = [];
+                    for (let r = 0; r < numCols; r++) {
+                        if (finalCells[m][r].correction === null) {
+                            row.push(null);
+                            continue;
+                        }
+
+                        let weightedSum = 0;
+                        let weightTotal = 0;
+
+                        for (let dy = -radius; dy <= radius; dy++) {
+                            for (let dx = -radius; dx <= radius; dx++) {
+                                const nm = m + dy;
+                                const nr = r + dx;
+                                if (nm < 0 || nm >= numRows || nr < 0 || nr >= numCols) continue;
+                                if (finalCells[nm][nr].correction === null) continue;
+
+                                const w = kernel[dy + radius][dx + radius];
+                                weightedSum += finalCells[nm][nr].correction * w;
+                                weightTotal += w;
+                            }
+                        }
+
+                        if (weightTotal > 0) {
+                            row.push(weightedSum / weightTotal);
+                        } else {
+                            row.push(finalCells[m][r].correction);
+                        }
+                    }
+                    smoothedCorrections.push(row);
+                }
+
+                // Write smoothed values back into finalCells
+                for (let m = 0; m < numRows; m++) {
+                    for (let r = 0; r < numCols; r++) {
+                        if (smoothedCorrections[m][r] !== null) {
+                            finalCells[m][r].correction = smoothedCorrections[m][r];
+                        }
+                    }
+                }
+            }
 
             // 6b. Build newValuesGrid for display (original VE * (1 + correction/100))
             const newValuesGrid = [];
