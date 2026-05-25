@@ -47,6 +47,30 @@
         <span class="filename-display">Discard samples before this many seconds from log start</span>
       </div>
 
+      <div class="file-row">
+        <label for="min-change-amount">Min Change Amount (%):</label>
+        <input type="number" id="min-change-amount" min="0" max="50" value="0" step="0.1" style="width: 80px;" />
+        <span class="filename-display">Zero out corrections smaller than this absolute value</span>
+      </div>
+
+      <div class="file-row">
+        <label for="scaling-factor">Scaling Factor (%):</label>
+        <input type="number" id="scaling-factor" min="1" max="100" value="100" step="1" style="width: 80px;" />
+        <span class="filename-display">Apply only this percentage of the recommended correction (e.g., 75 for conservative)</span>
+      </div>
+
+      <div class="file-row">
+        <label for="outlier-stddev">Outlier Filter (σ):</label>
+        <input type="number" id="outlier-stddev" min="0" max="10" value="0" step="0.5" style="width: 80px;" />
+        <span class="filename-display">Discard samples beyond N standard deviations from cell mean (0 = disabled)</span>
+      </div>
+
+      <div class="file-row">
+        <label for="max-tps-rate">Max TPS Rate (%/s):</label>
+        <input type="number" id="max-tps-rate" min="0" max="1000" value="0" step="10" style="width: 80px;" />
+        <span class="filename-display">Discard samples where throttle is changing faster than this rate (0 = disabled)</span>
+      </div>
+
       <div class="button-row">
         <button id="process-btn" disabled>Process</button>
       </div>
@@ -84,7 +108,9 @@
 
       <div id="table-toggle" class="table-toggle" hidden>
         <button id="show-corrections-btn" class="toggle-btn active">Correction %</button>
+        <button id="show-new-values-btn" class="toggle-btn">New VE Values</button>
         <button id="show-hits-btn" class="toggle-btn">Hit Counts</button>
+        <button id="show-stddev-btn" class="toggle-btn">Std Dev</button>
       </div>
 
       <h3 id="table-label" class="table-label" hidden></h3>

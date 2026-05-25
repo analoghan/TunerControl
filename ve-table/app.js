@@ -25,6 +25,10 @@ const resultsContainer = document.getElementById('results-container');
 const hitThresholdInput = document.getElementById('hit-threshold');
 const minCoolantTempInput = document.getElementById('min-coolant-temp');
 const minRunTimeInput = document.getElementById('min-run-time');
+const minChangeAmountInput = document.getElementById('min-change-amount');
+const scalingFactorInput = document.getElementById('scaling-factor');
+const outlierStddevInput = document.getElementById('outlier-stddev');
+const maxTpsRateInput = document.getElementById('max-tps-rate');
 
 // ---------------------------------------------------------------------------
 // State
@@ -308,10 +312,15 @@ processBtn.addEventListener('click', async () => {
     const hitThreshold = parseInt(hitThresholdInput.value, 10) || 50;
     const minCoolantTemp = parseFloat(minCoolantTempInput.value) || 55;
     const minRunTime = parseFloat(minRunTimeInput.value) || 60;
+    const minChangeAmount = parseFloat(minChangeAmountInput.value) || 0;
+    const scalingFactor = parseFloat(scalingFactorInput.value) || 100;
+    const outlierStddev = parseFloat(outlierStddevInput.value) || 0;
+    const maxTpsRate = parseFloat(maxTpsRateInput.value) || 0;
+    const payload = { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate };
     if (isLd) {
-        worker.postMessage({ type: 'process_ld', logBuffer: logData, veText, hitThreshold, minCoolantTemp, minRunTime });
+        worker.postMessage(Object.assign({ type: 'process_ld', logBuffer: logData }, payload));
     } else {
-        worker.postMessage({ type: 'process', logText: logData, veText, hitThreshold, minCoolantTemp, minRunTime });
+        worker.postMessage(Object.assign({ type: 'process', logText: logData }, payload));
     }
 });
 
@@ -350,7 +359,7 @@ function renderResults(msg) {
     const tableToggle = document.getElementById('table-toggle');
     const tableLabel = document.getElementById('table-label');
 
-    const { correctionGrid, diffCsv, newValuesCsv, totalSamples, cellsAboveThreshold, filteredByTime, filteredByCoolant } = msg;
+    const { correctionGrid, diffCsv, newValuesCsv, totalSamples, cellsAboveThreshold, filteredByTime, filteredByCoolant, filteredByTps, filteredByOutlier } = msg;
 
     // Clear previous table content
     tableContainer.innerHTML = '';
@@ -358,10 +367,12 @@ function renderResults(msg) {
     // Show stats line
     const threshold = parseInt(hitThresholdInput.value, 10) || 50;
     let statsText = `Processed ${totalSamples.toLocaleString()} valid samples \u00B7 ${cellsAboveThreshold} cells above threshold (>${threshold} hits)`;
-    if (filteredByTime > 0 || filteredByCoolant > 0) {
+    if (filteredByTime > 0 || filteredByCoolant > 0 || filteredByTps > 0 || filteredByOutlier > 0) {
         const parts = [];
         if (filteredByTime > 0) parts.push(`${filteredByTime.toLocaleString()} by run time`);
         if (filteredByCoolant > 0) parts.push(`${filteredByCoolant.toLocaleString()} by coolant temp`);
+        if (filteredByTps > 0) parts.push(`${filteredByTps.toLocaleString()} by TPS rate`);
+        if (filteredByOutlier > 0) parts.push(`${filteredByOutlier.toLocaleString()} as outliers`);
         statsText += ` \u00B7 Filtered: ${parts.join(', ')}`;
     }
     statsLine.textContent = statsText;
@@ -391,17 +402,39 @@ function renderResults(msg) {
     // Wire up table toggle buttons
     const showCorrectionsBtn = document.getElementById('show-corrections-btn');
     const showHitsBtn = document.getElementById('show-hits-btn');
+    const showNewValuesBtn = document.getElementById('show-new-values-btn');
+    const showStddevBtn = document.getElementById('show-stddev-btn');
 
     showCorrectionsBtn.onclick = () => {
         showCorrectionsBtn.classList.add('active');
         showHitsBtn.classList.remove('active');
+        showNewValuesBtn.classList.remove('active');
+        showStddevBtn.classList.remove('active');
         renderCorrectionTable(correctionGrid, tableContainer, tableLabel);
+    };
+
+    showNewValuesBtn.onclick = () => {
+        showNewValuesBtn.classList.add('active');
+        showCorrectionsBtn.classList.remove('active');
+        showHitsBtn.classList.remove('active');
+        showStddevBtn.classList.remove('active');
+        renderNewValuesTable(correctionGrid, msg.newValuesGrid, tableContainer, tableLabel);
     };
 
     showHitsBtn.onclick = () => {
         showHitsBtn.classList.add('active');
         showCorrectionsBtn.classList.remove('active');
+        showNewValuesBtn.classList.remove('active');
+        showStddevBtn.classList.remove('active');
         renderHitCountTable(correctionGrid, tableContainer, tableLabel);
+    };
+
+    showStddevBtn.onclick = () => {
+        showStddevBtn.classList.add('active');
+        showCorrectionsBtn.classList.remove('active');
+        showNewValuesBtn.classList.remove('active');
+        showHitsBtn.classList.remove('active');
+        renderStdDevTable(correctionGrid, tableContainer, tableLabel);
     };
 
     // Default: show corrections table
@@ -517,6 +550,134 @@ function renderHitCountTable(correctionGrid, tableContainer, tableLabel) {
             } else {
                 td.className = 'zero';
                 td.textContent = cell.count;
+            }
+
+            row.appendChild(td);
+        }
+        tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    tableContainer.appendChild(table);
+}
+
+
+/**
+ * Renders the new VE values table showing the recommended VE table after corrections.
+ */
+function renderNewValuesTable(correctionGrid, newValuesGrid, tableContainer, tableLabel) {
+    tableContainer.innerHTML = '';
+    tableLabel.textContent = 'Recommended VE Table — New values after applying corrections (highlighted cells were changed)';
+
+    const { mapBreakpoints, rpmBreakpoints, cells } = correctionGrid;
+
+    const table = document.createElement('table');
+    table.className = 'correction-table';
+
+    // Header row
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    const cornerTh = document.createElement('th');
+    cornerTh.textContent = 'MAP \\ RPM';
+    headerRow.appendChild(cornerTh);
+
+    for (let r = 0; r < rpmBreakpoints.length; r++) {
+        const th = document.createElement('th');
+        th.textContent = rpmBreakpoints[r];
+        headerRow.appendChild(th);
+    }
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    // Data rows
+    const tbody = document.createElement('tbody');
+    for (let m = 0; m < mapBreakpoints.length; m++) {
+        const row = document.createElement('tr');
+        const rowHeader = document.createElement('th');
+        rowHeader.textContent = mapBreakpoints[m];
+        row.appendChild(rowHeader);
+
+        for (let r = 0; r < rpmBreakpoints.length; r++) {
+            const td = document.createElement('td');
+            const cell = cells[m][r];
+            const newValue = newValuesGrid[m][r];
+
+            if (cell.correction === null) {
+                // Below threshold — show original value, greyed out
+                td.className = 'below-threshold';
+                td.textContent = newValue.toFixed(2);
+            } else if (cell.correction > 0) {
+                td.className = 'positive';
+                td.textContent = newValue.toFixed(2);
+            } else if (cell.correction < 0) {
+                td.className = 'negative';
+                td.textContent = newValue.toFixed(2);
+            } else {
+                td.className = 'zero';
+                td.textContent = newValue.toFixed(2);
+            }
+
+            row.appendChild(td);
+        }
+        tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    tableContainer.appendChild(table);
+}
+
+
+/**
+ * Renders the standard deviation table showing correction variability per cell.
+ */
+function renderStdDevTable(correctionGrid, tableContainer, tableLabel) {
+    tableContainer.innerHTML = '';
+    tableLabel.textContent = 'Correction Std Dev — Lower values indicate more consistent/trustworthy corrections';
+
+    const { mapBreakpoints, rpmBreakpoints, cells } = correctionGrid;
+
+    const table = document.createElement('table');
+    table.className = 'correction-table';
+
+    // Header row
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    const cornerTh = document.createElement('th');
+    cornerTh.textContent = 'MAP \\ RPM';
+    headerRow.appendChild(cornerTh);
+
+    for (let r = 0; r < rpmBreakpoints.length; r++) {
+        const th = document.createElement('th');
+        th.textContent = rpmBreakpoints[r];
+        headerRow.appendChild(th);
+    }
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    // Data rows
+    const tbody = document.createElement('tbody');
+    for (let m = 0; m < mapBreakpoints.length; m++) {
+        const row = document.createElement('tr');
+        const rowHeader = document.createElement('th');
+        rowHeader.textContent = mapBreakpoints[m];
+        row.appendChild(rowHeader);
+
+        for (let r = 0; r < rpmBreakpoints.length; r++) {
+            const td = document.createElement('td');
+            const cell = cells[m][r];
+
+            if (cell.stddev === undefined || cell.stddev === null) {
+                td.className = 'below-threshold';
+            } else if (cell.stddev <= 1.0) {
+                // Low variance — high confidence
+                td.className = 'positive';
+                td.textContent = cell.stddev.toFixed(2);
+            } else if (cell.stddev <= 3.0) {
+                // Moderate variance
+                td.className = 'zero';
+                td.textContent = cell.stddev.toFixed(2);
+            } else {
+                // High variance — low confidence
+                td.className = 'negative';
+                td.textContent = cell.stddev.toFixed(2);
             }
 
             row.appendChild(td);
