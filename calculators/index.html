@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calculators — TunerControl</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #ffffff;
+      background: #0a0a0a;
+    }
+
+    .app-container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 24px;
+      background: #1a1a1a;
+      border-radius: 8px;
+      border: 1px solid #333333;
+    }
+
+    .top-nav {
+      display: flex;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .top-nav a {
+      color: #E31837;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+
+    .top-nav a:hover {
+      text-decoration: underline;
+      color: #ff2d4a;
+    }
+
+    .nav-logo {
+      height: 64px;
+      vertical-align: middle;
+      margin-left: auto;
+    }
+
+    h1 {
+      margin: 0 0 24px;
+      font-size: 1.6rem;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .calc-section {
+      background: #111111;
+      border: 1px solid #333333;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .calc-section h2 {
+      margin: 0 0 12px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #E31837;
+    }
+
+    .calc-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .calc-field {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .calc-field label {
+      color: #b0b0b0;
+      font-weight: 500;
+      min-width: 60px;
+    }
+
+    .calc-field input {
+      width: 120px;
+      padding: 8px 10px;
+      background: #222222;
+      border: 1px solid #333333;
+      border-radius: 4px;
+      color: #ffffff;
+      font-size: 0.95rem;
+      transition: border-color 0.2s;
+    }
+
+    .calc-field input:focus {
+      outline: none;
+      border-color: #E31837;
+    }
+
+    .calc-arrow {
+      color: #666666;
+      font-size: 1.2rem;
+      user-select: none;
+    }
+
+    .calc-note {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: #666666;
+      font-style: italic;
+    }
+
+    @media (max-width: 500px) {
+      .calc-row {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .calc-arrow {
+        transform: rotate(90deg);
+        align-self: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../index.html" aria-label="Back to TunerControl landing page">&larr; Back to TunerControl</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Calculators</h1>
+
+    <!-- kPa to PSI (Relative) -->
+    <div class="calc-section">
+      <h2>Pressure — kPa ↔ PSI (Relative / Gauge)</h2>
+      <div class="calc-row">
+        <div class="calc-field">
+          <label for="kpa-rel">kPa</label>
+          <input type="number" id="kpa-rel" step="any" value="100" />
+        </div>
+        <span class="calc-arrow">⇄</span>
+        <div class="calc-field">
+          <label for="psi-rel">PSI</label>
+          <input type="number" id="psi-rel" step="any" />
+        </div>
+      </div>
+      <p class="calc-note">Gauge pressure (0 kPa = 0 PSI = atmospheric)</p>
+    </div>
+
+    <!-- kPa to PSI (Absolute) -->
+    <div class="calc-section">
+      <h2>Pressure — kPa ↔ PSI (Absolute)</h2>
+      <div class="calc-row">
+        <div class="calc-field">
+          <label for="kpa-abs">kPa</label>
+          <input type="number" id="kpa-abs" step="any" value="101.325" />
+        </div>
+        <span class="calc-arrow">⇄</span>
+        <div class="calc-field">
+          <label for="psi-abs">PSI</label>
+          <input type="number" id="psi-abs" step="any" />
+        </div>
+      </div>
+      <p class="calc-note">Absolute pressure (101.325 kPa = 14.696 PSI = 1 atmosphere)</p>
+    </div>
+
+    <!-- Celsius to Fahrenheit -->
+    <div class="calc-section">
+      <h2>Temperature — °C ↔ °F</h2>
+      <div class="calc-row">
+        <div class="calc-field">
+          <label for="celsius">°C</label>
+          <input type="number" id="celsius" step="any" value="100" />
+        </div>
+        <span class="calc-arrow">⇄</span>
+        <div class="calc-field">
+          <label for="fahrenheit">°F</label>
+          <input type="number" id="fahrenheit" step="any" />
+        </div>
+      </div>
+    </div>
+
+    <!-- AFR to Lambda -->
+    <div class="calc-section">
+      <h2>Air/Fuel Ratio — AFR ↔ Lambda (Gasoline)</h2>
+      <div class="calc-row">
+        <div class="calc-field">
+          <label for="afr">AFR</label>
+          <input type="number" id="afr" step="any" value="14.7" />
+        </div>
+        <span class="calc-arrow">⇄</span>
+        <div class="calc-field">
+          <label for="lambda">Lambda</label>
+          <input type="number" id="lambda" step="any" />
+        </div>
+      </div>
+      <p class="calc-note">Stoichiometric AFR for gasoline = 14.7:1 (Lambda 1.0)</p>
+    </div>
+
+    <!-- km/h to mph -->
+    <div class="calc-section">
+      <h2>Speed — km/h ↔ mph</h2>
+      <div class="calc-row">
+        <div class="calc-field">
+          <label for="kmh">km/h</label>
+          <input type="number" id="kmh" step="any" value="100" />
+        </div>
+        <span class="calc-arrow">⇄</span>
+        <div class="calc-field">
+          <label for="mph">mph</label>
+          <input type="number" id="mph" step="any" />
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // ---------------------------------------------------------------------------
+    // Bidirectional converter wiring
+    // ---------------------------------------------------------------------------
+
+    const STOICH_GASOLINE = 14.7;
+    const KPA_PER_PSI = 6.89476;
+
+    function wire(idA, idB, aToB, bToA) {
+      const elA = document.getElementById(idA);
+      const elB = document.getElementById(idB);
+
+      elA.addEventListener('input', () => {
+        const val = parseFloat(elA.value);
+        if (!isNaN(val)) {
+          elB.value = aToB(val);
+        } else {
+          elB.value = '';
+        }
+      });
+
+      elB.addEventListener('input', () => {
+        const val = parseFloat(elB.value);
+        if (!isNaN(val)) {
+          elA.value = bToA(val);
+        } else {
+          elA.value = '';
+        }
+      });
+
+      // Initialize B from A's default value
+      const initVal = parseFloat(elA.value);
+      if (!isNaN(initVal)) {
+        elB.value = aToB(initVal);
+      }
+    }
+
+    function round(val, decimals) {
+      const factor = Math.pow(10, decimals);
+      return Math.round(val * factor) / factor;
+    }
+
+    // kPa ↔ PSI (Relative) — same conversion factor, just gauge pressure
+    wire('kpa-rel', 'psi-rel',
+      kpa => round(kpa / KPA_PER_PSI, 4),
+      psi => round(psi * KPA_PER_PSI, 4)
+    );
+
+    // kPa ↔ PSI (Absolute) — same conversion factor
+    wire('kpa-abs', 'psi-abs',
+      kpa => round(kpa / KPA_PER_PSI, 4),
+      psi => round(psi * KPA_PER_PSI, 4)
+    );
+
+    // °C ↔ °F
+    wire('celsius', 'fahrenheit',
+      c => round(c * 9 / 5 + 32, 2),
+      f => round((f - 32) * 5 / 9, 2)
+    );
+
+    // AFR ↔ Lambda (Gasoline)
+    wire('afr', 'lambda',
+      afr => round(afr / STOICH_GASOLINE, 4),
+      lambda => round(lambda * STOICH_GASOLINE, 2)
+    );
+
+    // km/h ↔ mph
+    wire('kmh', 'mph',
+      kmh => round(kmh / 1.60934, 2),
+      mph => round(mph * 1.60934, 2)
+    );
+  </script>
+</body>
+</html>
