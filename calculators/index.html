@@ -199,7 +199,7 @@
           <input type="number" id="bar-abs" step="any" />
         </div>
       </div>
-      <p class="calc-note">Absolute pressure with 102 kPa atmospheric reference. 102 kPa = 0 PSI gauge = 1.02 Bar abs</p>
+      <p class="calc-note">Absolute pressure with 102 kPa atmospheric reference. 102 kPa = 0 PSI gauge = 0 Bar gauge</p>
     </div>
 
     <!-- Celsius to Fahrenheit -->
@@ -363,15 +363,15 @@
       bar => round(bar * KPA_PER_BAR, 4)
     );
 
-    // Absolute pressure: kPa(abs) ↔ PSI(gauge) ↔ Bar(abs)
-    // 102 kPa absolute = 0 PSI gauge
+    // Absolute pressure: kPa(abs) ↔ PSI(gauge) ↔ Bar(gauge)
+    // 102 kPa absolute = 0 PSI gauge = 0 Bar gauge
     // PSI gauge = (kPa_abs - 102) / 6.89476
-    // Bar absolute = kPa_abs / 100
+    // Bar gauge = (kPa_abs - 102) / 100
     wire3('kpa-abs', 'psi-abs', 'bar-abs',
       kpa => round((kpa - ATM_KPA) / KPA_PER_PSI, 4),
       psi => round(psi * KPA_PER_PSI + ATM_KPA, 4),
-      kpa => round(kpa / KPA_PER_BAR, 4),
-      bar => round(bar * KPA_PER_BAR, 4)
+      kpa => round((kpa - ATM_KPA) / KPA_PER_BAR, 4),
+      bar => round(bar * KPA_PER_BAR + ATM_KPA, 4)
     );
 
     // °C ↔ °F
