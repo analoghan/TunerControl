@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DI Fuel Pressure Deep Dive — Help</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 32px; margin-bottom: 8px; font-size: 1.3rem; border-bottom: 1px solid #333333; padding-bottom: 6px; }
+    .help-content h3 { color: #ffffff; margin-top: 20px; margin-bottom: 6px; font-size: 1.05rem; }
+    .help-content p, .help-content li { color: #cccccc; font-size: 0.95rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222222; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; color: #ff9800; }
+    .help-content .example-box { background: #111111; border: 1px solid #333333; border-radius: 6px; padding: 16px; margin: 12px 0; }
+    .help-content .example-box p { margin: 4px 0; }
+    .help-content .tip { background: rgba(76, 175, 80, 0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255, 152, 0, 0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .danger { background: rgba(244, 67, 54, 0.1); border-left: 3px solid #f44336; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .toc { background: #111111; border: 1px solid #333333; border-radius: 6px; padding: 16px 24px; margin-bottom: 24px; }
+    .toc ul { list-style: none; padding: 0; margin: 0; columns: 2; }
+    .toc li { margin-bottom: 6px; }
+    .toc a { color: #E31837; text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    .freq-table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.9rem; }
+    .freq-table th, .freq-table td { padding: 8px 12px; border: 1px solid #333333; text-align: center; }
+    .freq-table thead th { background: #222222; color: #ffffff; font-weight: 600; }
+    .freq-table tbody tr:nth-child(even) { background: #111111; }
+    .freq-table tbody td { color: #cccccc; }
+    .freq-table .highlight { color: #4caf50; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html" aria-label="Back to DI Fuel Pressure Deep Dive">&larr; Back to DI Fuel Pressure Deep Dive</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>DI Fuel Pressure Deep Dive — Help</h1>
+    <p>This tool provides detailed analysis of direct injection fuel rail pressure behavior, tracking accuracy, transient response, and operating condition correlation to diagnose HPFP and fuel system issues.</p>
+
+    <nav class="toc">
+      <ul>
+        <li><a href="#quick-start">Quick Start</a></li>
+        <li><a href="#inputs">Input Requirements</a></li>
+        <li><a href="#metrics">Key Metrics</a></li>
+        <li><a href="#transients">Transient Detection</a></li>
+        <li><a href="#charts">Charts</a></li>
+        <li><a href="#diagnostics">Diagnostics</a></li>
+        <li><a href="#lt4-hpfp">GM LT4 HPFP System</a></li>
+        <li><a href="#failure-modes">Failure Modes</a></li>
+        <li><a href="#tuning-workflow">Tuning Workflow</a></li>
+      </ul>
+    </nav>
+
+    <h2 id="quick-start">Quick Start</h2>
+    <ol>
+      <li>Load a MoTeC log file (.csv or .ld) containing fuel pressure, fuel pressure aim, and engine speed channels.</li>
+      <li>Click <strong>Analyze</strong>.</li>
+      <li>Review the pressure error statistics, transient response events, and correlation charts.</li>
+      <li>Check diagnostics for overshoot/undershoot warnings and HPFP capacity issues.</li>
+    </ol>
+
+    <h2 id="inputs">Input Requirements</h2>
+    <h3>Required Channels</h3>
+    <ul>
+      <li><strong>Fuel Pressure Direct Bank 1</strong> — actual rail pressure (dMPa in MoTeC, displayed as bar)</li>
+      <li><strong>Fuel Pressure Direct Bank 1 Aim</strong> — ECU target rail pressure</li>
+      <li><strong>Engine Speed</strong> — RPM for correlation analysis</li>
+    </ul>
+
+    <h3>Optional Channels</h3>
+    <ul>
+      <li><strong>Fuel Pressure Direct Bank 1 Control</strong> — pump control duty/output signal. Shows how hard the ECU is driving the HPFP.</li>
+      <li><strong>Fuel Injector Primary Duty Cycle</strong> — injector duty. Correlates pressure error with fuel demand.</li>
+      <li><strong>Fuel Flow</strong> — instantaneous fuel flow rate. Correlates pressure drops with high flow demand.</li>
+      <li><strong>Fuel Volume</strong> — cumulative fuel consumed.</li>
+      <li><strong>Throttle Pedal</strong> — driver demand for transient context.</li>
+    </ul>
+
+    <div class="warning">
+      <strong>Note:</strong> All three required channels must be present. Without fuel pressure, aim, and RPM, the tool cannot perform its analysis.
+    </div>
+
+    <h2 id="metrics">Key Metrics</h2>
+
+    <h3>Error Statistics</h3>
+    <p>The tool computes the pressure error as <code>actual - aim</code> for every sample:</p>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Metric</th><th>Meaning</th><th>Healthy Range</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Mean Error</td><td>Average offset from aim across the log</td><td class="highlight">±0.5 bar</td></tr>
+        <tr><td>Mean Absolute Error</td><td>Average magnitude of deviation (ignores direction)</td><td class="highlight">&lt; 2 bar</td></tr>
+        <tr><td>Std Dev Error</td><td>Variability of pressure tracking</td><td class="highlight">&lt; 3 bar</td></tr>
+        <tr><td>Max Overshoot</td><td>Worst case above aim</td><td>&lt; 10 bar</td></tr>
+        <tr><td>Max Undershoot</td><td>Worst case below aim</td><td>&gt; -10 bar</td></tr>
+        <tr><td>% Within Tolerance</td><td>Samples within ±2 bar of aim</td><td class="highlight">&gt; 95%</td></tr>
+        <tr><td>% Overshoot</td><td>Samples more than 2 bar above aim</td><td>&lt; 5%</td></tr>
+        <tr><td>% Undershoot</td><td>Samples more than 2 bar below aim</td><td>&lt; 5%</td></tr>
+      </tbody>
+    </table>
+
+    <div class="tip">
+      <strong>Tolerance band:</strong> The tool uses ±2 bar as the acceptable tolerance. A well-functioning HPFP system should keep pressure within this band &gt;95% of the time during steady-state operation. Transient excursions outside this band are normal during rapid aim changes.
+    </div>
+
+    <h2 id="transients">Transient Detection</h2>
+    <p>The tool automatically detects transient events — moments where the fuel pressure aim changes rapidly (more than 20 bar within 0.5 seconds). For each transient:</p>
+    <ul>
+      <li><strong>Direction</strong> — whether aim stepped up or down</li>
+      <li><strong>Aim change magnitude</strong> — how large the step was (bar)</li>
+      <li><strong>Max error during transient</strong> — worst overshoot or undershoot during the response</li>
+      <li><strong>Settle time</strong> — how long until pressure returns within ±2 bar of the new aim</li>
+    </ul>
+
+    <div class="example-box">
+      <p><strong>Example transient event:</strong></p>
+      <p>Direction: Up | Aim change: +45 bar | Max error: +8 bar overshoot | Settle time: 0.35s</p>
+    </div>
+
+    <h3>What Good Transient Response Looks Like</h3>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Parameter</th><th>Good</th><th>Marginal</th><th>Poor</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Settle time (step up)</td><td class="highlight">&lt; 0.3s</td><td>0.3–0.8s</td><td style="color:#f44336;">&gt; 0.8s</td></tr>
+        <tr><td>Settle time (step down)</td><td class="highlight">&lt; 0.5s</td><td>0.5–1.0s</td><td style="color:#f44336;">&gt; 1.0s</td></tr>
+        <tr><td>Overshoot on step up</td><td class="highlight">&lt; 5 bar</td><td>5–15 bar</td><td style="color:#f44336;">&gt; 15 bar</td></tr>
+        <tr><td>Undershoot on step down</td><td class="highlight">&lt; 5 bar</td><td>5–15 bar</td><td style="color:#f44336;">&gt; 15 bar</td></tr>
+      </tbody>
+    </table>
+
+    <div class="warning">
+      <strong>Step-down is slower:</strong> Pressure reduction relies on fuel being consumed by the injectors (there's no pressure relief valve in most DI systems). Step-down settle time is naturally longer than step-up, especially at low RPM where injector events are less frequent.
+    </div>
+
+    <h2 id="charts">Charts</h2>
+
+    <h3>Pressure vs Aim Timeline</h3>
+    <p>Full-width time series showing actual rail pressure and aim overlaid. The ±2 bar tolerance band is shaded around the aim line. Deviations outside this band are immediately visible. Use zoom (scroll) and pan (drag) to inspect specific events.</p>
+
+    <h3>Pressure Error Timeline</h3>
+    <p>The error signal (actual - aim) plotted over time with the ±2 bar tolerance band. Positive = overshoot, negative = undershoot. This is the primary diagnostic chart — patterns in the error signal reveal system behavior.</p>
+
+    <h3>Error vs RPM</h3>
+    <p>Scatter plot correlating pressure error with engine speed. Look for:</p>
+    <ul>
+      <li><strong>Undershoot increasing with RPM</strong> — HPFP capacity limit (can't pump fast enough at high RPM)</li>
+      <li><strong>Overshoot at low RPM</strong> — control gain too aggressive at low speeds</li>
+      <li><strong>Consistent error across all RPM</strong> — systematic offset (sensor calibration or aim table issue)</li>
+    </ul>
+
+    <h3>Error vs Injector Duty Cycle</h3>
+    <p>Correlates pressure error with fuel demand. If undershoot increases above 70% duty cycle, the pump is reaching its flow capacity. This is the clearest indicator of HPFP limitation on modified engines.</p>
+
+    <h3>Error vs Fuel Flow</h3>
+    <p>Similar to duty cycle correlation but uses actual fuel flow rate. Useful for identifying the exact flow rate where the pump starts falling behind.</p>
+
+    <h3>Transient Response Overlay</h3>
+    <p>All detected transient events time-aligned to t=0 (the moment aim changes) and overlaid. Shows the pressure error response pattern. Consistent traces indicate predictable system behavior; scattered traces suggest inconsistent pump response.</p>
+
+    <h3>Error Distribution (Histogram)</h3>
+    <p>Distribution of pressure error values across the entire log. A healthy system shows a tight, symmetric distribution centered near 0. A skewed distribution indicates systematic over- or under-pressure. A wide distribution indicates poor control stability.</p>
+
+    <h2 id="diagnostics">Diagnostics</h2>
+    <p>The tool generates diagnostic messages based on the analysis:</p>
+    <ul>
+      <li><strong>"Pressure tracks aim well"</strong> — &gt;95% within tolerance. System is healthy.</li>
+      <li><strong>"Significant undershoot detected"</strong> — &gt;10% of samples below aim by more than 2 bar. Pump may be struggling.</li>
+      <li><strong>"Significant overshoot detected"</strong> — &gt;10% of samples above aim by more than 2 bar. Control gain may be too aggressive.</li>
+      <li><strong>"Worst undershoot/overshoot"</strong> — reports the extreme values and at what RPM they occurred.</li>
+      <li><strong>"Transient events detected"</strong> — reports count and average settle time.</li>
+      <li><strong>"High duty cycle correlation"</strong> — undershoot increases above 70% injector duty, indicating HPFP capacity limit.</li>
+    </ul>
+
+    <h2 id="lt4-hpfp">GM LT4 HPFP System</h2>
+
+    <h3>System Architecture</h3>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Component</th><th>Specification</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Low-pressure pump</td><td>In-tank electric, supplies 4–6 bar to HPFP inlet</td></tr>
+        <tr><td>High-pressure pump</td><td>Cam-driven single-piston, 3-lobe cam on exhaust camshaft</td></tr>
+        <tr><td>Maximum pressure</td><td>~200 bar (20 MPa)</td></tr>
+        <tr><td>Fuel rail</td><td>Common rail feeding all 8 injectors</td></tr>
+        <tr><td>Pressure sensor</td><td>Mounted on fuel rail, 0–200 bar range</td></tr>
+        <tr><td>Control method</td><td>Solenoid-controlled inlet metering valve on HPFP</td></tr>
+        <tr><td>Pump drive</td><td>3 pumping events per camshaft revolution (6 per crank revolution)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>How the HPFP Control Works</h3>
+    <p>The M1 ECU controls rail pressure by modulating the HPFP inlet metering valve:</p>
+    <ol>
+      <li>The ECU determines the target pressure from the Fuel Pressure Aim table (indexed by RPM and load)</li>
+      <li>A closed-loop controller compares actual vs aim and adjusts the metering valve duty</li>
+      <li>Higher duty = more fuel pumped per stroke = pressure rises</li>
+      <li>Lower duty = less fuel pumped = pressure falls (consumed by injectors)</li>
+    </ol>
+    <div class="tip">
+      <strong>The "Fuel Pressure Direct Bank 1 Control" channel</strong> shows this control output. Values near 100% mean the pump is working at maximum capacity. If you see sustained 100% control with pressure still below aim, the pump has reached its physical limit.
+    </div>
+
+    <h3>Pressure Aim Table Strategy</h3>
+    <p>The fuel pressure aim table in M1 Tune typically follows this pattern:</p>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Condition</th><th>Typical Aim (bar)</th><th>Rationale</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Idle / cranking</td><td>50–80</td><td>Low demand, keep PW above minimum for stability</td></tr>
+        <tr><td>Light cruise</td><td>80–120</td><td>Moderate demand, balance efficiency and response</td></tr>
+        <tr><td>Part throttle</td><td>120–160</td><td>Increasing demand, prepare for potential tip-in</td></tr>
+        <tr><td>Full load / boost</td><td>160–200</td><td>Maximum fuel delivery capacity needed</td></tr>
+        <tr><td>Overrun / decel</td><td>50–80</td><td>No fuel demand, reduce pump load</td></tr>
+      </tbody>
+    </table>
+
+    <div class="warning">
+      <strong>Modified engines:</strong> If you've increased injector size or boost levels, you may need higher pressure aims to maintain adequate fuel delivery. However, higher pressure means shorter pulse widths — watch for XDI instability at idle if pressure aim is too high at low load.
+    </div>
+
+    <h2 id="failure-modes">Failure Modes &amp; Diagnosis</h2>
+
+    <h3>HPFP Capacity Limitation</h3>
+    <p><strong>Symptoms in this tool:</strong></p>
+    <ul>
+      <li>Undershoot increases with RPM (Error vs RPM chart shows downward trend at high RPM)</li>
+      <li>Undershoot increases with duty cycle (Error vs Duty chart shows negative correlation above 70%)</li>
+      <li>Control channel pegged at or near 100% during undershoot events</li>
+      <li>Diagnostic: "High duty cycle correlation: undershoot increases above 70% duty"</li>
+    </ul>
+    <p><strong>Causes:</strong> Stock pump capacity exceeded (modified engine), cam lobe wear, inlet restriction, low-pressure supply insufficient.</p>
+    <p><strong>Solutions:</strong> Upgraded HPFP cam lobe, higher-flow low-pressure pump, reduced pressure aim at high RPM (trade-off: longer PW needed), or aftermarket HPFP.</p>
+
+    <h3>Control Instability (Oscillation)</h3>
+    <p><strong>Symptoms:</strong></p>
+    <ul>
+      <li>High std dev error during steady-state operation</li>
+      <li>Error timeline shows regular oscillation pattern</li>
+      <li>Histogram is wide and possibly bimodal</li>
+    </ul>
+    <p><strong>Causes:</strong> Control gains too aggressive, sensor noise, mechanical resonance in fuel system.</p>
+    <p><strong>Solutions:</strong> Reduce P gain in fuel pressure controller, add filtering to pressure sensor input, check for air in fuel lines.</p>
+
+    <h3>Slow Transient Response</h3>
+    <p><strong>Symptoms:</strong></p>
+    <ul>
+      <li>Settle times consistently &gt; 0.5s for step-up events</li>
+      <li>Transient overlay shows slow, sluggish response curves</li>
+      <li>Large undershoot during tip-in (pressure can't rise fast enough)</li>
+    </ul>
+    <p><strong>Causes:</strong> Control gains too conservative, HPFP inlet valve response slow, low-pressure supply lag.</p>
+    <p><strong>Solutions:</strong> Increase P gain (carefully — too much causes oscillation), verify low-pressure pump maintains supply during transients, check for fuel filter restriction.</p>
+
+    <h3>Systematic Offset</h3>
+    <p><strong>Symptoms:</strong></p>
+    <ul>
+      <li>Mean error consistently positive or negative (not centered at 0)</li>
+      <li>Error vs RPM shows flat offset across all speeds</li>
+      <li>Histogram centered away from 0</li>
+    </ul>
+    <p><strong>Causes:</strong> Pressure sensor calibration drift, aim table offset, control integral term saturated.</p>
+    <p><strong>Solutions:</strong> Verify sensor calibration with known reference, check for integral wind-up limits in controller, recalibrate sensor offset in M1 Tune.</p>
+
+    <h2 id="tuning-workflow">Tuning Workflow</h2>
+    <ol>
+      <li><strong>Baseline log:</strong> Drive through full operating range including idle, cruise, part-throttle, WOT, and tip-in/tip-out transients. Log at high sample rate (200+ Hz for fuel pressure channels).</li>
+      <li><strong>Analyze:</strong> Load the log and review the summary. Check % within tolerance and identify any systematic patterns.</li>
+      <li><strong>Check steady-state:</strong> If % within tolerance is below 95%, look at the Error vs RPM chart to identify which RPM ranges have the worst tracking.</li>
+      <li><strong>Check transients:</strong> Review transient events. If settle times are poor, adjust control gains. If overshoot is excessive, reduce P gain. If response is sluggish, increase P gain.</li>
+      <li><strong>Check capacity:</strong> Look at Error vs Duty Cycle. If undershoot correlates with high duty, the pump is at its limit — either reduce pressure aim or upgrade hardware.</li>
+      <li><strong>Adjust and re-log:</strong> Make targeted changes to pressure aim table or control gains. Re-log and verify improvement.</li>
+    </ol>
+
+    <div class="example-box">
+      <p><strong>Typical iteration:</strong></p>
+      <p>1. Baseline: 87% within tolerance, undershoot at high RPM</p>
+      <p>2. Error vs Duty shows undershoot above 75% duty → pump capacity issue</p>
+      <p>3. Reduce pressure aim at high RPM/load from 200 → 180 bar</p>
+      <p>4. Re-log: 96% within tolerance, no undershoot correlation with duty</p>
+      <p>5. Verify injector PW is still above 0.8ms at the lower pressure (check with Injector tool)</p>
+    </div>
+
+    <div class="danger">
+      <strong>Safety:</strong> Fuel pressure that drops significantly below aim under boost means the engine is running lean. If you see sustained undershoot (&gt;10 bar below aim) at high load, reduce boost or load until the fuel system issue is resolved. Running lean under boost risks catastrophic engine damage.
+    </div>
+
+    <div class="tip">
+      <strong>Pro tip:</strong> Use this tool in conjunction with the Injector Characterization tool. The fuel pressure aim table directly affects injector pulse width — lowering pressure aim increases PW (good for idle stability) but reduces maximum fuel delivery capacity (bad for WOT). Finding the right balance requires checking both tools after each change.
+    </div>
+
+  </div>
+</body>
+</html>

@@ -103,6 +103,27 @@ h1 {
 
 .button-row {
   margin-top: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.help-link-btn {
+  display: inline-block;
+  padding: 10px 24px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: #222222;
+  border: 1px solid #E31837;
+  border-radius: 4px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.help-link-btn:hover {
+  background: #333333;
 }
 
 /* === Analyze button === */
