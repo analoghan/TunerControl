@@ -681,6 +681,245 @@ function computeHeatmapBins(events) {
 }
 
 // ---------------------------------------------------------------------------
+// Knock vs Engine Load Normalized
+// ---------------------------------------------------------------------------
+
+/**
+ * Computes a per-cylinder 2D grid of knock event rate (events/minute) normalized
+ * by dwell time, binned by RPM and Load. This aligns with spark table layout in
+ * MoTeC M1 Tune for targeted timing reduction.
+ *
+ * Returns data for "All Cylinders" plus each individual cylinder (1–8).
+ * Grid dimensions: 15 RPM bins (500 RPM wide) × 25 Load bins (10 kPa wide).
+ *
+ * @param {Array<Object>} events - Array of KnockEvent objects
+ * @param {number[][]} data - Full log data (row arrays)
+ * @param {Object} channels - Resolved channel indices
+ * @returns {Object|null} { rpmLabels, loadLabels, dwellGrid, cylinders: { 0: grid, 1: grid, ... } }
+ *   Each grid is a 2D array [loadIdx][rpmIdx] of { events, rate, avgLevel, maxLevel }
+ */
+function computeKnockRpmLoadGrid(events, data, channels) {
+    var rpmIdx = channels.rpm;
+    var mapIdx = channels.map;
+    if (rpmIdx === -1 || mapIdx === -1) return null;
+
+    var NUM_RPM_BINS = 15;
+    var NUM_LOAD_BINS = 25;
+    var RPM_WIDTH = 500;
+    var LOAD_WIDTH = 10;
+
+    // Estimate sample period
+    var samplePeriod = 0.01;
+    if (data.length >= 2) {
+        var dt = data[1][0] - data[0][0];
+        if (dt > 0 && dt < 1) samplePeriod = dt;
+    }
+
+    // Compute dwell time per RPM×Load cell from full dataset
+    var dwellSamples = [];
+    for (var l = 0; l < NUM_LOAD_BINS; l++) {
+        var row = new Array(NUM_RPM_BINS);
+        for (var r = 0; r < NUM_RPM_BINS; r++) row[r] = 0;
+        dwellSamples.push(row);
+    }
+
+    for (var i = 0; i < data.length; i++) {
+        var rpm = data[i][rpmIdx];
+        var load = data[i][mapIdx];
+        if (isNaN(rpm) || isNaN(load)) continue;
+        var rBin = assignRpmBin(rpm);
+        var lBin = assignLoadBin(load);
+        dwellSamples[lBin][rBin]++;
+    }
+
+    // Convert to seconds
+    var dwellGrid = [];
+    for (var l = 0; l < NUM_LOAD_BINS; l++) {
+        var row = new Array(NUM_RPM_BINS);
+        for (var r = 0; r < NUM_RPM_BINS; r++) {
+            row[r] = dwellSamples[l][r] * samplePeriod;
+        }
+        dwellGrid.push(row);
+    }
+
+    // Helper to create an empty grid of cell objects
+    function makeEmptyGrid() {
+        var g = [];
+        for (var l = 0; l < NUM_LOAD_BINS; l++) {
+            var row = [];
+            for (var r = 0; r < NUM_RPM_BINS; r++) {
+                row.push({ events: 0, levelSum: 0, maxLevel: 0 });
+            }
+            g.push(row);
+        }
+        return g;
+    }
+
+    // Build grids: index 0 = all cylinders, 1–8 = per cylinder
+    var grids = {};
+    grids[0] = makeEmptyGrid(); // all
+    for (var c = 1; c <= 8; c++) {
+        grids[c] = makeEmptyGrid();
+    }
+
+    // Tally events
+    for (var e = 0; e < events.length; e++) {
+        var evt = events[e];
+        if (evt.rpm === null || evt.load === null) continue;
+        var rBin = assignRpmBin(evt.rpm);
+        var lBin = assignLoadBin(evt.load);
+
+        // All cylinders
+        var cellAll = grids[0][lBin][rBin];
+        cellAll.events++;
+        cellAll.levelSum += evt.knockLevel;
+        if (evt.knockLevel > cellAll.maxLevel) cellAll.maxLevel = evt.knockLevel;
+
+        // Per cylinder
+        var cylGrid = grids[evt.cylinderIndex];
+        if (cylGrid) {
+            var cellCyl = cylGrid[lBin][rBin];
+            cellCyl.events++;
+            cellCyl.levelSum += evt.knockLevel;
+            if (evt.knockLevel > cellCyl.maxLevel) cellCyl.maxLevel = evt.knockLevel;
+        }
+    }
+
+    // Finalize: compute rate and avgLevel
+    function finalizeGrid(grid) {
+        var result = [];
+        for (var l = 0; l < NUM_LOAD_BINS; l++) {
+            var row = [];
+            for (var r = 0; r < NUM_RPM_BINS; r++) {
+                var cell = grid[l][r];
+                var dwell = dwellGrid[l][r];
+                var rate = dwell > 0 ? (cell.events / dwell) * 60 : 0;
+                row.push({
+                    events: cell.events,
+                    rate: Math.round(rate * 100) / 100,
+                    avgLevel: cell.events > 0 ? Math.round((cell.levelSum / cell.events) * 10) / 10 : 0,
+                    maxLevel: Math.round(cell.maxLevel * 10) / 10
+                });
+            }
+            result.push(row);
+        }
+        return result;
+    }
+
+    var cylinders = {};
+    for (var c = 0; c <= 8; c++) {
+        cylinders[c] = finalizeGrid(grids[c]);
+    }
+
+    // Build labels
+    var rpmLabels = [];
+    for (var r = 0; r < NUM_RPM_BINS; r++) {
+        rpmLabels.push((r * RPM_WIDTH) + '–' + ((r + 1) * RPM_WIDTH));
+    }
+    var loadLabels = [];
+    for (var l = 0; l < NUM_LOAD_BINS; l++) {
+        loadLabels.push((l * LOAD_WIDTH) + '–' + ((l + 1) * LOAD_WIDTH));
+    }
+
+    return {
+        rpmLabels: rpmLabels,
+        loadLabels: loadLabels,
+        dwellGrid: dwellGrid,
+        cylinders: cylinders
+    };
+}
+
+/**
+ * Computes knock event frequency normalized by time spent at each load bin.
+ *
+ * For each load bin (10 kPa wide, 0–250 kPa), computes:
+ *   - Total knock events in that bin
+ *   - Total time (seconds) the engine spent in that bin (from all log data)
+ *   - Normalized rate: knock events per minute at that load
+ *   - Average knock level of events in that bin
+ *   - Max knock level in that bin
+ *
+ * This reveals which load ranges are most knock-prone relative to how much
+ * time is spent there, eliminating the bias of simply spending more time
+ * at certain loads.
+ *
+ * @param {Array<Object>} events - Array of KnockEvent objects
+ * @param {number[][]} data - Full log data (row arrays)
+ * @param {Object} channels - Resolved channel indices
+ * @returns {{ bins: Array<{loadMin: number, loadMax: number, events: number, dwellTime: number, rate: number, avgLevel: number, maxLevel: number}> } | null}
+ */
+function computeKnockByLoadNormalized(events, data, channels) {
+    var mapIdx = channels.map;
+    if (mapIdx === -1) return null;
+
+    var NUM_BINS = 25;
+    var BIN_WIDTH = 10; // kPa
+
+    // Compute dwell time per load bin from full dataset
+    // Estimate sample period from first two timestamps
+    var samplePeriod = 0.01; // default 10ms
+    if (data.length >= 2) {
+        var dt = data[1][0] - data[0][0];
+        if (dt > 0 && dt < 1) {
+            samplePeriod = dt;
+        }
+    }
+
+    var dwellSamples = new Array(NUM_BINS);
+    for (var i = 0; i < NUM_BINS; i++) {
+        dwellSamples[i] = 0;
+    }
+
+    for (var r = 0; r < data.length; r++) {
+        var load = data[r][mapIdx];
+        if (load === null || load === undefined || isNaN(load)) continue;
+        var bin = assignLoadBin(load);
+        dwellSamples[bin]++;
+    }
+
+    // Count knock events per load bin and accumulate knock levels
+    var eventCounts = new Array(NUM_BINS);
+    var levelSums = new Array(NUM_BINS);
+    var maxLevels = new Array(NUM_BINS);
+    for (var i = 0; i < NUM_BINS; i++) {
+        eventCounts[i] = 0;
+        levelSums[i] = 0;
+        maxLevels[i] = 0;
+    }
+
+    for (var e = 0; e < events.length; e++) {
+        var evt = events[e];
+        if (evt.load === null || evt.load === undefined) continue;
+        var bin = assignLoadBin(evt.load);
+        eventCounts[bin]++;
+        levelSums[bin] += evt.knockLevel;
+        if (evt.knockLevel > maxLevels[bin]) {
+            maxLevels[bin] = evt.knockLevel;
+        }
+    }
+
+    // Build result bins
+    var bins = [];
+    for (var i = 0; i < NUM_BINS; i++) {
+        var dwellTime = dwellSamples[i] * samplePeriod; // seconds
+        var rate = dwellTime > 0 ? (eventCounts[i] / dwellTime) * 60 : 0; // events per minute
+        var avgLevel = eventCounts[i] > 0 ? levelSums[i] / eventCounts[i] : 0;
+
+        bins.push({
+            loadMin: i * BIN_WIDTH,
+            loadMax: (i + 1) * BIN_WIDTH,
+            events: eventCounts[i],
+            dwellTime: Math.round(dwellTime * 10) / 10,
+            rate: Math.round(rate * 100) / 100,
+            avgLevel: Math.round(avgLevel * 10) / 10,
+            maxLevel: Math.round(maxLevels[i] * 10) / 10
+        });
+    }
+
+    return { bins: bins };
+}
+
+// ---------------------------------------------------------------------------
 // Timing Correlation Analysis
 // ---------------------------------------------------------------------------
 
@@ -1395,6 +1634,14 @@ function runAnalysisPipeline(threshold) {
     // Step 8: Compute timing recommendations
     var recommendations = computeTimingRecommendations(distribution);
 
+    self.postMessage({ type: 'progress', phase: 'Computing knock vs load normalized', percent: 80 });
+
+    // Step 8b: Compute knock vs engine load normalized
+    var knockByLoad = computeKnockByLoadNormalized(events, cachedData, resolved);
+
+    // Step 8c: Compute per-cylinder RPM × Load knock grid
+    var knockRpmLoadGrid = computeKnockRpmLoadGrid(events, cachedData, resolved);
+
     self.postMessage({ type: 'progress', phase: 'Generating diagnostics', percent: 85 });
 
     // Step 9: Generate diagnostics
@@ -1446,6 +1693,8 @@ function runAnalysisPipeline(threshold) {
             retardStats: retardStats,
             worstConditions: worstConditions,
             timingRecommendations: recommendations,
+            knockByLoad: knockByLoad,
+            knockRpmLoadGrid: knockRpmLoadGrid,
             diagnostics: diagnostics,
             threshold: threshold
         },

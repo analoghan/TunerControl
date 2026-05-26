@@ -317,6 +317,12 @@ function renderReport(analysis) {
 
     // Render timing recommendations table
     renderTimingRecommendations(analysis.timingRecommendations);
+
+    // Render knock vs engine load normalized table
+    renderKnockByLoad(analysis.knockByLoad);
+
+    // Render per-cylinder RPM × Load knock grid
+    renderKnockRpmLoadGrid(analysis.knockRpmLoadGrid);
 }
 
 // ---------------------------------------------------------------------------
@@ -613,6 +619,298 @@ function renderTimingRecommendations(recommendations) {
     }
     table.appendChild(tbody);
     content.appendChild(table);
+}
+
+// ---------------------------------------------------------------------------
+// Knock vs Engine Load Normalized Rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders the knock vs engine load normalized table.
+ * Shows knock event rate (events/minute) per load bin, normalized by dwell time.
+ * Only displays bins that have either events or significant dwell time.
+ *
+ * @param {Object|null} knockByLoad - Result from computeKnockByLoadNormalized
+ */
+function renderKnockByLoad(knockByLoad) {
+    var content = document.getElementById('knock-by-load-content');
+    if (!content) return;
+
+    clearElement(content);
+
+    var block = content.closest('.report-block');
+
+    if (!knockByLoad || !knockByLoad.bins) {
+        if (block) block.hidden = true;
+        return;
+    }
+
+    if (block) block.hidden = false;
+
+    // Filter to bins with either events or meaningful dwell time (>1s)
+    var activeBins = [];
+    for (var i = 0; i < knockByLoad.bins.length; i++) {
+        var bin = knockByLoad.bins[i];
+        if (bin.events > 0 || bin.dwellTime > 1) {
+            activeBins.push(bin);
+        }
+    }
+
+    if (activeBins.length === 0) {
+        renderUnavailable(content, 'No load data available for normalization.');
+        return;
+    }
+
+    // Summary
+    var summary = document.createElement('p');
+    summary.className = 'distribution-summary';
+    summary.textContent = 'Knock event rate normalized by time spent at each engine load (MAP) range. Higher rate = more knock-prone at that load.';
+    content.appendChild(summary);
+
+    // Create table
+    var table = document.createElement('table');
+    table.className = 'distribution-table';
+
+    // Header row
+    var thead = document.createElement('thead');
+    var headerRow = document.createElement('tr');
+    var headers = ['Load (kPa)', 'Events', 'Dwell (s)', 'Rate (events/min)', 'Avg Level', 'Max Level'];
+    for (var h = 0; h < headers.length; h++) {
+        var th = document.createElement('th');
+        th.textContent = headers[h];
+        headerRow.appendChild(th);
+    }
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    // Data rows — sorted by rate descending for quick identification of problem areas
+    activeBins.sort(function(a, b) { return b.rate - a.rate; });
+
+    var tbody = document.createElement('tbody');
+    for (var i = 0; i < activeBins.length; i++) {
+        var bin = activeBins[i];
+        var tr = document.createElement('tr');
+
+        var tdLoad = document.createElement('td');
+        tdLoad.textContent = bin.loadMin + '–' + bin.loadMax;
+        tr.appendChild(tdLoad);
+
+        var tdEvents = document.createElement('td');
+        tdEvents.textContent = bin.events.toLocaleString();
+        tr.appendChild(tdEvents);
+
+        var tdDwell = document.createElement('td');
+        tdDwell.textContent = bin.dwellTime.toFixed(1);
+        tr.appendChild(tdDwell);
+
+        var tdRate = document.createElement('td');
+        tdRate.textContent = bin.rate.toFixed(2);
+        if (bin.rate > 0) {
+            tdRate.style.color = '#f44336';
+            tdRate.style.fontWeight = '600';
+        }
+        tr.appendChild(tdRate);
+
+        var tdAvg = document.createElement('td');
+        tdAvg.textContent = bin.events > 0 ? bin.avgLevel.toFixed(1) : '—';
+        tr.appendChild(tdAvg);
+
+        var tdMax = document.createElement('td');
+        tdMax.textContent = bin.events > 0 ? bin.maxLevel.toFixed(1) : '—';
+        tr.appendChild(tdMax);
+
+        tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    content.appendChild(table);
+}
+
+// ---------------------------------------------------------------------------
+// Knock Rate Grid — RPM × Load (per Cylinder) Rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders the per-cylinder RPM × Load knock rate grid with a cylinder selector.
+ * Layout matches MoTeC spark table: Load (MAP) on rows, RPM on columns.
+ * Color-coded by knock rate intensity.
+ *
+ * @param {Object|null} gridData - Result from computeKnockRpmLoadGrid
+ */
+function renderKnockRpmLoadGrid(gridData) {
+    var content = document.getElementById('knock-rpm-load-grid-content');
+    if (!content) return;
+
+    clearElement(content);
+
+    var block = content.closest('.report-block');
+
+    if (!gridData || !gridData.cylinders) {
+        if (block) block.hidden = true;
+        return;
+    }
+
+    if (block) block.hidden = false;
+
+    // Description
+    var desc = document.createElement('p');
+    desc.className = 'distribution-summary';
+    desc.textContent = 'Knock events/minute normalized by dwell time at each RPM × Load cell. Select a cylinder to isolate its knock pattern. Layout matches MoTeC spark table (Load rows, RPM columns).';
+    content.appendChild(desc);
+
+    // Cylinder selector
+    var controlRow = document.createElement('div');
+    controlRow.style.cssText = 'display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;';
+
+    var label = document.createElement('label');
+    label.textContent = 'Cylinder:';
+    label.style.cssText = 'font-weight:500;color:#b0b0b0;';
+    controlRow.appendChild(label);
+
+    var select = document.createElement('select');
+    select.style.cssText = 'background:#222;border:1px solid #333;border-radius:4px;color:#fff;padding:6px 10px;font-size:0.85rem;';
+
+    var optAll = document.createElement('option');
+    optAll.value = '0';
+    optAll.textContent = 'All Cylinders';
+    select.appendChild(optAll);
+
+    for (var c = 1; c <= 8; c++) {
+        var opt = document.createElement('option');
+        opt.value = String(c);
+        opt.textContent = 'Cylinder ' + c;
+        select.appendChild(opt);
+    }
+    controlRow.appendChild(select);
+
+    // Display mode selector
+    var modeLabel = document.createElement('label');
+    modeLabel.textContent = 'Show:';
+    modeLabel.style.cssText = 'font-weight:500;color:#b0b0b0;margin-left:12px;';
+    controlRow.appendChild(modeLabel);
+
+    var modeSelect = document.createElement('select');
+    modeSelect.style.cssText = 'background:#222;border:1px solid #333;border-radius:4px;color:#fff;padding:6px 10px;font-size:0.85rem;';
+
+    var modes = [
+        { value: 'rate', label: 'Rate (events/min)' },
+        { value: 'events', label: 'Event Count' },
+        { value: 'maxLevel', label: 'Max Knock Level' }
+    ];
+    for (var m = 0; m < modes.length; m++) {
+        var mOpt = document.createElement('option');
+        mOpt.value = modes[m].value;
+        mOpt.textContent = modes[m].label;
+        modeSelect.appendChild(mOpt);
+    }
+    controlRow.appendChild(modeSelect);
+
+    content.appendChild(controlRow);
+
+    // Table container
+    var tableContainer = document.createElement('div');
+    tableContainer.style.cssText = 'overflow-x:auto;margin-top:8px;';
+    content.appendChild(tableContainer);
+
+    function renderGrid() {
+        tableContainer.innerHTML = '';
+        var cylIdx = parseInt(select.value, 10);
+        var mode = modeSelect.value;
+        var grid = gridData.cylinders[cylIdx];
+        if (!grid) return;
+
+        var table = document.createElement('table');
+        table.className = 'distribution-table';
+        table.style.cssText = 'border-collapse:collapse;font-size:0.75rem;white-space:nowrap;';
+
+        // Find max value for color scaling
+        var maxVal = 0;
+        for (var l = 0; l < grid.length; l++) {
+            for (var r = 0; r < grid[l].length; r++) {
+                var val = mode === 'rate' ? grid[l][r].rate :
+                          mode === 'events' ? grid[l][r].events :
+                          grid[l][r].maxLevel;
+                if (val > maxVal) maxVal = val;
+            }
+        }
+
+        // Header row: corner + RPM labels
+        var thead = document.createElement('thead');
+        var headerRow = document.createElement('tr');
+        var cornerTh = document.createElement('th');
+        cornerTh.textContent = 'Load\\RPM';
+        cornerTh.style.cssText = 'background:#222;color:#fff;padding:4px 6px;border:1px solid #333;position:sticky;left:0;z-index:2;';
+        headerRow.appendChild(cornerTh);
+
+        for (var r = 0; r < gridData.rpmLabels.length; r++) {
+            var th = document.createElement('th');
+            th.textContent = gridData.rpmLabels[r];
+            th.style.cssText = 'background:#222;color:#fff;padding:4px 6px;border:1px solid #333;font-size:0.7rem;';
+            headerRow.appendChild(th);
+        }
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        // Data rows: load bins (high to low for natural MAP reading)
+        var tbody = document.createElement('tbody');
+        for (var l = grid.length - 1; l >= 0; l--) {
+            // Skip rows with zero dwell across all RPM bins
+            var hasData = false;
+            for (var r = 0; r < grid[l].length; r++) {
+                if (gridData.dwellGrid[l][r] > 0) { hasData = true; break; }
+            }
+            if (!hasData) continue;
+
+            var tr = document.createElement('tr');
+            var rowTh = document.createElement('th');
+            rowTh.textContent = gridData.loadLabels[l];
+            rowTh.style.cssText = 'background:#222;color:#fff;padding:4px 6px;border:1px solid #333;font-weight:600;position:sticky;left:0;z-index:1;';
+            tr.appendChild(rowTh);
+
+            for (var r = 0; r < grid[l].length; r++) {
+                var cell = grid[l][r];
+                var td = document.createElement('td');
+                td.style.cssText = 'padding:4px 6px;border:1px solid #333;text-align:center;min-width:44px;';
+
+                var val = mode === 'rate' ? cell.rate :
+                          mode === 'events' ? cell.events :
+                          cell.maxLevel;
+
+                if (gridData.dwellGrid[l][r] < 0.5) {
+                    // No meaningful dwell — grey out
+                    td.style.background = '#1a1a1a';
+                    td.style.color = '#444';
+                    td.textContent = '—';
+                } else if (val === 0) {
+                    td.style.background = 'rgba(76,175,80,0.15)';
+                    td.style.color = '#4caf50';
+                    td.textContent = '0';
+                } else {
+                    // Color intensity based on value relative to max
+                    var intensity = maxVal > 0 ? Math.min(val / maxVal, 1) : 0;
+                    var red = Math.round(60 + intensity * 195);
+                    var green = Math.round(60 - intensity * 40);
+                    var blue = Math.round(60 - intensity * 40);
+                    td.style.background = 'rgba(' + red + ',' + green + ',' + blue + ',0.4)';
+                    td.style.color = '#f44336';
+                    td.style.fontWeight = '600';
+                    td.textContent = mode === 'rate' ? val.toFixed(1) :
+                                     mode === 'events' ? val :
+                                     val.toFixed(1);
+                }
+
+                tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        tableContainer.appendChild(table);
+    }
+
+    select.addEventListener('change', renderGrid);
+    modeSelect.addEventListener('change', renderGrid);
+
+    // Initial render
+    renderGrid();
 }
 
 // ---------------------------------------------------------------------------
