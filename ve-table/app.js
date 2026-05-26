@@ -728,35 +728,57 @@ function copyCurrentTableToClipboard() {
     }
 
     const text = rows.join('\n');
-    navigator.clipboard.writeText(text).then(() => {
-        const btn = document.getElementById('copy-table-btn');
-        const originalText = btn.textContent;
-        btn.textContent = 'Copied!';
-        btn.classList.add('copied');
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.classList.remove('copied');
-        }, 2000);
-    }).catch(() => {
-        // Fallback for older browsers or file:// protocol
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
 
-        const btn = document.getElementById('copy-table-btn');
-        const originalText = btn.textContent;
+    // Use a textarea + execCommand as primary method (works on file:// protocol)
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '-9999px';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    let success = false;
+    try {
+        success = document.execCommand('copy');
+    } catch (e) {
+        success = false;
+    }
+    document.body.removeChild(textarea);
+
+    // If execCommand failed, try the async clipboard API as fallback
+    if (!success && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            showCopyFeedback();
+        }).catch(() => {
+            // Both methods failed
+            showCopyFeedback('Copy failed');
+        });
+        return;
+    }
+
+    showCopyFeedback(success ? null : 'Copy failed');
+}
+
+/**
+ * Shows brief feedback on the copy button.
+ * @param {string|null} errorMsg - If null, shows success. Otherwise shows the error.
+ */
+function showCopyFeedback(errorMsg) {
+    const btn = document.getElementById('copy-table-btn');
+    const originalText = btn.textContent;
+    if (errorMsg) {
+        btn.textContent = errorMsg;
+    } else {
         btn.textContent = 'Copied!';
         btn.classList.add('copied');
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.classList.remove('copied');
-        }, 2000);
-    });
+    }
+    setTimeout(() => {
+        btn.textContent = originalText;
+        btn.classList.remove('copied');
+    }, 2000);
 }
 
 // ---------------------------------------------------------------------------
