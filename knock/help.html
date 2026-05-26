@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Knock Analyzer — Help</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .help-content {
+      line-height: 1.7;
+    }
+    .help-content h2 {
+      color: #E31837;
+      margin-top: 32px;
+      margin-bottom: 8px;
+      font-size: 1.3rem;
+      border-bottom: 1px solid #333333;
+      padding-bottom: 6px;
+    }
+    .help-content h3 {
+      color: #ffffff;
+      margin-top: 20px;
+      margin-bottom: 6px;
+      font-size: 1.05rem;
+    }
+    .help-content p, .help-content li {
+      color: #cccccc;
+      font-size: 0.95rem;
+    }
+    .help-content ul, .help-content ol {
+      padding-left: 20px;
+    }
+    .help-content li {
+      margin-bottom: 6px;
+    }
+    .help-content code {
+      background: #222222;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 0.9em;
+      color: #ff9800;
+    }
+    .help-content .example-box {
+      background: #111111;
+      border: 1px solid #333333;
+      border-radius: 6px;
+      padding: 16px;
+      margin: 12px 0;
+    }
+    .help-content .example-box p {
+      margin: 4px 0;
+    }
+    .help-content .tip {
+      background: rgba(76, 175, 80, 0.1);
+      border-left: 3px solid #4caf50;
+      padding: 10px 14px;
+      margin: 12px 0;
+      border-radius: 0 4px 4px 0;
+    }
+    .help-content .warning {
+      background: rgba(255, 152, 0, 0.1);
+      border-left: 3px solid #ff9800;
+      padding: 10px 14px;
+      margin: 12px 0;
+      border-radius: 0 4px 4px 0;
+    }
+    .help-content .danger {
+      background: rgba(244, 67, 54, 0.1);
+      border-left: 3px solid #f44336;
+      padding: 10px 14px;
+      margin: 12px 0;
+      border-radius: 0 4px 4px 0;
+    }
+    .toc {
+      background: #111111;
+      border: 1px solid #333333;
+      border-radius: 6px;
+      padding: 16px 24px;
+      margin-bottom: 24px;
+    }
+    .toc ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      columns: 2;
+    }
+    .toc li {
+      margin-bottom: 6px;
+    }
+    .toc a {
+      color: #E31837;
+      text-decoration: none;
+    }
+    .toc a:hover {
+      text-decoration: underline;
+    }
+    .freq-table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 12px 0;
+      font-size: 0.9rem;
+    }
+    .freq-table th, .freq-table td {
+      padding: 8px 12px;
+      border: 1px solid #333333;
+      text-align: center;
+    }
+    .freq-table thead th {
+      background: #222222;
+      color: #ffffff;
+      font-weight: 600;
+    }
+    .freq-table tbody tr:nth-child(even) {
+      background: #111111;
+    }
+    .freq-table tbody td {
+      color: #cccccc;
+    }
+    .freq-table .highlight {
+      color: #4caf50;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html" aria-label="Back to Knock Analyzer">&larr; Back to Knock Analyzer</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Knock Analyzer — Help</h1>
+    <p>This tool analyzes MoTeC log data to identify knock events, correlate them with operating conditions, and provide per-cylinder timing reduction guidance.</p>
+
+    <nav class="toc">
+      <ul>
+        <li><a href="#quick-start">Quick Start</a></li>
+        <li><a href="#inputs">Input Requirements</a></li>
+        <li><a href="#threshold">Knock Threshold</a></li>
+        <li><a href="#reports">Report Sections</a></li>
+        <li><a href="#rpm-load-grid">RPM × Load Grid</a></li>
+        <li><a href="#charts">Charts</a></li>
+        <li><a href="#lt4-setup">GM LT4 Knock Setup</a></li>
+        <li><a href="#motec-config">MoTeC M1 Configuration</a></li>
+        <li><a href="#frequency-theory">Frequency Theory</a></li>
+        <li><a href="#tuning-workflow">Tuning Workflow</a></li>
+      </ul>
+    </nav>
+
+    <!-- Quick Start -->
+    <h2 id="quick-start">Quick Start</h2>
+    <ol>
+      <li>Load a MoTeC log file (.csv export or raw .ld) that contains knock level channels.</li>
+      <li>Set the knock threshold (default 5%) — events above this level are classified as knock.</li>
+      <li>Click <strong>Analyze</strong>.</li>
+      <li>Review the per-cylinder distribution, RPM × Load grid, and timing recommendations.</li>
+      <li>Use the RPM × Load grid (filtered by cylinder) to identify exactly where to pull timing in M1 Tune.</li>
+    </ol>
+
+    <!-- Input Requirements -->
+    <h2 id="inputs">Input Requirements</h2>
+    <h3>Required Channels</h3>
+    <ul>
+      <li><strong>Ignition Cylinder N Knock Level</strong> (1–8) — the per-cylinder knock intensity from the M1's DSP. At least one cylinder channel must be present.</li>
+    </ul>
+
+    <h3>Optional Channels (enhance analysis)</h3>
+    <ul>
+      <li><strong>Engine Speed</strong> — RPM for binning and correlation</li>
+      <li><strong>Inlet Manifold Pressure</strong> — MAP (kPa) for load binning</li>
+      <li><strong>Ignition Timing</strong> — actual timing at the moment of knock</li>
+      <li><strong>Ignition Timing Compensation</strong> — ECU's knock retard amount</li>
+      <li><strong>Throttle Position</strong> — TPS for operating condition context</li>
+      <li><strong>Gear</strong> — gear position for condition identification</li>
+      <li><strong>Coolant Temperature</strong> — for thermal correlation</li>
+    </ul>
+
+    <div class="tip">
+      <strong>Tip:</strong> For the most useful analysis, ensure your log includes Engine Speed and Inlet Manifold Pressure at minimum. Without these, the RPM × Load grid and heatmap cannot be generated.
+    </div>
+
+    <!-- Knock Threshold -->
+    <h2 id="threshold">Knock Threshold</h2>
+    <p>The threshold determines what constitutes a "knock event." Any sample where a cylinder's knock level exceeds this value (strictly greater than) is classified as knock.</p>
+    <ul>
+      <li><strong>Lower threshold (1–3%)</strong> — catches more events including borderline/light knock. Good for conservative tuning.</li>
+      <li><strong>Default (5%)</strong> — reasonable starting point for most engines.</li>
+      <li><strong>Higher threshold (8–15%)</strong> — only flags significant knock events. Use when you want to focus on heavy detonation only.</li>
+    </ul>
+    <div class="warning">
+      <strong>Note:</strong> The "correct" threshold depends on your knock sensor sensitivity, mounting location, and engine. Start at 5% and adjust based on whether the tool is flagging events that correlate with audible knock or timing retard from the ECU.
+    </div>
+
+    <!-- Report Sections -->
+    <h2 id="reports">Report Sections</h2>
+
+    <h3>Diagnostic Summary</h3>
+    <p>High-level overview: total events, most affected cylinder, worst operating conditions, and whether the ECU's knock retard is actively responding.</p>
+
+    <h3>Per-Cylinder Knock Distribution</h3>
+    <p>Table showing event count and percentage per cylinder. Identifies which cylinders are most knock-prone — useful for diagnosing injector issues, hot spots, or sensor problems.</p>
+
+    <h3>Timing Adjustment Recommendations</h3>
+    <p>Suggested timing reduction per cylinder based on knock frequency and severity. These are starting-point recommendations — always validate on the dyno.</p>
+
+    <h3>Knock vs Engine Load (Normalized)</h3>
+    <p>Shows knock rate (events/minute) per load bin, normalized by time spent at each load. Eliminates the bias of simply spending more time at certain loads. Sorted by rate so the most problematic load ranges appear first.</p>
+
+    <!-- RPM × Load Grid -->
+    <h2 id="rpm-load-grid">RPM × Load Grid (per Cylinder)</h2>
+    <p>The most actionable output for tuning. This 2D table mirrors the layout of your MoTeC spark/ignition timing table:</p>
+    <ul>
+      <li><strong>Rows</strong> = Load (MAP in kPa), high to low (boost at top, vacuum at bottom)</li>
+      <li><strong>Columns</strong> = RPM (500 RPM bins)</li>
+      <li><strong>Cell values</strong> = knock events per minute, normalized by dwell time</li>
+    </ul>
+
+    <h3>How to use it</h3>
+    <ol>
+      <li>Select a specific cylinder from the dropdown.</li>
+      <li>Identify red cells — these are the RPM/Load zones where that cylinder is knocking.</li>
+      <li>Open your ignition timing table in M1 Tune for that cylinder.</li>
+      <li>Pull timing in the corresponding cells. Start with 1–2° and re-log.</li>
+      <li>Repeat until the grid shows green (zero knock rate) across your operating range.</li>
+    </ol>
+
+    <h3>Display modes</h3>
+    <ul>
+      <li><strong>Rate (events/min)</strong> — the primary metric. Accounts for how long you spent at each cell.</li>
+      <li><strong>Event Count</strong> — raw number of knock events. Useful for seeing absolute volume.</li>
+      <li><strong>Max Knock Level</strong> — worst-case intensity. High values here indicate severe detonation even if infrequent.</li>
+    </ul>
+
+    <div class="tip">
+      <strong>Tip:</strong> Grey cells (—) mean less than 0.5 seconds of dwell time — not enough data to draw conclusions. Drive more time at those RPM/Load points to fill in the map.
+    </div>
+
+    <!-- Charts -->
+    <h2 id="charts">Charts</h2>
+    <ul>
+      <li><strong>Per-Cylinder Knock Count</strong> — bar chart for quick visual comparison between cylinders</li>
+      <li><strong>Knock Level vs RPM</strong> — scatter plot showing where in the RPM range knock occurs and how severe it is</li>
+      <li><strong>Knock Heatmap (RPM × Load)</strong> — bubble chart showing knock concentration across the operating map</li>
+      <li><strong>Ignition Timing vs RPM</strong> — scatter of timing values at knock events, colored by severity</li>
+      <li><strong>Timing Retard Time Series</strong> — shows the ECU's knock retard response over time</li>
+    </ul>
+
+    <!-- GM LT4 Knock Setup -->
+    <h2 id="lt4-setup">GM Gen V LT4 — Knock Frequency Setup</h2>
+
+    <h3>Engine Specifications</h3>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Parameter</th><th>Value</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Displacement</td><td>6.2L (376 ci)</td></tr>
+        <tr><td>Configuration</td><td>V8, 90°</td></tr>
+        <tr><td>Bore</td><td>103.25 mm (4.065")</td></tr>
+        <tr><td>Stroke</td><td>92 mm (3.622")</td></tr>
+        <tr><td>Compression Ratio</td><td>10.0:1</td></tr>
+        <tr><td>Forced Induction</td><td>1.7L Eaton R1740 TVS supercharger</td></tr>
+        <tr><td>Knock Sensors</td><td>2× flat-response broadband (one per bank)</td></tr>
+        <tr><td>Sensor Location</td><td>Valley, between cylinder banks</td></tr>
+        <tr><td>Firing Order</td><td>1-8-7-2-6-5-4-3</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Calculated Knock Frequencies</h3>
+    <p>The primary knock frequency is determined by the cylinder bore diameter using the Draper formula for the first circumferential resonance mode of combustion chamber gas oscillation:</p>
+    <div class="example-box">
+      <p><code>f = (α × c) / (π × B)</code></p>
+      <p>Where:</p>
+      <p><code>α</code> = 1.841 (first circumferential mode Bessel function root)</p>
+      <p><code>c</code> = speed of sound in combustion gases ≈ 900 m/s</p>
+      <p><code>B</code> = cylinder bore in meters</p>
+    </div>
+
+    <table class="freq-table">
+      <thead>
+        <tr><th>Mode</th><th>Frequency</th><th>Usage</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1st circumferential (primary)</td>
+          <td class="highlight">5,108 Hz</td>
+          <td>Primary knock detection frequency</td>
+        </tr>
+        <tr>
+          <td>Below primary (−500 Hz)</td>
+          <td>4,600 Hz</td>
+          <td>Lower bandwidth edge — catches temperature variation</td>
+        </tr>
+        <tr>
+          <td>Above primary (+500 Hz)</td>
+          <td>5,600 Hz</td>
+          <td>Upper bandwidth edge — catches temperature variation</td>
+        </tr>
+        <tr>
+          <td>2nd harmonic</td>
+          <td class="highlight">10,216 Hz</td>
+          <td>Secondary detection — helps distinguish real knock from mechanical noise</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="tip">
+      <strong>Why ±500 Hz bandwidth?</strong> The actual knock frequency varies with combustion gas temperature. At higher loads and RPM, gas temperature increases, raising the speed of sound and shifting the knock frequency upward. The ±500 Hz window accounts for this variation across the operating range.
+    </div>
+
+    <h3>Per-Cylinder Sensor Assignment (LT4)</h3>
+    <p>The LT4 has two knock sensors mounted in the valley between the cylinder banks. In MoTeC M1, assign sensors to cylinders based on proximity:</p>
+
+    <table class="freq-table">
+      <thead>
+        <tr><th>Knock Sensor</th><th>Position</th><th>Assigned Cylinders</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Sensor 1 (Front)</td>
+          <td>Front of valley</td>
+          <td>Cyl 1, 2, 3, 4 (front pair each bank)</td>
+        </tr>
+        <tr>
+          <td>Sensor 2 (Rear)</td>
+          <td>Rear of valley</td>
+          <td>Cyl 5, 6, 7, 8 (rear pair each bank)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="warning">
+      <strong>Note:</strong> GM cylinder numbering: Bank 1 (driver side) = 1, 3, 5, 7. Bank 2 (passenger side) = 2, 4, 6, 8. Front-to-rear on each bank. Verify your specific harness wiring matches this assignment.
+    </div>
+
+    <!-- MoTeC M1 Configuration -->
+    <h2 id="motec-config">MoTeC M1 Knock Control Configuration</h2>
+
+    <h3>Recommended M1 Tune Settings for LT4</h3>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Parameter</th><th>Recommended Value</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Knock Sensor Type</td><td>Broadband (Flat Response)</td><td>GM Gen V sensors are broadband</td></tr>
+        <tr><td>Frequency Channel 1</td><td>5,100 Hz</td><td>Primary knock frequency (center)</td></tr>
+        <tr><td>Frequency Channel 2</td><td>4,600 Hz</td><td>Lower edge of primary band</td></tr>
+        <tr><td>Frequency Channel 3</td><td>5,600 Hz</td><td>Upper edge of primary band</td></tr>
+        <tr><td>Frequency Channel 4</td><td>10,200 Hz</td><td>2nd harmonic — noise discrimination</td></tr>
+        <tr><td>Bandwidth</td><td>±200 Hz per channel</td><td>Narrow band for each center frequency</td></tr>
+        <tr><td>Knock Window Start</td><td>5° ATDC</td><td>After peak pressure — where knock occurs</td></tr>
+        <tr><td>Knock Window End</td><td>60° ATDC</td><td>Covers the knock-prone combustion phase</td></tr>
+        <tr><td>Knock Level Filter</td><td>2nd order low-pass</td><td>Smooths the knock level signal</td></tr>
+        <tr><td>Knock Threshold Mode</td><td>Adaptive (Background Noise)</td><td>Threshold tracks background noise level</td></tr>
+        <tr><td>Retard Step</td><td>1.5–2.0°</td><td>Timing pulled per knock event</td></tr>
+        <tr><td>Recovery Rate</td><td>0.5–1.0°/s</td><td>How fast timing returns after knock stops</td></tr>
+        <tr><td>Maximum Retard</td><td>8–12°</td><td>Safety limit on total knock retard</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Knock Window Timing</h3>
+    <p>The knock detection window defines when during the combustion cycle the M1 listens for knock. Setting this correctly is critical — too early catches compression noise, too late misses actual knock.</p>
+    <div class="example-box">
+      <p><strong>Start:</strong> <code>5° ATDC</code> — just after TDC where peak cylinder pressure occurs</p>
+      <p><strong>End:</strong> <code>60° ATDC</code> — covers the expansion stroke where knock energy is released</p>
+      <p><strong>Duration:</strong> ~55° of crank rotation</p>
+    </div>
+
+    <div class="tip">
+      <strong>Tip:</strong> On the LT4 with boost, knock tends to occur earlier in the combustion cycle (closer to TDC) due to higher cylinder pressures. If you're missing events, try starting the window at 0° ATDC. If you're getting false triggers from piston slap, move the start to 8–10° ATDC.
+    </div>
+
+    <h3>Adaptive Threshold Setup</h3>
+    <p>The M1's adaptive threshold tracks background noise and sets the knock detection level above it. Key parameters:</p>
+    <ul>
+      <li><strong>Noise Adaptation Rate</strong> — how quickly the background level adjusts. Slower = more stable but slower to adapt to changing conditions. Start at 0.5.</li>
+      <li><strong>Threshold Multiplier</strong> — how far above background noise a signal must be to count as knock. Start at 2.0× (i.e., knock must be 2× louder than background).</li>
+      <li><strong>Minimum Threshold</strong> — floor value to prevent false triggers at idle when background is very low. Set to 2–3%.</li>
+    </ul>
+
+    <!-- Frequency Theory -->
+    <h2 id="frequency-theory">Knock Frequency Theory</h2>
+
+    <h3>Why Bore Size Determines Knock Frequency</h3>
+    <p>Engine knock is the spontaneous ignition of the end-gas (unburned mixture ahead of the flame front). This creates a pressure wave that resonates within the cylindrical combustion chamber. The resonant frequency is determined by the chamber geometry — primarily the bore diameter.</p>
+    <p>The combustion chamber acts like a circular drum membrane. The dominant resonance mode is the first circumferential mode, where the pressure wave oscillates across the bore diameter.</p>
+
+    <h3>Frequency Calculation for Any Engine</h3>
+    <div class="example-box">
+      <p><code>f₁ = (1.841 × c) / (π × B)</code></p>
+      <p>Where <code>c</code> ≈ 900 m/s and <code>B</code> = bore in meters</p>
+      <p>Simplified: <code>f₁ ≈ 527,000 / B(mm)</code></p>
+    </div>
+
+    <h3>Reference Table — Common Bore Sizes</h3>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Engine</th><th>Bore (mm)</th><th>Primary Freq (Hz)</th><th>2nd Harmonic (Hz)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>GM LT4 / LT1 (Gen V)</td><td>103.25</td><td class="highlight">5,108</td><td>10,216</td></tr>
+        <tr><td>GM LS3 / L99 (Gen IV)</td><td>103.25</td><td class="highlight">5,108</td><td>10,216</td></tr>
+        <tr><td>GM LS7 (Gen IV)</td><td>104.78</td><td>5,033</td><td>10,066</td></tr>
+        <tr><td>Ford Coyote 5.0</td><td>92.2</td><td>5,717</td><td>11,434</td></tr>
+        <tr><td>BMW S58 (3.0T)</td><td>84.0</td><td>6,274</td><td>12,548</td></tr>
+        <tr><td>Toyota 2JZ-GTE</td><td>86.0</td><td>6,128</td><td>12,256</td></tr>
+        <tr><td>Nissan VR38DETT (GT-R)</td><td>95.5</td><td>5,518</td><td>11,036</td></tr>
+        <tr><td>Honda K20</td><td>86.0</td><td>6,128</td><td>12,256</td></tr>
+        <tr><td>Subaru EJ257</td><td>99.5</td><td>5,296</td><td>10,592</td></tr>
+      </tbody>
+    </table>
+
+    <div class="warning">
+      <strong>Important:</strong> These are theoretical values. Real-world knock frequency varies ±5–10% depending on combustion temperature, fuel type, and compression ratio. Always verify with audio knock detection (headphones + knock sensor signal) on the dyno during initial setup.
+    </div>
+
+    <h3>Using the 2nd Harmonic for Noise Discrimination</h3>
+    <p>Real knock produces energy at both the primary frequency and its harmonics (2×, 3×). Mechanical noise (valve train, piston slap, bearing noise) typically does NOT produce harmonic patterns. By monitoring both the primary (~5,100 Hz) and 2nd harmonic (~10,200 Hz), the M1 can distinguish real knock from false triggers:</p>
+    <ul>
+      <li>Signal at primary AND 2nd harmonic → likely real knock</li>
+      <li>Signal at primary only → possibly mechanical noise</li>
+      <li>Signal at neither → no knock</li>
+    </ul>
+
+    <!-- Tuning Workflow -->
+    <h2 id="tuning-workflow">Knock Tuning Workflow</h2>
+    <ol>
+      <li><strong>Baseline log:</strong> Run the engine through its full operating range with conservative timing. Log all knock channels at 1000 Hz minimum sample rate.</li>
+      <li><strong>Analyze:</strong> Load the log into this tool. Set threshold to 5% initially.</li>
+      <li><strong>Identify problem areas:</strong> Use the RPM × Load grid filtered by cylinder to find where knock is occurring.</li>
+      <li><strong>Pull timing:</strong> In M1 Tune, reduce ignition timing by 1–2° in the identified cells for the affected cylinder(s).</li>
+      <li><strong>Re-log and verify:</strong> Drive the same conditions again. Re-analyze. The knock rate should decrease.</li>
+      <li><strong>Iterate:</strong> Repeat until the grid shows zero or near-zero knock rate across your operating range.</li>
+      <li><strong>Advance cautiously:</strong> Once knock-free, you can try advancing timing 0.5° at a time in cells that show zero knock, looking for more power without triggering detonation.</li>
+    </ol>
+
+    <div class="danger">
+      <strong>Safety:</strong> Never advance timing beyond the point of knock on a supercharged engine like the LT4. Sustained detonation under boost can destroy pistons and bearings within seconds. Always have the M1's knock retard active as a safety net, even when manually tuning timing tables.
+    </div>
+
+    <div class="tip">
+      <strong>Pro tip:</strong> Log multiple sessions at different intake air temperatures and fuel qualities. Knock behavior changes significantly with ambient conditions. Your timing map should be safe under the worst conditions you expect to encounter (hot day, lower octane fuel).
+    </div>
+
+  </div>
+</body>
+</html>
