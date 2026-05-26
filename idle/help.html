@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Idle Behavior Analyzer — Help</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 32px; margin-bottom: 8px; font-size: 1.3rem; border-bottom: 1px solid #333333; padding-bottom: 6px; }
+    .help-content h3 { color: #ffffff; margin-top: 20px; margin-bottom: 6px; font-size: 1.05rem; }
+    .help-content p, .help-content li { color: #cccccc; font-size: 0.95rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222222; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; color: #ff9800; }
+    .help-content .example-box { background: #111111; border: 1px solid #333333; border-radius: 6px; padding: 16px; margin: 12px 0; }
+    .help-content .example-box p { margin: 4px 0; }
+    .help-content .tip { background: rgba(76, 175, 80, 0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255, 152, 0, 0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .danger { background: rgba(244, 67, 54, 0.1); border-left: 3px solid #f44336; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .toc { background: #111111; border: 1px solid #333333; border-radius: 6px; padding: 16px 24px; margin-bottom: 24px; }
+    .toc ul { list-style: none; padding: 0; margin: 0; columns: 2; }
+    .toc li { margin-bottom: 6px; }
+    .toc a { color: #E31837; text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    .freq-table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.9rem; }
+    .freq-table th, .freq-table td { padding: 8px 12px; border: 1px solid #333333; text-align: center; }
+    .freq-table thead th { background: #222222; color: #ffffff; font-weight: 600; }
+    .freq-table tbody tr:nth-child(even) { background: #111111; }
+    .freq-table tbody td { color: #cccccc; }
+    .freq-table .highlight { color: #4caf50; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html" aria-label="Back to Idle Behavior Analyzer">&larr; Back to Idle Behavior Analyzer</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Idle Behavior Analyzer — Help</h1>
+    <p>This tool detects deceleration-to-idle events in MoTeC log data, classifies idle hang conditions, measures settle times, and correlates idle behavior with engine temperature and mass flow.</p>
+
+    <nav class="toc">
+      <ul>
+        <li><a href="#quick-start">Quick Start</a></li>
+        <li><a href="#inputs">Input Requirements</a></li>
+        <li><a href="#detection">Event Detection Logic</a></li>
+        <li><a href="#hang">Idle Hang Classification</a></li>
+        <li><a href="#reports">Report Sections</a></li>
+        <li><a href="#charts">Charts</a></li>
+        <li><a href="#motec-idle">MoTeC M1 Idle Control</a></li>
+        <li><a href="#tuning-workflow">Tuning Workflow</a></li>
+      </ul>
+    </nav>
+
+    <h2 id="quick-start">Quick Start</h2>
+    <ol>
+      <li>Load a MoTeC log file (.csv or .ld) that includes clutch, throttle, and RPM channels.</li>
+      <li>Click <strong>Analyze</strong>.</li>
+      <li>Review the summary statistics, diagnostic messages, and charts.</li>
+      <li>Identify whether idle hang is occurring and under what conditions (cold, warm, hot).</li>
+    </ol>
+    <div class="tip">
+      <strong>Tip:</strong> For best results, log a session that includes multiple deceleration events — shifting through gears, coming to stops, and coasting. The tool needs clutch-in + throttle-closed events to detect decel behavior.
+    </div>
+
+    <h2 id="inputs">Input Requirements</h2>
+    <h3>Required Channels</h3>
+    <ul>
+      <li><strong>Engine Speed</strong> — RPM for tracking deceleration and settle behavior</li>
+      <li><strong>Throttle Pedal</strong> or <strong>Throttle Position</strong> — must drop below 1% to trigger decel event detection</li>
+      <li><strong>Clutch Switch Position</strong> or <strong>Clutch Position</strong> — must be pressed (value &gt; 0) to indicate a decel event</li>
+    </ul>
+    <div class="danger">
+      <strong>All three required channels must be present.</strong> Without RPM, throttle, and clutch data, the tool cannot detect deceleration events and will show an error.
+    </div>
+
+    <h3>Optional Channels (enhance analysis)</h3>
+    <ul>
+      <li><strong>Idle Aim</strong> or <strong>Idle Speed Aim</strong> — the ECU's target idle RPM. If missing, defaults to 750–900 RPM.</li>
+      <li><strong>Inlet Manifold Pressure (MAP)</strong> — for manifold pressure correlation during events</li>
+      <li><strong>Coolant Temperature</strong> — enables temperature-based correlation (cold/warm/hot hang rates)</li>
+      <li><strong>Idle Mass Flow</strong> — actual idle air mass flow for diagnosing air control issues</li>
+      <li><strong>Idle Mass Flow Feed Forward</strong> — the ECU's predicted idle air requirement. Comparing actual vs. feed forward reveals calibration errors.</li>
+    </ul>
+
+    <h2 id="detection">Event Detection Logic</h2>
+    <p>The tool identifies deceleration events using these criteria:</p>
+
+    <h3>Event Start Conditions (all must be true simultaneously)</h3>
+    <ul>
+      <li>Clutch is pressed (position &gt; 0)</li>
+      <li>Throttle position is below 1%</li>
+      <li>RPM was above 1500 within the previous 1 second (confirms the engine was driving, not already at idle)</li>
+    </ul>
+
+    <h3>Event End Conditions (any one triggers end)</h3>
+    <ul>
+      <li><strong>Settled:</strong> RPM stays within 100 RPM of idle aim for 2+ consecutive seconds</li>
+      <li><strong>Throttle opened:</strong> driver applies throttle (≥ 1%)</li>
+      <li><strong>Clutch released:</strong> clutch pedal released (value drops to 0)</li>
+    </ul>
+
+    <div class="example-box">
+      <p><strong>Typical decel event:</strong></p>
+      <p>1. Driver shifts gear → clutch pressed, throttle closed</p>
+      <p>2. RPM drops from 4000 → 1200 → 800 → settles at idle aim (750)</p>
+      <p>3. Event ends when RPM holds within 100 RPM of 750 for 2 seconds</p>
+      <p>4. Settle time = time from event start until RPM first reaches the idle aim range</p>
+    </div>
+
+    <h2 id="hang">Idle Hang Classification</h2>
+    <p>A decel event is classified as "idle hang" if:</p>
+    <div class="example-box">
+      <p><code>RPM stays more than 200 RPM above idle aim for more than 3 consecutive seconds</code></p>
+    </div>
+    <p>This means the engine is holding RPM elevated well above the target for an extended period after the driver has released the throttle and pressed the clutch — the classic "idle hang" symptom.</p>
+
+    <h3>What Causes Idle Hang</h3>
+    <ul>
+      <li><strong>Idle mass flow feed forward too high</strong> — the ECU predicts more air is needed than actually required, holding the throttle blade open too far during decel</li>
+      <li><strong>Dashpot / decel rate too slow</strong> — the ECU intentionally slows the RPM drop to prevent stalling, but the rate is calibrated too conservatively</li>
+      <li><strong>Idle speed control integral term</strong> — if the integral term wound up during driving, it takes time to unwind during decel</li>
+      <li><strong>IACV (Idle Air Control Valve) sticking</strong> — mechanical issue preventing the air bypass from closing quickly</li>
+      <li><strong>Vacuum leaks</strong> — unmetered air entering the manifold holds RPM up</li>
+      <li><strong>Cold engine calibration</strong> — higher idle targets and slower control response when cold</li>
+    </ul>
+
+    <h2 id="reports">Report Sections</h2>
+
+    <h3>Idle Behavior Summary</h3>
+    <p>Key statistics at a glance:</p>
+    <ul>
+      <li><strong>Decel Events</strong> — total number of deceleration events detected in the log</li>
+      <li><strong>Idle Hangs</strong> — count and percentage of events classified as hang</li>
+      <li><strong>Normal Settles</strong> — events that settled to idle without hanging</li>
+      <li><strong>Avg Settle Time</strong> — mean time from decel start to reaching idle aim range</li>
+      <li><strong>Worst Settle Time</strong> — longest settle time observed (flags if &gt; 5 seconds)</li>
+      <li><strong>Avg Hang RPM</strong> — average RPM during hang events (how high it holds)</li>
+    </ul>
+
+    <h3>Diagnostic Messages</h3>
+    <p>Severity-coded messages interpreting the results:</p>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Severity</th><th>Condition</th><th>Meaning</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="highlight">Healthy</td><td>0 hang events</td><td>All decel events settled normally — idle control is working well</td></tr>
+        <tr><td style="color:#ff9800;font-weight:600;">Warning</td><td>Worst settle &gt; 5s</td><td>At least one event took unusually long to settle — review idle control parameters</td></tr>
+        <tr><td style="color:#ff9800;font-weight:600;">Warning</td><td>Avg settle &gt; 3s</td><td>Overall settle time is elevated — idle mass flow feed forward may need adjustment</td></tr>
+        <tr><td style="color:#ff9800;font-weight:600;">Warning</td><td>High cold hang rate</td><td>Hang occurs primarily when cold — cold start idle calibration needs attention</td></tr>
+        <tr><td style="color:#f44336;font-weight:600;">Severe</td><td>Hang events detected</td><td>Idle hang is occurring — investigate causes listed above</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Coolant Temperature Correlation</h3>
+    <p>Breaks down decel events and hang rate by engine temperature:</p>
+    <ul>
+      <li><strong>Cold (&lt; 60°C)</strong> — engine warming up, higher idle targets expected</li>
+      <li><strong>Warm (60–85°C)</strong> — normal operating temperature</li>
+      <li><strong>Hot (&gt; 85°C)</strong> — fully warmed, possibly heat-soaked</li>
+    </ul>
+    <p>If hang rate is significantly higher when cold, the cold-start idle calibration (higher idle aim, slower decel rate, more feed-forward air) likely needs adjustment.</p>
+
+    <h2 id="charts">Charts</h2>
+
+    <h3>Full RPM Timeline</h3>
+    <p>Shows engine RPM across the entire log with idle aim overlaid. Decel events are highlighted. Gives you the big picture of when and where idle behavior occurs during the session.</p>
+
+    <h3>Decel Event Overlay</h3>
+    <p>All detected decel events time-aligned to their start point and overlaid on the same chart. Hang events are colored differently from normal settles. This reveals whether hang is consistent (all events look similar) or intermittent (only some events hang).</p>
+
+    <h3>Settle Time Distribution</h3>
+    <p>Histogram of settle times across all events. A tight distribution around 1–2 seconds is healthy. A long tail or bimodal distribution suggests inconsistent idle control behavior.</p>
+
+    <h3>MAP During Events</h3>
+    <p>Manifold pressure traces during hang events vs. normal events. Higher MAP during hang suggests more air is entering the manifold than needed — points to feed-forward calibration or throttle blade position issues.</p>
+
+    <h3>Mass Flow Comparison</h3>
+    <p>Compares idle mass flow (actual) and idle mass flow feed forward between hang and normal events. If feed forward is higher during hang events, the ECU is commanding too much air. If actual mass flow is higher than feed forward, there may be an unmetered air source (vacuum leak).</p>
+
+    <h2 id="motec-idle">MoTeC M1 Idle Control Parameters</h2>
+
+    <h3>Key Parameters Affecting Idle Settle Behavior</h3>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Parameter</th><th>Effect on Settle</th><th>Adjustment Direction</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Idle Mass Flow Feed Forward</td><td>Determines initial air during decel</td><td>Reduce if RPM hangs high; increase if engine stalls</td></tr>
+        <tr><td>Idle Speed Aim</td><td>Target RPM the controller seeks</td><td>Lower for faster settle (but risk stalling)</td></tr>
+        <tr><td>Idle Speed Control P Gain</td><td>How aggressively controller responds to RPM error</td><td>Increase for faster response; decrease if oscillating</td></tr>
+        <tr><td>Idle Speed Control I Gain</td><td>How quickly integral term corrects steady-state error</td><td>Increase for tighter hold; decrease if overshooting</td></tr>
+        <tr><td>Idle Speed Control D Gain</td><td>Damping of RPM oscillations</td><td>Increase if RPM oscillates around aim; decrease if sluggish</td></tr>
+        <tr><td>Decel Dashpot Rate</td><td>How fast RPM is allowed to drop during decel</td><td>Increase (faster drop) to reduce hang; decrease to prevent stalling</td></tr>
+        <tr><td>Decel Dashpot Threshold</td><td>RPM above idle aim where dashpot activates</td><td>Lower threshold = dashpot releases sooner</td></tr>
+        <tr><td>Idle Mass Flow Integral Limit</td><td>Maximum correction the integral term can apply</td><td>Reduce if integral wind-up causes hang after driving</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Common M1 Idle Tuning Adjustments</h3>
+    <div class="example-box">
+      <p><strong>Problem:</strong> RPM hangs at 1200 for 4 seconds after every shift</p>
+      <p><strong>Diagnosis:</strong> Feed forward too high, dashpot too slow</p>
+      <p><strong>Fix:</strong></p>
+      <p>1. Reduce Idle Mass Flow Feed Forward by 10–15% in the affected coolant temp range</p>
+      <p>2. Increase Decel Dashpot Rate (allow RPM to drop faster)</p>
+      <p>3. Verify Idle Speed Control I Gain isn't wound up — reduce integral limit if needed</p>
+    </div>
+
+    <div class="example-box">
+      <p><strong>Problem:</strong> Engine stalls on decel (RPM drops too fast)</p>
+      <p><strong>Diagnosis:</strong> Feed forward too low, dashpot too aggressive</p>
+      <p><strong>Fix:</strong></p>
+      <p>1. Increase Idle Mass Flow Feed Forward by 5–10%</p>
+      <p>2. Decrease Decel Dashpot Rate (slow the RPM drop)</p>
+      <p>3. Increase P Gain slightly for faster recovery when RPM undershoots</p>
+    </div>
+
+    <div class="warning">
+      <strong>Balance:</strong> Idle control is a trade-off between fast settle (no hang) and stability (no stall). Make small changes (5–10% per iteration) and re-log to verify. Aggressive changes can cause oscillation or stalling.
+    </div>
+
+    <h2 id="tuning-workflow">Tuning Workflow</h2>
+    <ol>
+      <li><strong>Baseline log:</strong> Drive a session with multiple decel events at various temperatures. Include cold start if possible.</li>
+      <li><strong>Analyze:</strong> Load the log and review the summary. Note hang rate, settle times, and temperature correlation.</li>
+      <li><strong>Identify the pattern:</strong>
+        <ul>
+          <li>Hang only when cold → adjust cold-start feed forward and idle aim</li>
+          <li>Hang at all temperatures → feed forward or dashpot calibration issue</li>
+          <li>Intermittent hang → possible integral wind-up or mechanical issue (IACV)</li>
+        </ul>
+      </li>
+      <li><strong>Adjust parameters:</strong> Make targeted changes based on the diagnosis (see table above).</li>
+      <li><strong>Re-log and verify:</strong> Drive the same conditions. Re-analyze. Hang rate should decrease and settle times should improve.</li>
+      <li><strong>Iterate:</strong> Repeat until hang rate is 0% and average settle time is under 2 seconds at operating temperature.</li>
+    </ol>
+
+    <div class="tip">
+      <strong>Pro tip:</strong> Log the Idle Mass Flow and Idle Mass Flow Feed Forward channels. Comparing these during hang events vs. normal events immediately reveals whether the ECU is commanding too much air (feed forward issue) or whether unmetered air is entering (vacuum leak / mechanical issue).
+    </div>
+
+  </div>
+</body>
+</html>

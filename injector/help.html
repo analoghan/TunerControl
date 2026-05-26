@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Injector Characterization — Help</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .help-content {
+      line-height: 1.7;
+    }
+    .help-content h2 {
+      color: #E31837;
+      margin-top: 32px;
+      margin-bottom: 8px;
+      font-size: 1.3rem;
+      border-bottom: 1px solid #333333;
+      padding-bottom: 6px;
+    }
+    .help-content h3 {
+      color: #ffffff;
+      margin-top: 20px;
+      margin-bottom: 6px;
+      font-size: 1.05rem;
+    }
+    .help-content p, .help-content li {
+      color: #cccccc;
+      font-size: 0.95rem;
+    }
+    .help-content ul, .help-content ol {
+      padding-left: 20px;
+    }
+    .help-content li {
+      margin-bottom: 6px;
+    }
+    .help-content code {
+      background: #222222;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 0.9em;
+      color: #ff9800;
+    }
+    .help-content .example-box {
+      background: #111111;
+      border: 1px solid #333333;
+      border-radius: 6px;
+      padding: 16px;
+      margin: 12px 0;
+    }
+    .help-content .example-box p {
+      margin: 4px 0;
+    }
+    .help-content .tip {
+      background: rgba(76, 175, 80, 0.1);
+      border-left: 3px solid #4caf50;
+      padding: 10px 14px;
+      margin: 12px 0;
+      border-radius: 0 4px 4px 0;
+    }
+    .help-content .warning {
+      background: rgba(255, 152, 0, 0.1);
+      border-left: 3px solid #ff9800;
+      padding: 10px 14px;
+      margin: 12px 0;
+      border-radius: 0 4px 4px 0;
+    }
+    .help-content .danger {
+      background: rgba(244, 67, 54, 0.1);
+      border-left: 3px solid #f44336;
+      padding: 10px 14px;
+      margin: 12px 0;
+      border-radius: 0 4px 4px 0;
+    }
+    .toc {
+      background: #111111;
+      border: 1px solid #333333;
+      border-radius: 6px;
+      padding: 16px 24px;
+      margin-bottom: 24px;
+    }
+    .toc ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      columns: 2;
+    }
+    .toc li {
+      margin-bottom: 6px;
+    }
+    .toc a {
+      color: #E31837;
+      text-decoration: none;
+    }
+    .toc a:hover {
+      text-decoration: underline;
+    }
+    .freq-table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 12px 0;
+      font-size: 0.9rem;
+    }
+    .freq-table th, .freq-table td {
+      padding: 8px 12px;
+      border: 1px solid #333333;
+      text-align: center;
+    }
+    .freq-table thead th {
+      background: #222222;
+      color: #ffffff;
+      font-weight: 600;
+    }
+    .freq-table tbody tr:nth-child(even) {
+      background: #111111;
+    }
+    .freq-table tbody td {
+      color: #cccccc;
+    }
+    .freq-table .highlight {
+      color: #4caf50;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html" aria-label="Back to Injector Characterization">&larr; Back to Injector Characterization</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Injector Characterization — Help</h1>
+    <p>This tool analyzes MoTeC log data to characterize direct injection (DI) injector behavior, identify lean spike events, evaluate fuel pressure stability, and diagnose common DI fueling issues on the GM LT4 and similar engines.</p>
+
+    <nav class="toc">
+      <ul>
+        <li><a href="#quick-start">Quick Start</a></li>
+        <li><a href="#inputs">Input Requirements</a></li>
+        <li><a href="#reports">Report Sections</a></li>
+        <li><a href="#charts">Charts</a></li>
+        <li><a href="#lt4-di">GM LT4 DI-Specific Guidance</a></li>
+        <li><a href="#tuning-workflow">Tuning Workflow</a></li>
+        <li><a href="#diagnostics">Interpreting Diagnostics</a></li>
+      </ul>
+    </nav>
+
+    <!-- Quick Start -->
+    <h2 id="quick-start">Quick Start</h2>
+    <ol>
+      <li>Load a MoTeC log file (.csv export or raw .ld) that contains lambda and engine speed channels.</li>
+      <li>Click <strong>Analyze</strong>.</li>
+      <li>Review the generated reports: lean spike analysis, pulse width stability, fuel pressure, injection timing, and closed-loop trim diagnostics.</li>
+    </ol>
+    <div class="tip">
+      <strong>Tip:</strong> For the most comprehensive analysis, include injector pulse width, DI fuel pressure, injection timing, and closed-loop trim channels in your log. The tool adapts its output based on which channels are available.
+    </div>
+
+    <!-- Input Requirements -->
+    <h2 id="inputs">Input Requirements</h2>
+    <h3>Required Channels</h3>
+    <ul>
+      <li><strong>Engine Speed</strong> — RPM for binning, correlation, and RPM distribution analysis</li>
+      <li><strong>Lambda (at least one)</strong> — Bank 1 Lambda, Bank 2 Lambda, or Average Lambda. At least one lambda channel must be present for lean spike detection.</li>
+    </ul>
+
+    <h3>Optional Channels (enhance analysis)</h3>
+    <ul>
+      <li><strong>Injector Pulse Width</strong> — DI injector on-time in milliseconds. Enables pulse width stability analysis and XDI instability detection.</li>
+      <li><strong>Injection Timing</strong> — injection event timing in degrees BTDC. Enables timing window analysis and correlation with lean spikes.</li>
+      <li><strong>DI Fuel Pressure</strong> — actual high-pressure fuel rail pressure in bar. Enables pressure stability and HPFP degradation analysis.</li>
+      <li><strong>DI Fuel Pressure Aim</strong> — ECU target fuel pressure in bar. Enables pressure error calculation and aim tracking.</li>
+      <li><strong>CL Trim Bank 1</strong> — closed-loop fuel trim for Bank 1 (%). Enables per-bank VE error detection.</li>
+      <li><strong>CL Trim Bank 2</strong> — closed-loop fuel trim for Bank 2 (%). Enables per-bank VE error detection.</li>
+      <li><strong>Throttle Position</strong> — TPS for operating condition context.</li>
+      <li><strong>Inlet Manifold Pressure (MAP)</strong> — manifold pressure in kPa for load correlation.</li>
+      <li><strong>Coolant Temperature</strong> — engine coolant temp for thermal condition filtering.</li>
+      <li><strong>Intake Air Temperature (IAT)</strong> — charge air temperature for density correction context.</li>
+      <li><strong>Fuel Mixture Aim</strong> — target lambda/AFR for comparison against actual lambda.</li>
+    </ul>
+
+    <div class="warning">
+      <strong>Note:</strong> The tool requires Engine Speed and at least one Lambda channel to produce any output. All other channels are optional — the tool will generate whichever report sections are possible given the available data.
+    </div>
+
+    <!-- Report Sections -->
+    <h2 id="reports">Report Sections</h2>
+
+    <h3>Lean Spike Analysis</h3>
+    <p>Identifies samples where lambda exceeds <code>1.06</code> (lean of stoichiometric target). The analysis includes:</p>
+    <ul>
+      <li><strong>Event count</strong> — total number of lean spike samples detected</li>
+      <li><strong>Bank categorization</strong> — whether lean spikes occur on Bank 1 only, Bank 2 only, or both banks simultaneously</li>
+      <li><strong>Low PW correlation</strong> — percentage of lean spikes that coincide with low injector pulse width (near the XDI instability threshold)</li>
+      <li><strong>RPM distribution</strong> — which RPM ranges see the most lean spikes, helping identify idle/cruise vs. WOT issues</li>
+    </ul>
+    <div class="example-box">
+      <p><strong>Example output:</strong></p>
+      <p><code>Lean spikes detected: 142 samples (2.3% of log)</code></p>
+      <p><code>Bank 1 only: 38% | Bank 2 only: 12% | Both banks: 50%</code></p>
+      <p><code>Correlated with low PW (&lt;0.8ms): 67%</code></p>
+    </div>
+
+    <h3>Injector Pulsewidth Stability</h3>
+    <p>Statistical analysis of injector pulse width behavior:</p>
+    <ul>
+      <li><strong>Mean, median, std deviation</strong> — overall PW statistics across the log</li>
+      <li><strong>XDI instability threshold</strong> — flags samples where PW falls below <code>0.8 ms</code>, the approximate minimum for stable DI atomization</li>
+      <li><strong>5th percentile diagnostic</strong> — reports the PW value at the 5th percentile. If this is below 0.8 ms, a significant portion of operation is in the instability zone</li>
+      <li><strong>Time-in-zone</strong> — percentage of the log spent below the instability threshold</li>
+    </ul>
+    <div class="warning">
+      <strong>XDI Instability Zone:</strong> Direct injection injectors require a minimum pulse width (~0.8 ms) to properly atomize fuel. Below this threshold, fuel delivery becomes erratic — the injector may deliver inconsistent fuel mass or fail to open fully, causing lean misfires.
+    </div>
+
+    <h3>DI Fuel Pressure</h3>
+    <p>Analysis of the high-pressure fuel system (requires DI Fuel Pressure channel):</p>
+    <ul>
+      <li><strong>Pressure statistics</strong> — mean, min, max, and standard deviation in bar</li>
+      <li><strong>Error vs aim</strong> — if DI Fuel Pressure Aim is available, calculates the deviation between actual and target pressure</li>
+      <li><strong>Lean spike correlation</strong> — percentage of lean spikes that coincide with low fuel pressure or large pressure error</li>
+      <li><strong>HPFP degradation warnings</strong> — flags conditions suggesting high-pressure fuel pump wear: sustained pressure below aim, increasing pressure error at high RPM, or inability to maintain target pressure under load</li>
+    </ul>
+    <div class="danger">
+      <strong>HPFP Warning:</strong> If the tool reports sustained pressure error &gt;10 bar below aim at high RPM/load, this may indicate HPFP cam lobe wear or pump internals degradation. This is a progressive failure — address it before it causes lean conditions under boost.
+    </div>
+
+    <h3>Injection Timing</h3>
+    <p>Analysis of injection event timing (requires Injection Timing channel):</p>
+    <ul>
+      <li><strong>Optimal window</strong> — identifies what percentage of injection events fall within the preferred <code>240–320 dBTDC</code> intake stroke window</li>
+      <li><strong>Compression stroke injection</strong> — flags events below <code>180 dBTDC</code>, which indicates late/compression stroke injection (used for stratified charge but problematic if unintended)</li>
+      <li><strong>Lean spike timing correlation</strong> — shows the timing distribution during lean spike events vs. normal operation</li>
+      <li><strong>RPM-dependent timing</strong> — how injection timing varies with engine speed</li>
+    </ul>
+
+    <h3>Closed-Loop Fuel Trim</h3>
+    <p>Per-bank analysis of closed-loop fuel trim behavior (requires CL Trim Bank 1 and/or Bank 2):</p>
+    <ul>
+      <li><strong>Per-bank mean and standard deviation</strong> — average trim offset and variability for each bank</li>
+      <li><strong>VE error detection</strong> — flags when <code>|mean trim| &gt; 5%</code>, indicating the VE table is consistently over- or under-predicting airflow</li>
+      <li><strong>Inconsistent fueling</strong> — flags when <code>trim std &gt; 4%</code>, indicating the fuel system is hunting or unstable</li>
+      <li><strong>Bank-to-bank comparison</strong> — large differences between banks suggest injector imbalance, intake manifold issues, or sensor problems</li>
+    </ul>
+    <div class="tip">
+      <strong>Tip:</strong> A consistent positive trim (e.g., +6%) means the ECU is adding fuel to compensate for a lean condition — your VE table is under-predicting airflow in that region. A negative trim means the opposite. Use this to guide VE table corrections.
+    </div>
+
+    <!-- Charts -->
+    <h2 id="charts">Charts</h2>
+
+    <h3>Lambda Time Series</h3>
+    <p>Plots lambda values over time for all available banks. Lean spikes appear as upward excursions above the 1.06 threshold line. Use this to see whether lean events are transient spikes or sustained lean conditions, and whether they correlate with specific driving events.</p>
+
+    <h3>Pulse Width Time Series</h3>
+    <p>Injector pulse width over time with the 0.8 ms XDI instability threshold marked. Helps identify when the engine enters the instability zone — typically at idle, deceleration, or light-load cruise. Look for correlation between PW dips and lean spikes on the lambda chart.</p>
+
+    <h3>Lambda vs Pulse Width Scatter</h3>
+    <p>Scatter plot of lambda against injector pulse width. The key diagnostic chart for DI instability — you should see lean spikes clustering at low pulse widths (below 0.8 ms). If lean spikes occur across all pulse widths, the issue is likely fuel pressure or VE table related rather than injector minimum PW.</p>
+
+    <h3>Fuel Pressure Time Series</h3>
+    <p>DI fuel rail pressure over time, with the aim pressure overlaid if available. Look for:</p>
+    <ul>
+      <li>Pressure drops that correlate with lean spikes</li>
+      <li>Inability to reach aim pressure at high RPM (HPFP capacity issue)</li>
+      <li>Pressure oscillations (pump control instability)</li>
+    </ul>
+
+    <h3>Pulse Width Histogram</h3>
+    <p>Distribution of injector pulse width values across the log. Shows how much time is spent at various PW levels. A large portion of the distribution below 0.8 ms indicates the engine frequently operates in the XDI instability zone — consider raising idle airflow or adjusting fuel pressure targets to increase PW.</p>
+
+    <h3>Lambda-RPM Density</h3>
+    <p>2D density plot showing lambda values across the RPM range. Identifies which RPM bands have the most lean excursions. Useful for distinguishing idle lean spikes (low RPM) from tip-in lean spikes (mid RPM) from high-load issues (high RPM).</p>
+
+    <h3>Injection Timing vs RPM</h3>
+    <p>Scatter plot of injection timing (dBTDC) against engine speed. Shows how the ECU schedules injection events across the RPM range. The optimal 240–320 dBTDC window is highlighted. Points outside this window at unexpected RPM ranges may indicate timing table issues.</p>
+
+    <!-- GM LT4 DI-Specific Guidance -->
+    <h2 id="lt4-di">GM LT4 DI-Specific Guidance</h2>
+
+    <h3>XDI (Extreme Direct Injection) Injector Characteristics</h3>
+    <p>The LT4 uses GM's XDI (Extreme Direct Injection) system with solenoid-actuated, multi-hole injectors operating at pressures up to 200 bar. Key characteristics:</p>
+    <ul>
+      <li><strong>Multi-hole nozzle design</strong> — produces a structured spray pattern optimized for the combustion chamber geometry</li>
+      <li><strong>High-speed solenoid actuation</strong> — enables multiple injection events per combustion cycle (pilot + main + post)</li>
+      <li><strong>Pressure-dependent flow</strong> — fuel mass delivered depends on both pulse width AND rail pressure (unlike port injection where flow is primarily PW-dependent)</li>
+      <li><strong>Minimum operating pulse width</strong> — below ~0.8 ms, the injector needle may not fully open or the spray pattern degrades, causing poor atomization and inconsistent fuel delivery</li>
+    </ul>
+
+    <h3>Minimum Pulse Width Considerations</h3>
+    <p>DI injectors have a more critical minimum pulse width than port injectors due to the high-pressure environment and spray pattern requirements:</p>
+    <table class="freq-table">
+      <thead>
+        <tr><th>PW Range</th><th>Behavior</th><th>Concern Level</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>&gt; 1.2 ms</td><td>Normal operation, full atomization</td><td class="highlight">None</td></tr>
+        <tr><td>0.8 – 1.2 ms</td><td>Marginal zone, atomization may degrade</td><td>Low — monitor</td></tr>
+        <tr><td>0.5 – 0.8 ms</td><td>XDI instability zone, erratic fuel delivery</td><td>High — lean spikes likely</td></tr>
+        <tr><td>&lt; 0.5 ms</td><td>Injector may not open, severe lean risk</td><td style="color: #f44336; font-weight: 600;">Critical</td></tr>
+      </tbody>
+    </table>
+    <div class="tip">
+      <strong>Tip:</strong> If your engine spends significant time below 0.8 ms PW at idle, consider increasing idle airflow (higher idle RPM or more throttle opening) or reducing fuel pressure aim at idle to force longer pulse widths. The trade-off is slightly higher fuel consumption at idle vs. stable combustion.
+    </div>
+
+    <h3>Fuel Pressure Targets for DI Systems</h3>
+    <p>The LT4 HPFP (High-Pressure Fuel Pump) is cam-driven and varies pressure with load demand:</p>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Operating Condition</th><th>Typical Pressure (bar)</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Idle / Light Load</td><td>50 – 100</td><td>Lower pressure to allow longer PW for stability</td></tr>
+        <tr><td>Part Throttle / Cruise</td><td>100 – 150</td><td>Balanced for efficiency and response</td></tr>
+        <tr><td>Full Load / Boost</td><td>150 – 200</td><td>Maximum pressure for peak fuel delivery</td></tr>
+        <tr><td>Transient (Tip-in)</td><td>Rapidly rising</td><td>HPFP must respond quickly; lag causes lean spikes</td></tr>
+      </tbody>
+    </table>
+    <div class="warning">
+      <strong>Pressure vs. Pulse Width Trade-off:</strong> Higher rail pressure delivers more fuel per millisecond of injector opening. This means at high pressure, the same fuel mass requires a shorter pulse width. At idle with high pressure, PW can drop into the instability zone. The ECU's fuel pressure aim table should reduce pressure at idle/light load to keep PW above the minimum threshold.
+    </div>
+
+    <h3>Injection Timing</h3>
+    <p>DI injection timing is specified in degrees Before Top Dead Center (dBTDC) and determines when fuel enters the cylinder relative to the piston position:</p>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Timing Window</th><th>Stroke</th><th>Charge Type</th><th>Usage</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="highlight">240 – 320 dBTDC</td><td>Intake stroke</td><td>Homogeneous</td><td>Preferred for most operating conditions — fuel mixes thoroughly with air</td></tr>
+        <tr><td>180 – 240 dBTDC</td><td>Late intake / early compression</td><td>Semi-homogeneous</td><td>Acceptable at high RPM where mixing time is limited</td></tr>
+        <tr><td>&lt; 180 dBTDC</td><td>Compression stroke</td><td>Stratified</td><td>Used for ultra-lean stratified combustion (not typical for LT4 tuning)</td></tr>
+      </tbody>
+    </table>
+    <div class="tip">
+      <strong>Intake stroke injection (240–320 dBTDC)</strong> is preferred for the LT4 because it provides maximum time for fuel-air mixing before ignition, resulting in a homogeneous charge that burns cleanly and predictably. Compression stroke injection is used in some GDI engines for stratified lean-burn modes but is not the normal operating mode for the supercharged LT4.
+    </div>
+
+    <h3>Common Failure Modes</h3>
+    <ul>
+      <li><strong>HPFP degradation</strong> — the cam-driven high-pressure pump wears over time, especially on modified engines with higher fuel demand. Symptoms: pressure drops below aim at high RPM/load, increasing lean spikes under boost, audible pump noise changes.</li>
+      <li><strong>Injector coking</strong> — carbon deposits on injector tips restrict spray pattern and reduce flow. Symptoms: gradual increase in lean spikes, bank-to-bank lambda imbalance, increasing CL trim offsets over time.</li>
+      <li><strong>Low-PW lean spikes at idle/light load</strong> — the most common DI issue. The ECU commands very short pulse widths at idle, pushing injectors into the instability zone. Symptoms: intermittent lean spikes at idle, rough idle, occasional misfires at light load.</li>
+      <li><strong>Fuel pressure transient lag</strong> — during rapid throttle application, the HPFP cannot increase pressure fast enough. Symptoms: lean spikes during tip-in, pressure dip visible on fuel pressure chart during transients.</li>
+      <li><strong>Injector seal leakage</strong> — high-pressure seals degrade, causing fuel to leak past the injector body. Symptoms: fuel smell, single-cylinder lean condition, visible fuel residue around injector bore.</li>
+    </ul>
+
+    <div class="danger">
+      <strong>Safety:</strong> Sustained lean conditions under boost on the supercharged LT4 can cause catastrophic piston damage. If the tool identifies consistent lean spikes above 3000 RPM with boost, address the root cause before continuing to drive at high load. Common causes are HPFP capacity limits on modified engines or fuel pressure aim tables that are too aggressive.
+    </div>
+
+    <!-- Tuning Workflow -->
+    <h2 id="tuning-workflow">Tuning Workflow</h2>
+    <ol>
+      <li><strong>Baseline analysis:</strong> Log a session covering idle, cruise, part-throttle, and WOT. Load into this tool and analyze to establish the current state of injector behavior.</li>
+      <li><strong>Identify lean spikes:</strong> Review the Lean Spike Analysis report. Note the bank distribution, RPM range, and correlation with low PW.</li>
+      <li><strong>Check PW stability:</strong> Review the Pulse Width Stability report. If significant time is spent below 0.8 ms, this is likely the root cause of lean spikes at idle/light load.</li>
+      <li><strong>Verify fuel pressure:</strong> Check the DI Fuel Pressure report. Ensure pressure tracks aim across all conditions. Flag any HPFP degradation warnings.</li>
+      <li><strong>Review timing:</strong> Check injection timing distribution. Ensure most events fall in the 240–320 dBTDC intake stroke window.</li>
+      <li><strong>Adjust VE/fuel tables:</strong> Based on CL trim analysis, correct VE table regions where trim offsets exceed ±5%. Adjust fuel pressure aim to keep PW above 0.8 ms at idle.</li>
+      <li><strong>Re-log and verify:</strong> After changes, log another session and re-analyze. Lean spike count should decrease and CL trims should center closer to 0%.</li>
+    </ol>
+    <div class="example-box">
+      <p><strong>Typical workflow iteration:</strong></p>
+      <p>1. Baseline: 142 lean spikes, 67% correlated with low PW</p>
+      <p>2. Reduce fuel pressure aim at idle from 120 bar → 80 bar (increases PW)</p>
+      <p>3. Re-log: 23 lean spikes, 30% correlated with low PW</p>
+      <p>4. Adjust VE table in idle region (+4% based on CL trim)</p>
+      <p>5. Re-log: 5 lean spikes, within acceptable range</p>
+    </div>
+
+    <!-- Interpreting Diagnostics -->
+    <h2 id="diagnostics">Interpreting Diagnostics</h2>
+
+    <h3>What "Both Banks Lean" Means vs. Single Bank</h3>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Pattern</th><th>Likely Cause</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Both banks lean simultaneously</td>
+          <td>System-wide issue: low fuel pressure, VE table error, or fuel pressure aim too high (causing low PW)</td>
+          <td>Check fuel pressure, review VE table, lower pressure aim at affected RPM/load</td>
+        </tr>
+        <tr>
+          <td>Bank 1 only</td>
+          <td>Bank-specific issue: injector coking on Bank 1, intake manifold imbalance, or Bank 1 injector failure</td>
+          <td>Compare CL trims between banks, inspect Bank 1 injectors, check intake runner balance</td>
+        </tr>
+        <tr>
+          <td>Bank 2 only</td>
+          <td>Same as above but for Bank 2</td>
+          <td>Same diagnostic approach for Bank 2</td>
+        </tr>
+        <tr>
+          <td>Alternating banks</td>
+          <td>Possible sensor issue or intermittent fuel pressure fluctuation</td>
+          <td>Verify lambda sensor health, check for fuel pressure oscillations</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>XDI Instability Zone Explanation</h3>
+    <p>The "XDI instability zone" refers to the pulse width range below <code>0.8 ms</code> where direct injection injectors cannot reliably atomize fuel. This is a fundamental physical limitation:</p>
+    <ul>
+      <li>The injector solenoid requires a minimum energization time to fully lift the needle off its seat</li>
+      <li>Below this time, the needle may only partially open, creating an irregular spray pattern</li>
+      <li>Partial needle lift reduces the effective flow area, making fuel delivery unpredictable</li>
+      <li>The high-pressure differential (100+ bar) means even small variations in needle lift cause large changes in delivered fuel mass</li>
+    </ul>
+    <div class="example-box">
+      <p><strong>Why 0.8 ms?</strong></p>
+      <p>The 0.8 ms threshold is empirically derived from GM XDI injector characterization data. It represents the approximate point where injector-to-injector variation in delivered fuel mass exceeds ±5% — enough to cause perceptible lambda fluctuations. Individual injectors may have slightly different thresholds due to manufacturing tolerances and wear.</p>
+    </div>
+
+    <h3>HPFP Warning Interpretation</h3>
+    <p>The tool generates HPFP (High-Pressure Fuel Pump) warnings based on these criteria:</p>
+    <ul>
+      <li><strong>"Pressure below aim"</strong> — actual rail pressure is consistently more than 10 bar below the ECU's target. The pump cannot keep up with demand. Causes: pump wear, insufficient low-pressure supply, cam lobe wear, or fuel demand exceeding pump capacity on modified engines.</li>
+      <li><strong>"Pressure error increases with RPM"</strong> — the gap between actual and aim pressure grows as engine speed increases. This is the classic signature of HPFP capacity limitation — the pump physically cannot cycle fast enough to maintain pressure at high RPM.</li>
+      <li><strong>"Pressure instability"</strong> — large standard deviation in fuel pressure (>5 bar) during steady-state operation. May indicate pump check valve issues, fuel line restrictions, or control system oscillation.</li>
+    </ul>
+    <div class="warning">
+      <strong>Modified engines:</strong> If you have increased injector size or raised boost levels, the stock HPFP may not have sufficient capacity. The tool's HPFP warnings are particularly important for modified applications — a pump that was adequate at stock power levels may be marginal or insufficient after modifications.
+    </div>
+
+    <h3>CL Trim Offset Meaning</h3>
+    <p>Closed-loop fuel trim represents the ECU's real-time correction to maintain target lambda. Interpreting the values:</p>
+    <table class="freq-table">
+      <thead>
+        <tr><th>Trim Value</th><th>Meaning</th><th>VE Table Action</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="highlight">-2% to +2%</td>
+          <td>Normal — VE table is accurate</td>
+          <td>No change needed</td>
+        </tr>
+        <tr>
+          <td>+3% to +5%</td>
+          <td>Slightly lean — VE table under-predicts airflow</td>
+          <td>Consider increasing VE in this region</td>
+        </tr>
+        <tr>
+          <td>-3% to -5%</td>
+          <td>Slightly rich — VE table over-predicts airflow</td>
+          <td>Consider decreasing VE in this region</td>
+        </tr>
+        <tr>
+          <td>&gt; +5%</td>
+          <td>Significantly lean — VE error needs correction</td>
+          <td style="color: #ff9800; font-weight: 600;">Increase VE by approximately the trim percentage</td>
+        </tr>
+        <tr>
+          <td>&lt; -5%</td>
+          <td>Significantly rich — VE error needs correction</td>
+          <td style="color: #ff9800; font-weight: 600;">Decrease VE by approximately the trim percentage</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="tip">
+      <strong>Trim standard deviation:</strong> A trim std &gt; 4% indicates the fuel system is "hunting" — the ECU is making large corrections back and forth. This can be caused by: a lambda sensor that is slow to respond, fuel pressure oscillations, or a VE table with sharp discontinuities between adjacent cells. Smooth the VE table in the affected region and verify sensor response time.
+    </div>
+
+    <div class="danger">
+      <strong>Important:</strong> CL trim corrections only work within the ECU's authority range (typically ±15–25%). If the VE error is larger than this, the ECU cannot fully compensate and the engine will run lean or rich despite closed-loop control. Always correct large VE errors in the table rather than relying on CL trim to compensate.
+    </div>
+
+  </div>
+</body>
+</html>
