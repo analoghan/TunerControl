@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lambda Fuel Conversion — TunerControl</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #ffffff;
+      background: #0a0a0a;
+    }
+
+    .app-container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px;
+      background: #1a1a1a;
+      border-radius: 8px;
+      border: 1px solid #333333;
+    }
+
+    .top-nav {
+      display: flex;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .top-nav a {
+      color: #E31837;
+      text-decoration: none;
+      font-size: 0.9rem;
+      margin-right: 16px;
+    }
+
+    .top-nav a:hover {
+      text-decoration: underline;
+      color: #ff2d4a;
+    }
+
+    .nav-logo {
+      height: 64px;
+      vertical-align: middle;
+      margin-left: auto;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.6rem;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .subtitle {
+      margin: 0 0 24px;
+      font-size: 0.95rem;
+      color: #b0b0b0;
+    }
+
+    /* Converter section */
+    .converter-section {
+      background: #111111;
+      border: 1px solid #333333;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+
+    .converter-section h2 {
+      margin: 0 0 12px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #E31837;
+    }
+
+    .converter-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .converter-row label {
+      color: #b0b0b0;
+      font-weight: 500;
+      min-width: 70px;
+    }
+
+    .converter-row input {
+      width: 120px;
+      padding: 8px 10px;
+      background: #222222;
+      border: 1px solid #333333;
+      border-radius: 4px;
+      color: #ffffff;
+      font-size: 0.95rem;
+      transition: border-color 0.2s;
+    }
+
+    .converter-row input:focus {
+      outline: none;
+      border-color: #E31837;
+    }
+
+    .converter-row .arrow {
+      color: #666666;
+      font-size: 1.2rem;
+      user-select: none;
+    }
+
+    .converter-row .result {
+      color: #4caf50;
+      font-weight: 600;
+      font-size: 0.95rem;
+      min-width: 80px;
+    }
+
+    /* Reference table */
+    .table-section {
+      margin-bottom: 24px;
+    }
+
+    .table-section h2 {
+      margin: 0 0 12px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #E31837;
+    }
+
+    .ref-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    .ref-table th,
+    .ref-table td {
+      padding: 8px 12px;
+      border: 1px solid #333333;
+      text-align: center;
+    }
+
+    .ref-table thead th {
+      background: #222222;
+      color: #ffffff;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+    }
+
+    .ref-table tbody tr:nth-child(even) {
+      background: #111111;
+    }
+
+    .ref-table tbody tr:nth-child(odd) {
+      background: #1a1a1a;
+    }
+
+    .ref-table .stoich {
+      background: rgba(76, 175, 80, 0.2);
+      color: #4caf50;
+      font-weight: 600;
+    }
+
+    .ref-table .rich {
+      color: #ff9800;
+    }
+
+    .ref-table .lean {
+      color: #64b5f6;
+    }
+
+    .fuel-info {
+      background: #111111;
+      border: 1px solid #333333;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 24px;
+    }
+
+    .fuel-info h3 {
+      margin: 0 0 8px;
+      color: #ffffff;
+      font-size: 1rem;
+    }
+
+    .fuel-info p {
+      margin: 4px 0;
+      color: #b0b0b0;
+      font-size: 0.9rem;
+    }
+
+    .fuel-info code {
+      background: #222222;
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: #ff9800;
+    }
+
+    .note {
+      font-size: 0.8rem;
+      color: #666666;
+      font-style: italic;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Calculators</a>
+      <a href="../index.html">Home</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Lambda Fuel Conversion</h1>
+    <p class="subtitle">Convert between Lambda, AFR, and equivalence ratio for different fuel types.</p>
+
+    <!-- Fuel stoich info -->
+    <div class="fuel-info">
+      <h3>Stoichiometric Reference Values</h3>
+      <p><strong>Gasoline:</strong> AFR <code>14.7:1</code> = Lambda <code>1.000</code></p>
+      <p><strong>E85:</strong> AFR <code>9.765:1</code> = Lambda <code>1.000</code></p>
+      <p class="note">Lambda is fuel-independent — Lambda 1.0 always means stoichiometric regardless of fuel type. AFR values differ because each fuel requires a different mass of air per unit of fuel.</p>
+    </div>
+
+    <!-- Interactive converter -->
+    <div class="converter-section">
+      <h2>Interactive Converter</h2>
+      <div class="converter-row">
+        <label for="conv-lambda">Lambda</label>
+        <input type="number" id="conv-lambda" step="any" value="1.0" />
+        <span class="arrow">→</span>
+        <label>Gasoline AFR</label>
+        <span class="result" id="conv-gas-afr">14.70</span>
+        <span class="arrow">|</span>
+        <label>E85 AFR</label>
+        <span class="result" id="conv-e85-afr">9.77</span>
+      </div>
+      <div class="converter-row">
+        <label for="conv-gas-input">Gas AFR</label>
+        <input type="number" id="conv-gas-input" step="any" placeholder="Enter AFR" />
+        <span class="arrow">→</span>
+        <label>Lambda</label>
+        <span class="result" id="conv-gas-lambda"></span>
+        <span class="arrow">|</span>
+        <label>E85 AFR</label>
+        <span class="result" id="conv-gas-to-e85"></span>
+      </div>
+      <div class="converter-row">
+        <label for="conv-e85-input">E85 AFR</label>
+        <input type="number" id="conv-e85-input" step="any" placeholder="Enter AFR" />
+        <span class="arrow">→</span>
+        <label>Lambda</label>
+        <span class="result" id="conv-e85-lambda"></span>
+        <span class="arrow">|</span>
+        <label>Gas AFR</label>
+        <span class="result" id="conv-e85-to-gas"></span>
+      </div>
+    </div>
+
+    <!-- Reference chart -->
+    <div class="table-section">
+      <h2>Lambda ↔ AFR Reference Chart</h2>
+      <div style="overflow-x: auto;">
+        <table class="ref-table" id="ref-table">
+          <thead>
+            <tr>
+              <th>Lambda</th>
+              <th>Gasoline AFR</th>
+              <th>E85 AFR</th>
+              <th>Condition</th>
+            </tr>
+          </thead>
+          <tbody id="ref-table-body">
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Common tuning targets -->
+    <div class="fuel-info">
+      <h3>Common Tuning Targets</h3>
+      <p><strong>WOT / Full Power (Gasoline):</strong> Lambda <code>0.82–0.88</code> (AFR 12.0–13.0)</p>
+      <p><strong>WOT / Full Power (E85):</strong> Lambda <code>0.82–0.88</code> (AFR 8.0–8.6)</p>
+      <p><strong>Cruise / Part Throttle:</strong> Lambda <code>1.00–1.05</code> (stoich or slightly lean)</p>
+      <p><strong>Lean Best Torque:</strong> Lambda <code>0.86–0.90</code> (AFR 12.6–13.2 gasoline)</p>
+      <p><strong>Cat Protection Limit:</strong> Lambda <code>&gt;1.10</code> — avoid sustained lean operation above this</p>
+    </div>
+
+  </div>
+
+  <script>
+    const STOICH_GAS = 14.7;
+    const STOICH_E85 = 9.765;
+
+    function round(val, decimals) {
+      const factor = Math.pow(10, decimals);
+      return Math.round(val * factor) / factor;
+    }
+
+    // --- Interactive converter ---
+
+    const convLambda = document.getElementById('conv-lambda');
+    const convGasAfr = document.getElementById('conv-gas-afr');
+    const convE85Afr = document.getElementById('conv-e85-afr');
+
+    const convGasInput = document.getElementById('conv-gas-input');
+    const convGasLambda = document.getElementById('conv-gas-lambda');
+    const convGasToE85 = document.getElementById('conv-gas-to-e85');
+
+    const convE85Input = document.getElementById('conv-e85-input');
+    const convE85Lambda = document.getElementById('conv-e85-lambda');
+    const convE85ToGas = document.getElementById('conv-e85-to-gas');
+
+    convLambda.addEventListener('input', () => {
+      const val = parseFloat(convLambda.value);
+      if (!isNaN(val)) {
+        convGasAfr.textContent = round(val * STOICH_GAS, 2);
+        convE85Afr.textContent = round(val * STOICH_E85, 2);
+      } else {
+        convGasAfr.textContent = '';
+        convE85Afr.textContent = '';
+      }
+    });
+
+    convGasInput.addEventListener('input', () => {
+      const val = parseFloat(convGasInput.value);
+      if (!isNaN(val)) {
+        const lambda = val / STOICH_GAS;
+        convGasLambda.textContent = round(lambda, 4);
+        convGasToE85.textContent = round(lambda * STOICH_E85, 2);
+      } else {
+        convGasLambda.textContent = '';
+        convGasToE85.textContent = '';
+      }
+    });
+
+    convE85Input.addEventListener('input', () => {
+      const val = parseFloat(convE85Input.value);
+      if (!isNaN(val)) {
+        const lambda = val / STOICH_E85;
+        convE85Lambda.textContent = round(lambda, 4);
+        convE85ToGas.textContent = round(lambda * STOICH_GAS, 2);
+      } else {
+        convE85Lambda.textContent = '';
+        convE85ToGas.textContent = '';
+      }
+    });
+
+    // --- Reference table generation ---
+
+    const lambdaValues = [
+      0.75, 0.78, 0.80, 0.82, 0.84, 0.85, 0.86, 0.88,
+      0.90, 0.92, 0.94, 0.95, 0.96, 0.98,
+      1.00,
+      1.02, 1.04, 1.05, 1.06, 1.08, 1.10, 1.12, 1.15, 1.20
+    ];
+
+    const tbody = document.getElementById('ref-table-body');
+
+    lambdaValues.forEach(lambda => {
+      const tr = document.createElement('tr');
+      const gasAfr = round(lambda * STOICH_GAS, 2);
+      const e85Afr = round(lambda * STOICH_E85, 2);
+
+      let condition, condClass;
+      if (lambda < 0.99) {
+        condition = 'Rich';
+        condClass = 'rich';
+      } else if (lambda > 1.01) {
+        condition = 'Lean';
+        condClass = 'lean';
+      } else {
+        condition = 'Stoichiometric';
+        condClass = 'stoich';
+      }
+
+      const isStoich = lambda === 1.00;
+      const rowClass = isStoich ? 'stoich' : '';
+
+      tr.innerHTML = `
+        <td class="${rowClass}">${lambda.toFixed(2)}</td>
+        <td class="${rowClass}">${gasAfr}</td>
+        <td class="${rowClass}">${e85Afr}</td>
+        <td class="${condClass}">${condition}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  </script>
+</body>
+</html>

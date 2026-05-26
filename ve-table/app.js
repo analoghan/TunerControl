@@ -717,9 +717,9 @@ function copyCurrentTableToClipboard() {
     if (!table) return;
 
     const rows = [];
-    const allRows = table.querySelectorAll('tr');
+    const allRows = table.querySelectorAll('tbody tr');
     for (let i = 0; i < allRows.length; i++) {
-        const cells = allRows[i].querySelectorAll('th, td');
+        const cells = allRows[i].querySelectorAll('td');
         const rowData = [];
         for (let j = 0; j < cells.length; j++) {
             rowData.push(cells[j].textContent);

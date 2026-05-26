@@ -87,7 +87,7 @@
     .calc-field label {
       color: #b0b0b0;
       font-weight: 500;
-      min-width: 60px;
+      min-width: 50px;
     }
 
     .calc-field input {
@@ -119,6 +119,24 @@
       font-style: italic;
     }
 
+    .sub-page-link {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 10px 24px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: #ffffff;
+      background: #222222;
+      border: 1px solid #E31837;
+      border-radius: 4px;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+
+    .sub-page-link:hover {
+      background: #333333;
+    }
+
     @media (max-width: 500px) {
       .calc-row {
         flex-direction: column;
@@ -140,9 +158,9 @@
 
     <h1>Calculators</h1>
 
-    <!-- kPa to PSI (Relative) -->
+    <!-- kPa / PSI / Bar (Gauge) -->
     <div class="calc-section">
-      <h2>Pressure — kPa ↔ PSI (Relative / Gauge)</h2>
+      <h2>Pressure — Gauge (Relative)</h2>
       <div class="calc-row">
         <div class="calc-field">
           <label for="kpa-rel">kPa</label>
@@ -153,25 +171,35 @@
           <label for="psi-rel">PSI</label>
           <input type="number" id="psi-rel" step="any" />
         </div>
+        <span class="calc-arrow">⇄</span>
+        <div class="calc-field">
+          <label for="bar-rel">Bar</label>
+          <input type="number" id="bar-rel" step="any" />
+        </div>
       </div>
-      <p class="calc-note">Gauge pressure (0 kPa = 0 PSI = atmospheric)</p>
+      <p class="calc-note">Gauge pressure (0 kPa = 0 PSI = 0 Bar = atmospheric)</p>
     </div>
 
-    <!-- kPa to PSI (Absolute) -->
+    <!-- kPa / PSI / Bar (Absolute) -->
     <div class="calc-section">
-      <h2>Pressure — kPa ↔ PSI (Absolute)</h2>
+      <h2>Pressure — Absolute (102 kPa = 0 PSI gauge reference)</h2>
       <div class="calc-row">
         <div class="calc-field">
           <label for="kpa-abs">kPa</label>
-          <input type="number" id="kpa-abs" step="any" value="101.325" />
+          <input type="number" id="kpa-abs" step="any" value="102" />
         </div>
         <span class="calc-arrow">⇄</span>
         <div class="calc-field">
           <label for="psi-abs">PSI</label>
           <input type="number" id="psi-abs" step="any" />
         </div>
+        <span class="calc-arrow">⇄</span>
+        <div class="calc-field">
+          <label for="bar-abs">Bar</label>
+          <input type="number" id="bar-abs" step="any" />
+        </div>
       </div>
-      <p class="calc-note">Absolute pressure (101.325 kPa = 14.696 PSI = 1 atmosphere)</p>
+      <p class="calc-note">Absolute pressure with 102 kPa atmospheric reference. 102 kPa = 0 PSI gauge = 1.02 Bar abs</p>
     </div>
 
     <!-- Celsius to Fahrenheit -->
@@ -223,6 +251,9 @@
       </div>
     </div>
 
+    <!-- Link to Lambda Fuel Conversion page -->
+    <a href="lambda-fuel.html" class="sub-page-link">Lambda Fuel Conversion Chart →</a>
+
   </div>
 
   <script>
@@ -232,7 +263,12 @@
 
     const STOICH_GASOLINE = 14.7;
     const KPA_PER_PSI = 6.89476;
+    const KPA_PER_BAR = 100;
+    const ATM_KPA = 102; // Atmospheric reference in kPa
 
+    /**
+     * Wires two inputs bidirectionally.
+     */
     function wire(idA, idB, aToB, bToA) {
       const elA = document.getElementById(idA);
       const elB = document.getElementById(idB);
@@ -262,21 +298,80 @@
       }
     }
 
+    /**
+     * Wires three inputs so changing any one updates the other two.
+     * Conversions are all relative to the first input (A) as the canonical value.
+     */
+    function wire3(idA, idB, idC, aToB, bToA, aToC, cToA) {
+      const elA = document.getElementById(idA);
+      const elB = document.getElementById(idB);
+      const elC = document.getElementById(idC);
+
+      elA.addEventListener('input', () => {
+        const val = parseFloat(elA.value);
+        if (!isNaN(val)) {
+          elB.value = aToB(val);
+          elC.value = aToC(val);
+        } else {
+          elB.value = '';
+          elC.value = '';
+        }
+      });
+
+      elB.addEventListener('input', () => {
+        const val = parseFloat(elB.value);
+        if (!isNaN(val)) {
+          const a = bToA(val);
+          elA.value = a;
+          elC.value = aToC(a);
+        } else {
+          elA.value = '';
+          elC.value = '';
+        }
+      });
+
+      elC.addEventListener('input', () => {
+        const val = parseFloat(elC.value);
+        if (!isNaN(val)) {
+          const a = cToA(val);
+          elA.value = a;
+          elB.value = aToB(a);
+        } else {
+          elA.value = '';
+          elB.value = '';
+        }
+      });
+
+      // Initialize from A's default
+      const initVal = parseFloat(elA.value);
+      if (!isNaN(initVal)) {
+        elB.value = aToB(initVal);
+        elC.value = aToC(initVal);
+      }
+    }
+
     function round(val, decimals) {
       const factor = Math.pow(10, decimals);
       return Math.round(val * factor) / factor;
     }
 
-    // kPa ↔ PSI (Relative) — same conversion factor, just gauge pressure
-    wire('kpa-rel', 'psi-rel',
+    // Gauge pressure: kPa ↔ PSI ↔ Bar (all relative, 0 = atmospheric)
+    wire3('kpa-rel', 'psi-rel', 'bar-rel',
       kpa => round(kpa / KPA_PER_PSI, 4),
-      psi => round(psi * KPA_PER_PSI, 4)
+      psi => round(psi * KPA_PER_PSI, 4),
+      kpa => round(kpa / KPA_PER_BAR, 4),
+      bar => round(bar * KPA_PER_BAR, 4)
     );
 
-    // kPa ↔ PSI (Absolute) — same conversion factor
-    wire('kpa-abs', 'psi-abs',
-      kpa => round(kpa / KPA_PER_PSI, 4),
-      psi => round(psi * KPA_PER_PSI, 4)
+    // Absolute pressure: kPa(abs) ↔ PSI(gauge) ↔ Bar(abs)
+    // 102 kPa absolute = 0 PSI gauge
+    // PSI gauge = (kPa_abs - 102) / 6.89476
+    // Bar absolute = kPa_abs / 100
+    wire3('kpa-abs', 'psi-abs', 'bar-abs',
+      kpa => round((kpa - ATM_KPA) / KPA_PER_PSI, 4),
+      psi => round(psi * KPA_PER_PSI + ATM_KPA, 4),
+      kpa => round(kpa / KPA_PER_BAR, 4),
+      bar => round(bar * KPA_PER_BAR, 4)
     );
 
     // °C ↔ °F
