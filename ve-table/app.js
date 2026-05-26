@@ -443,6 +443,10 @@ function renderResults(msg) {
     };
 
     // Default: show corrections table
+    showCorrectionsBtn.classList.add('active');
+    showNewValuesBtn.classList.remove('active');
+    showHitsBtn.classList.remove('active');
+    showStddevBtn.classList.remove('active');
     renderCorrectionTable(correctionGrid, tableContainer, tableLabel);
 
     // Show 3D surface section and initialize
