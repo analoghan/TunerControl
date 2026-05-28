@@ -106,7 +106,7 @@ function createAccumulatorGrid(mapBreakpoints, rpmBreakpoints) {
     for (let mapIdx = 0; mapIdx < mapBreakpoints.length; mapIdx++) {
         const row = [];
         for (let rpmIdx = 0; rpmIdx < rpmBreakpoints.length; rpmIdx++) {
-            row.push({ count: 0, correctionSum: 0 });
+            row.push({ count: 0, correctionSum: 0, clTrimSum: 0 });
         }
         cells.push(row);
     }
@@ -123,10 +123,11 @@ function createAccumulatorGrid(mapBreakpoints, rpmBreakpoints) {
  * @param {number} rpmIdx    — column index
  * @param {number} correction — per-sample correction value to accumulate
  */
-function accumulateSample(grid, mapIdx, rpmIdx, correction) {
+function accumulateSample(grid, mapIdx, rpmIdx, correction, clTrimAvg) {
     const cell = grid.cells[mapIdx][rpmIdx];
     cell.count += 1;
     cell.correctionSum += correction;
+    cell.clTrimSum += (clTrimAvg || 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1099,8 +1100,8 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
                 if (rpmIdx === -1 || mapIdx === -1) continue;
 
                 // Accumulate the sample (first pass)
-                accumulateSample(grid, mapIdx, rpmIdx, result.correction);
-                binnedSamples.push({ mapIdx, rpmIdx, correction: result.correction });
+                accumulateSample(grid, mapIdx, rpmIdx, result.correction, result.clTrimAvg);
+                binnedSamples.push({ mapIdx, rpmIdx, correction: result.correction, clTrimAvg: result.clTrimAvg });
                 totalSamples++;
             }
 
@@ -1167,7 +1168,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
                         continue;
                     }
 
-                    accumulateSample(finalGrid, s.mapIdx, s.rpmIdx, s.correction);
+                    accumulateSample(finalGrid, s.mapIdx, s.rpmIdx, s.correction, s.clTrimAvg);
                     totalSamples++;
                 }
             }
@@ -1256,6 +1257,8 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
                     if (cell.count > threshold) {
                         // Strictly more than threshold samples required
                         let avgCorrection = cell.correctionSum / cell.count;
+                        const avgClTrim = cell.clTrimSum / cell.count;
+                        const lambdaError = avgCorrection - avgClTrim;
 
                         // Apply scaling factor
                         avgCorrection = avgCorrection * scalePct;
@@ -1267,13 +1270,13 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
 
                         // Apply minimum change amount filter
                         if (changeThreshold > 0 && Math.abs(avgCorrection) < changeThreshold) {
-                            row.push({ count: cell.count, correction: 0, stddev });
+                            row.push({ count: cell.count, correction: 0, stddev, clTrimAvg: avgClTrim, lambdaError: lambdaError });
                         } else {
-                            row.push({ count: cell.count, correction: avgCorrection, stddev });
+                            row.push({ count: cell.count, correction: avgCorrection, stddev, clTrimAvg: avgClTrim, lambdaError: lambdaError });
                         }
                         cellsAboveThreshold++;
                     } else {
-                        row.push({ count: cell.count, correction: null, stddev: null });
+                        row.push({ count: cell.count, correction: null, stddev: null, clTrimAvg: null, lambdaError: null });
                     }
                 }
                 finalCells.push(row);

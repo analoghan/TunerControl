@@ -379,6 +379,53 @@ function renderResults(msg) {
     }
     statsLine.textContent = statsText;
 
+    // VE value range sanity check
+    if (msg.newValuesGrid && cellsAboveThreshold > 0) {
+        let outOfRangeCount = 0;
+        let tooLow = 0;
+        let tooHigh = 0;
+        const { mapBreakpoints } = correctionGrid;
+        for (let m = 0; m < msg.newValuesGrid.length; m++) {
+            for (let r = 0; r < msg.newValuesGrid[m].length; r++) {
+                const ve = msg.newValuesGrid[m][r];
+                const cell = correctionGrid.cells[m][r];
+                if (cell.correction === null) continue; // skip cells without data
+                if (ve < 30) { tooLow++; outOfRangeCount++; }
+                else if (ve > 170) { tooHigh++; outOfRangeCount++; }
+            }
+        }
+        if (outOfRangeCount > 0) {
+            addWarning(
+                'VE range check: ' + outOfRangeCount + ' cell(s) have unusual values' +
+                (tooLow > 0 ? ' (' + tooLow + ' below 30%)' : '') +
+                (tooHigh > 0 ? ' (' + tooHigh + ' above 170%)' : '') +
+                '. This may indicate incorrect injector reference flow or fuel pressure calibration rather than a VE table error.'
+            );
+        }
+
+        // Check for global bias (all corrections in same direction)
+        let posCount = 0, negCount = 0, totalCorrCells = 0;
+        for (let m = 0; m < correctionGrid.cells.length; m++) {
+            for (let r = 0; r < correctionGrid.cells[m].length; r++) {
+                const cell = correctionGrid.cells[m][r];
+                if (cell.correction === null || cell.correction === 0) continue;
+                totalCorrCells++;
+                if (cell.correction > 0) posCount++;
+                else negCount++;
+            }
+        }
+        if (totalCorrCells > 5) {
+            const biasPct = Math.max(posCount, negCount) / totalCorrCells * 100;
+            if (biasPct > 85) {
+                const direction = posCount > negCount ? 'positive (lean)' : 'negative (rich)';
+                addWarning(
+                    'Global bias detected: ' + biasPct.toFixed(0) + '% of corrections are ' + direction +
+                    '. This pattern suggests a systemic issue (injector reference flow, fuel pressure calibration, or sensor error) rather than individual VE cell errors.'
+                );
+            }
+        }
+    }
+
     // No data case: zero valid samples or zero cells above threshold
     if (totalSamples === 0 || cellsAboveThreshold === 0) {
         noDataMsg.hidden = false;
@@ -409,12 +456,14 @@ function renderResults(msg) {
     const showHitsBtn = document.getElementById('show-hits-btn');
     const showNewValuesBtn = document.getElementById('show-new-values-btn');
     const showStddevBtn = document.getElementById('show-stddev-btn');
+    const showCltrimBtn = document.getElementById('show-cltrim-btn');
 
     showCorrectionsBtn.onclick = () => {
         showCorrectionsBtn.classList.add('active');
         showHitsBtn.classList.remove('active');
         showNewValuesBtn.classList.remove('active');
         showStddevBtn.classList.remove('active');
+        showCltrimBtn.classList.remove('active');
         renderCorrectionTable(correctionGrid, tableContainer, tableLabel);
     };
 
@@ -423,6 +472,7 @@ function renderResults(msg) {
         showCorrectionsBtn.classList.remove('active');
         showHitsBtn.classList.remove('active');
         showStddevBtn.classList.remove('active');
+        showCltrimBtn.classList.remove('active');
         renderNewValuesTable(correctionGrid, msg.newValuesGrid, tableContainer, tableLabel);
     };
 
@@ -431,6 +481,7 @@ function renderResults(msg) {
         showCorrectionsBtn.classList.remove('active');
         showNewValuesBtn.classList.remove('active');
         showStddevBtn.classList.remove('active');
+        showCltrimBtn.classList.remove('active');
         renderHitCountTable(correctionGrid, tableContainer, tableLabel);
     };
 
@@ -439,7 +490,17 @@ function renderResults(msg) {
         showCorrectionsBtn.classList.remove('active');
         showNewValuesBtn.classList.remove('active');
         showHitsBtn.classList.remove('active');
+        showCltrimBtn.classList.remove('active');
         renderStdDevTable(correctionGrid, tableContainer, tableLabel);
+    };
+
+    showCltrimBtn.onclick = () => {
+        showCltrimBtn.classList.add('active');
+        showCorrectionsBtn.classList.remove('active');
+        showNewValuesBtn.classList.remove('active');
+        showHitsBtn.classList.remove('active');
+        showStddevBtn.classList.remove('active');
+        renderClTrimTable(correctionGrid, tableContainer, tableLabel);
     };
 
     // Default: show corrections table
@@ -447,6 +508,7 @@ function renderResults(msg) {
     showNewValuesBtn.classList.remove('active');
     showHitsBtn.classList.remove('active');
     showStddevBtn.classList.remove('active');
+    showCltrimBtn.classList.remove('active');
     renderCorrectionTable(correctionGrid, tableContainer, tableLabel);
 
     // Show 3D surface section and initialize
@@ -1030,4 +1092,73 @@ function initSurface3D(msg) {
 
     // Initial render
     render();
+}
+
+
+/**
+ * Renders the CL Trim absorption table showing how much of the correction
+ * comes from closed-loop trim vs raw lambda error.
+ */
+function renderClTrimTable(correctionGrid, tableContainer, tableLabel) {
+    tableContainer.innerHTML = '';
+    tableLabel.textContent = 'CL Trim Breakdown — Shows CL trim contribution (top) vs lambda error (bottom) per cell. Large CL trim = ECU is compensating; large lambda error = VE table is wrong.';
+
+    const { mapBreakpoints, rpmBreakpoints, cells } = correctionGrid;
+
+    const table = document.createElement('table');
+    table.className = 'correction-table';
+
+    // Header row
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    const cornerTh = document.createElement('th');
+    cornerTh.textContent = 'MAP \\ RPM';
+    headerRow.appendChild(cornerTh);
+
+    for (let r = 0; r < rpmBreakpoints.length; r++) {
+        const th = document.createElement('th');
+        th.textContent = rpmBreakpoints[r];
+        headerRow.appendChild(th);
+    }
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    // Data rows
+    const tbody = document.createElement('tbody');
+    for (let m = 0; m < mapBreakpoints.length; m++) {
+        const row = document.createElement('tr');
+        const rowHeader = document.createElement('th');
+        rowHeader.textContent = mapBreakpoints[m];
+        row.appendChild(rowHeader);
+
+        for (let r = 0; r < rpmBreakpoints.length; r++) {
+            const td = document.createElement('td');
+            const cell = cells[m][r];
+
+            if (cell.clTrimAvg === null || cell.clTrimAvg === undefined) {
+                td.className = 'below-threshold';
+            } else {
+                const trim = cell.clTrimAvg;
+                const lambdaErr = cell.lambdaError;
+
+                // Color based on which component dominates
+                if (Math.abs(trim) > Math.abs(lambdaErr) && Math.abs(trim) > 1) {
+                    td.className = 'negative'; // CL trim is doing heavy lifting — concerning
+                } else if (Math.abs(lambdaErr) > 2) {
+                    td.className = 'positive'; // Lambda error dominates — VE table needs work
+                } else {
+                    td.className = 'zero';
+                }
+
+                // Show both values: trim / lambda error
+                td.innerHTML = '<span style="font-size:0.7rem;display:block;">CL: ' + trim.toFixed(1) + '%</span>' +
+                               '<span style="font-size:0.7rem;display:block;">\u03BB: ' + lambdaErr.toFixed(1) + '%</span>';
+            }
+
+            row.appendChild(td);
+        }
+        tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    tableContainer.appendChild(table);
 }
