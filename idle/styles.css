@@ -351,6 +351,12 @@ h1 {
   color: #4caf50;
 }
 
+.diagnostic-info {
+  background: rgba(33, 150, 243, 0.1);
+  border-left-color: #2196f3;
+  color: #2196f3;
+}
+
 /* === Coolant correlation table === */
 
 .coolant-table {

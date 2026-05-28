@@ -400,6 +400,42 @@ function renderDiagnostics(analysis) {
                 severity: 'warning'
             });
         }
+
+        // Mass flow diagnostics (Item 10)
+        if (analysis.massFlowDiagnostics) {
+            var mfd = analysis.massFlowDiagnostics;
+            if (mfd.diagnosis) {
+                messages.push({ text: mfd.diagnosis, severity: 'warning' });
+            }
+            if (mfd.hangFeedForward !== null && mfd.normalFeedForward !== null && analysis.hangEvents > 0) {
+                messages.push({
+                    text: 'Mass flow during hang: actual=' + (mfd.hangMassFlow || 'N/A') +
+                          ' g/s, feed forward=' + mfd.hangFeedForward +
+                          ' g/s. Normal events: actual=' + (mfd.normalMassFlow || 'N/A') +
+                          ' g/s, feed forward=' + mfd.normalFeedForward + ' g/s.',
+                    severity: 'info'
+                });
+            }
+        }
+
+        // Decel rate diagnostics (Item 11)
+        if (analysis.decelRates) {
+            var dr = analysis.decelRates;
+            if (dr.avgNormalRate > 0) {
+                messages.push({
+                    text: 'Average RPM decay rate: ' + dr.avgNormalRate + ' RPM/s (normal events)' +
+                          (dr.avgHangRate > 0 ? ', ' + dr.avgHangRate + ' RPM/s (hang events)' : '') + '.',
+                    severity: 'info'
+                });
+            }
+            if (dr.avgHangRate > 0 && dr.avgNormalRate > 0 && dr.avgHangRate < dr.avgNormalRate * 0.5) {
+                messages.push({
+                    text: 'Hang events have significantly slower RPM decay (' + dr.avgHangRate +
+                          ' vs ' + dr.avgNormalRate + ' RPM/s) — decel dashpot rate may be too conservative.',
+                    severity: 'warning'
+                });
+            }
+        }
     }
 
     for (var i = 0; i < messages.length; i++) {

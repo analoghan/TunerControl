@@ -748,7 +748,7 @@ function computeKnockRpmLoadGrid(events, data, channels) {
         for (var l = 0; l < NUM_LOAD_BINS; l++) {
             var row = [];
             for (var r = 0; r < NUM_RPM_BINS; r++) {
-                row.push({ events: 0, levelSum: 0, maxLevel: 0 });
+                row.push({ events: 0, levelSum: 0, maxLevel: 0, timingSum: 0, timingCount: 0 });
             }
             g.push(row);
         }
@@ -768,12 +768,14 @@ function computeKnockRpmLoadGrid(events, data, channels) {
         if (evt.rpm === null || evt.load === null) continue;
         var rBin = assignRpmBin(evt.rpm);
         var lBin = assignLoadBin(evt.load);
+        var hasTiming = evt.ignTiming !== null && !isNaN(evt.ignTiming);
 
         // All cylinders
         var cellAll = grids[0][lBin][rBin];
         cellAll.events++;
         cellAll.levelSum += evt.knockLevel;
         if (evt.knockLevel > cellAll.maxLevel) cellAll.maxLevel = evt.knockLevel;
+        if (hasTiming) { cellAll.timingSum += evt.ignTiming; cellAll.timingCount++; }
 
         // Per cylinder
         var cylGrid = grids[evt.cylinderIndex];
@@ -782,10 +784,11 @@ function computeKnockRpmLoadGrid(events, data, channels) {
             cellCyl.events++;
             cellCyl.levelSum += evt.knockLevel;
             if (evt.knockLevel > cellCyl.maxLevel) cellCyl.maxLevel = evt.knockLevel;
+            if (hasTiming) { cellCyl.timingSum += evt.ignTiming; cellCyl.timingCount++; }
         }
     }
 
-    // Finalize: compute rate and avgLevel
+    // Finalize: compute rate, avgLevel, and avgTiming
     function finalizeGrid(grid) {
         var result = [];
         for (var l = 0; l < NUM_LOAD_BINS; l++) {
@@ -798,7 +801,9 @@ function computeKnockRpmLoadGrid(events, data, channels) {
                     events: cell.events,
                     rate: Math.round(rate * 100) / 100,
                     avgLevel: cell.events > 0 ? Math.round((cell.levelSum / cell.events) * 10) / 10 : 0,
-                    maxLevel: Math.round(cell.maxLevel * 10) / 10
+                    maxLevel: Math.round(cell.maxLevel * 10) / 10,
+                    avgTiming: cell.timingCount > 0 ? Math.round((cell.timingSum / cell.timingCount) * 10) / 10 : null,
+                    weightedRate: dwell > 0 ? Math.round((cell.levelSum / dwell) * 60 * 100) / 100 : 0
                 });
             }
             result.push(row);

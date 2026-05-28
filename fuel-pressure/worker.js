@@ -811,6 +811,55 @@ function runAnalysis(columnNames, data, sampleRate) {
         channelMapping[keys[k]] = channels[keys[k]] !== -1;
     }
 
+    // Step 8b: Compute pressure vs PW impact analysis
+    // Using Bernoulli's principle: flow ∝ √pressure, so PW ∝ 1/√pressure
+    // If pressure drops from aim to actual, PW would need to increase by factor √(aim/actual)
+    var pressurePwImpact = null;
+    if (dutyArr) {
+        // Find operating points where pressure is significantly below aim
+        var impactPoints = [];
+        for (var i = 0; i < n; i++) {
+            if (isNaN(pressArr[i]) || isNaN(aimArr[i]) || pressArr[i] <= 0 || aimArr[i] <= 0) continue;
+            var error = pressArr[i] - aimArr[i];
+            if (error < -0.05) { // pressure below aim by >5 bar (in dMPa, so 0.05)
+                // PW multiplier needed: √(aim/actual)
+                var pwMultiplier = Math.sqrt(aimArr[i] / pressArr[i]);
+                impactPoints.push({
+                    rpm: rpmArr[i],
+                    pressBar: Math.round(pressArr[i] * 1000) / 10,
+                    aimBar: Math.round(aimArr[i] * 1000) / 10,
+                    pwIncreasePct: Math.round((pwMultiplier - 1) * 1000) / 10
+                });
+            }
+        }
+
+        if (impactPoints.length > 100) {
+            // Summarize by RPM bins
+            var rpmBins = {};
+            for (var i = 0; i < impactPoints.length; i++) {
+                var bin = Math.round(impactPoints[i].rpm / 500) * 500;
+                if (!rpmBins[bin]) rpmBins[bin] = { count: 0, pwIncSum: 0, maxPwInc: 0 };
+                rpmBins[bin].count++;
+                rpmBins[bin].pwIncSum += impactPoints[i].pwIncreasePct;
+                if (impactPoints[i].pwIncreasePct > rpmBins[bin].maxPwInc) {
+                    rpmBins[bin].maxPwInc = impactPoints[i].pwIncreasePct;
+                }
+            }
+            var summary = [];
+            var binKeys = Object.keys(rpmBins).sort(function(a,b) { return a - b; });
+            for (var b = 0; b < binKeys.length; b++) {
+                var bin = rpmBins[binKeys[b]];
+                summary.push({
+                    rpm: parseInt(binKeys[b]),
+                    samples: bin.count,
+                    avgPwIncrease: Math.round(bin.pwIncSum / bin.count * 10) / 10,
+                    maxPwIncrease: Math.round(bin.maxPwInc * 10) / 10
+                });
+            }
+            pressurePwImpact = { totalUndershootSamples: impactPoints.length, byRpm: summary };
+        }
+    }
+
     // Step 9: Post result
     self.postMessage({ type: 'progress', phase: 'Complete', percent: 100 });
     self.postMessage({
@@ -831,6 +880,7 @@ function runAnalysis(columnNames, data, sampleRate) {
             errorByRpm: downsampleScatter(errorVsRpm, 500),
             errorByDuty: errorVsDuty ? downsampleScatter(errorVsDuty, 500) : null,
             errorByFlow: errorVsFlow ? downsampleScatter(errorVsFlow, 500) : null,
+            pressurePwImpact: pressurePwImpact,
             diagnostics: diagnostics
         },
         chartData: {

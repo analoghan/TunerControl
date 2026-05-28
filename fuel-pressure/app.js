@@ -226,6 +226,7 @@ function renderReport(analysis) {
     renderChannelMapping(analysis.channelMapping);
     renderWarnings(analysis.channelWarnings);
     renderSummary(analysis);
+    renderPressurePwImpact(analysis.pressurePwImpact);
     renderDiagnostics(analysis);
 }
 
@@ -332,6 +333,82 @@ function addStat(container, value, label, extraClass) {
     div.appendChild(valSpan);
     div.appendChild(labelSpan);
     container.appendChild(div);
+}
+
+// ---------------------------------------------------------------------------
+// Pressure → PW Impact Rendering
+// ---------------------------------------------------------------------------
+
+function renderPressurePwImpact(pwImpact) {
+    var block = document.getElementById('report-pw-impact');
+    var content = document.getElementById('pw-impact-content');
+    if (!content || !block) return;
+    clearElement(content);
+
+    if (!pwImpact || !pwImpact.byRpm || pwImpact.byRpm.length === 0) {
+        block.hidden = true;
+        return;
+    }
+
+    block.hidden = false;
+
+    var desc = document.createElement('p');
+    desc.style.cssText = 'color:#b0b0b0;font-size:0.9rem;margin-bottom:12px;';
+    desc.textContent = 'When fuel pressure drops below aim, injector pulse width must increase to deliver the same fuel mass (PW \u221D 1/\u221Apressure). This table shows the implied PW increase needed at each RPM range during undershoot events (' + pwImpact.totalUndershootSamples.toLocaleString() + ' samples).';
+    content.appendChild(desc);
+
+    var table = document.createElement('table');
+    table.className = 'summary-table';
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.85rem;';
+
+    var thead = document.createElement('thead');
+    var headerRow = document.createElement('tr');
+    var headers = ['RPM', 'Samples', 'Avg PW Increase', 'Max PW Increase'];
+    for (var h = 0; h < headers.length; h++) {
+        var th = document.createElement('th');
+        th.style.cssText = 'padding:6px 10px;border:1px solid #333;background:#222;color:#fff;text-align:center;';
+        th.textContent = headers[h];
+        headerRow.appendChild(th);
+    }
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    for (var i = 0; i < pwImpact.byRpm.length; i++) {
+        var row = pwImpact.byRpm[i];
+        var tr = document.createElement('tr');
+
+        var tdRpm = document.createElement('td');
+        tdRpm.style.cssText = 'padding:6px 10px;border:1px solid #333;text-align:center;color:#ccc;';
+        tdRpm.textContent = row.rpm;
+        tr.appendChild(tdRpm);
+
+        var tdSamples = document.createElement('td');
+        tdSamples.style.cssText = 'padding:6px 10px;border:1px solid #333;text-align:center;color:#ccc;';
+        tdSamples.textContent = row.samples.toLocaleString();
+        tr.appendChild(tdSamples);
+
+        var tdAvg = document.createElement('td');
+        tdAvg.style.cssText = 'padding:6px 10px;border:1px solid #333;text-align:center;font-weight:600;';
+        tdAvg.style.color = row.avgPwIncrease > 5 ? '#f44336' : row.avgPwIncrease > 2 ? '#ff9800' : '#4caf50';
+        tdAvg.textContent = '+' + row.avgPwIncrease.toFixed(1) + '%';
+        tr.appendChild(tdAvg);
+
+        var tdMax = document.createElement('td');
+        tdMax.style.cssText = 'padding:6px 10px;border:1px solid #333;text-align:center;font-weight:600;';
+        tdMax.style.color = row.maxPwIncrease > 10 ? '#f44336' : row.maxPwIncrease > 5 ? '#ff9800' : '#4caf50';
+        tdMax.textContent = '+' + row.maxPwIncrease.toFixed(1) + '%';
+        tr.appendChild(tdMax);
+
+        tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    content.appendChild(table);
+
+    var note = document.createElement('p');
+    note.style.cssText = 'color:#666;font-size:0.8rem;font-style:italic;margin-top:8px;';
+    note.textContent = 'If PW increase pushes injectors below 0.8ms at idle/light load, XDI instability may result. Cross-reference with the Injector Characterization tool.';
+    content.appendChild(note);
 }
 
 // ---------------------------------------------------------------------------

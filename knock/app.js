@@ -793,8 +793,10 @@ function renderKnockRpmLoadGrid(gridData) {
 
     var modes = [
         { value: 'rate', label: 'Rate (events/min)' },
+        { value: 'weightedRate', label: 'Severity-Weighted Rate' },
         { value: 'events', label: 'Event Count' },
-        { value: 'maxLevel', label: 'Max Knock Level' }
+        { value: 'maxLevel', label: 'Max Knock Level' },
+        { value: 'avgTiming', label: 'Timing at Knock (°)' }
     ];
     for (var m = 0; m < modes.length; m++) {
         var mOpt = document.createElement('option');
@@ -827,7 +829,9 @@ function renderKnockRpmLoadGrid(gridData) {
         for (var l = 0; l < grid.length; l++) {
             for (var r = 0; r < grid[l].length; r++) {
                 var val = mode === 'rate' ? grid[l][r].rate :
+                          mode === 'weightedRate' ? grid[l][r].weightedRate :
                           mode === 'events' ? grid[l][r].events :
+                          mode === 'avgTiming' ? (grid[l][r].avgTiming !== null ? grid[l][r].avgTiming : 0) :
                           grid[l][r].maxLevel;
                 if (val > maxVal) maxVal = val;
             }
@@ -872,7 +876,9 @@ function renderKnockRpmLoadGrid(gridData) {
                 td.style.cssText = 'padding:4px 6px;border:1px solid #333;text-align:center;min-width:44px;';
 
                 var val = mode === 'rate' ? cell.rate :
+                          mode === 'weightedRate' ? cell.weightedRate :
                           mode === 'events' ? cell.events :
+                          mode === 'avgTiming' ? (cell.avgTiming !== null ? cell.avgTiming : 0) :
                           cell.maxLevel;
 
                 if (gridData.dwellGrid[l][r] < 0.5) {
@@ -880,6 +886,20 @@ function renderKnockRpmLoadGrid(gridData) {
                     td.style.background = '#1a1a1a';
                     td.style.color = '#444';
                     td.textContent = '—';
+                } else if (mode === 'avgTiming') {
+                    // Timing mode: show timing value, color by whether knock occurred
+                    if (cell.avgTiming === null || cell.events === 0) {
+                        td.style.background = 'rgba(76,175,80,0.15)';
+                        td.style.color = '#4caf50';
+                        td.textContent = '—';
+                    } else {
+                        // Higher timing at knock = more aggressive, show as red
+                        var intensity = maxVal > 0 ? Math.min(val / maxVal, 1) : 0;
+                        td.style.background = 'rgba(255,152,0,0.3)';
+                        td.style.color = '#ff9800';
+                        td.style.fontWeight = '600';
+                        td.textContent = val.toFixed(1) + '\u00B0';
+                    }
                 } else if (val === 0) {
                     td.style.background = 'rgba(76,175,80,0.15)';
                     td.style.color = '#4caf50';

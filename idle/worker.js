@@ -674,7 +674,120 @@ function computeStatistics(events, channels) {
         worstSettleTime: worstSettleTime,
         avgHangRpm: avgHangRpm,
         coolantTempCorrelation: coolantCorrelation,
+        massFlowDiagnostics: computeMassFlowDiagnostics(events),
+        decelRates: computeDecelRates(events),
         events: events
+    };
+}
+
+/**
+ * Compares mass flow vs feed forward during hang events vs normal events.
+ * Returns diagnostic info about whether feed forward is too high.
+ */
+function computeMassFlowDiagnostics(events) {
+    var hangMfAvg = 0, hangMfCount = 0;
+    var hangFfAvg = 0, hangFfCount = 0;
+    var normalMfAvg = 0, normalMfCount = 0;
+    var normalFfAvg = 0, normalFfCount = 0;
+
+    for (var i = 0; i < events.length; i++) {
+        var evt = events[i];
+        var mfTrace = evt.massFlowTrace;
+        var ffTrace = evt.massFlowFFTrace;
+
+        if (mfTrace && mfTrace.values.length > 0) {
+            var mfSum = 0;
+            for (var j = 0; j < mfTrace.values.length; j++) {
+                var v = mfTrace.values[j];
+                if (!isNaN(v)) mfSum += v;
+            }
+            var mfMean = mfSum / mfTrace.values.length;
+            if (evt.isHang) { hangMfAvg += mfMean; hangMfCount++; }
+            else { normalMfAvg += mfMean; normalMfCount++; }
+        }
+
+        if (ffTrace && ffTrace.values.length > 0) {
+            var ffSum = 0;
+            for (var j = 0; j < ffTrace.values.length; j++) {
+                var v = ffTrace.values[j];
+                if (!isNaN(v)) ffSum += v;
+            }
+            var ffMean = ffSum / ffTrace.values.length;
+            if (evt.isHang) { hangFfAvg += ffMean; hangFfCount++; }
+            else { normalFfAvg += ffMean; normalFfCount++; }
+        }
+    }
+
+    var result = {
+        hangMassFlow: hangMfCount > 0 ? Math.round((hangMfAvg / hangMfCount) * 10) / 10 : null,
+        hangFeedForward: hangFfCount > 0 ? Math.round((hangFfAvg / hangFfCount) * 10) / 10 : null,
+        normalMassFlow: normalMfCount > 0 ? Math.round((normalMfAvg / normalMfCount) * 10) / 10 : null,
+        normalFeedForward: normalFfCount > 0 ? Math.round((normalFfAvg / normalFfCount) * 10) / 10 : null,
+        diagnosis: null
+    };
+
+    // Generate diagnosis
+    if (result.hangFeedForward !== null && result.normalFeedForward !== null) {
+        var ffDiff = result.hangFeedForward - result.normalFeedForward;
+        if (ffDiff > 1) {
+            result.diagnosis = 'Feed forward is ' + ffDiff.toFixed(1) + ' g/s higher during hang events than normal events. Reduce idle mass flow feed forward table.';
+        }
+    }
+    if (result.hangMassFlow !== null && result.hangFeedForward !== null) {
+        var excess = result.hangMassFlow - result.hangFeedForward;
+        if (excess > 1) {
+            result.diagnosis = (result.diagnosis || '') + ' Actual mass flow exceeds feed forward by ' + excess.toFixed(1) + ' g/s during hang — possible vacuum leak or unmetered air source.';
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Computes RPM decay rate (RPM/second) for each decel event.
+ * Item 11: Decel dashpot rate visualization.
+ */
+function computeDecelRates(events) {
+    var hangRates = [];
+    var normalRates = [];
+
+    for (var i = 0; i < events.length; i++) {
+        var evt = events[i];
+        var trace = evt.rpmTrace;
+        if (!trace || trace.time.length < 2) continue;
+
+        // Compute decay rate from start RPM to minimum RPM over the event duration
+        var duration = evt.endTime - evt.startTime;
+        if (duration <= 0) continue;
+
+        var rpmDrop = evt.startRpm - evt.minRpm;
+        var rate = rpmDrop / duration; // RPM per second
+
+        if (evt.isHang) {
+            hangRates.push(Math.round(rate));
+        } else {
+            normalRates.push(Math.round(rate));
+        }
+    }
+
+    // Compute averages
+    var avgHangRate = 0, avgNormalRate = 0;
+    if (hangRates.length > 0) {
+        var sum = 0;
+        for (var j = 0; j < hangRates.length; j++) sum += hangRates[j];
+        avgHangRate = Math.round(sum / hangRates.length);
+    }
+    if (normalRates.length > 0) {
+        var sum = 0;
+        for (var j = 0; j < normalRates.length; j++) sum += normalRates[j];
+        avgNormalRate = Math.round(sum / normalRates.length);
+    }
+
+    return {
+        avgHangRate: avgHangRate,
+        avgNormalRate: avgNormalRate,
+        hangRates: hangRates,
+        normalRates: normalRates
     };
 }
 
