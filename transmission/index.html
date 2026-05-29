@@ -25,6 +25,14 @@
         <label for="adx-input">ADX Channel Definitions (required for .xdl):</label>
         <input type="file" id="adx-input" accept=".adx" />
       </div>
+      <div class="file-row" id="bin-row">
+        <label for="bin-input">Bin Config (optional — correlates tune with log):</label>
+        <input type="file" id="bin-input" accept=".bin" />
+      </div>
+      <div class="file-row" id="xdf-row">
+        <label for="xdf-input">XDF Definition (required with .bin):</label>
+        <input type="file" id="xdf-input" accept=".xdf" />
+      </div>
       <div class="button-row">
         <button id="analyze-btn" disabled>Analyze Shifts</button>
       </div>

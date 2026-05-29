@@ -4,6 +4,8 @@
 
 var logInput = document.getElementById('log-input');
 var adxInput = document.getElementById('adx-input');
+var binInput = document.getElementById('bin-input');
+var xdfInput = document.getElementById('xdf-input');
 var analyzeBtn = document.getElementById('analyze-btn');
 var errorContainer = document.getElementById('error-container');
 var progressSection = document.getElementById('progress-section');
@@ -14,6 +16,8 @@ var resultsSection = document.getElementById('results-section');
 
 var selectedFile = null;
 var selectedAdxFile = null;
+var selectedBinFile = null;
+var selectedXdfFile = null;
 var worker = null;
 
 // ---------------------------------------------------------------------------
@@ -53,16 +57,48 @@ if (adxInput) {
     });
 }
 
+if (binInput) {
+    binInput.addEventListener('change', function() {
+        var file = binInput.files[0] || null;
+        if (file && file.name.toLowerCase().endsWith('.bin')) {
+            selectedBinFile = file;
+            errorContainer.hidden = true;
+        } else {
+            selectedBinFile = null;
+            if (file) showError('Please select a .bin config file');
+        }
+        updateAnalyzeButton();
+    });
+}
+
+if (xdfInput) {
+    xdfInput.addEventListener('change', function() {
+        var file = xdfInput.files[0] || null;
+        if (file && file.name.toLowerCase().endsWith('.xdf')) {
+            selectedXdfFile = file;
+            errorContainer.hidden = true;
+        } else {
+            selectedXdfFile = null;
+            if (file) showError('Please select an .xdf definition file');
+        }
+        updateAnalyzeButton();
+    });
+}
+
 function updateAnalyzeButton() {
     if (!selectedFile) { analyzeBtn.disabled = true; return; }
     var ext = selectedFile.name.toLowerCase().split('.').pop();
     if (ext === 'csv') {
+        // CSV needs no companion files (bin+xdf optional)
         analyzeBtn.disabled = false;
     } else if (ext === 'xdl') {
+        // XDL requires ADX (bin+xdf optional)
         analyzeBtn.disabled = !selectedAdxFile;
     } else {
         analyzeBtn.disabled = true;
     }
+    // Bin requires XDF (but both are optional for analysis)
+    // No additional gating needed — bin is always optional
 }
 
 // ---------------------------------------------------------------------------
@@ -81,73 +117,91 @@ analyzeBtn.addEventListener('click', function() {
     progressPhase.textContent = '';
 
     var ext = selectedFile.name.toLowerCase().split('.').pop();
+    var hasBin = selectedBinFile && selectedXdfFile;
 
+    // Collect all files needed
+    var filesToRead = [];
+    var fileResults = {};
+
+    // Always read the log file
     if (ext === 'xdl') {
-        // XDL binary path: read both XDL (binary) and ADX (text)
-        if (!selectedAdxFile) {
-            showError('Please select an ADX channel definition file for XDL parsing.');
-            analyzeBtn.disabled = false;
-            progressSection.hidden = true;
-            return;
-        }
-
-        var adxReader = new FileReader();
-        adxReader.onload = function() {
-            var adxText = adxReader.result;
-            var xdlReader = new FileReader();
-            xdlReader.onload = function() {
-                startWorkerXdl(xdlReader.result, adxText);
-            };
-            xdlReader.onerror = function() {
-                progressSection.hidden = true;
-                showError('Could not read the XDL file.');
-                analyzeBtn.disabled = false;
-            };
-            xdlReader.readAsArrayBuffer(selectedFile);
-        };
-        adxReader.onerror = function() {
-            progressSection.hidden = true;
-            showError('Could not read the ADX file.');
-            analyzeBtn.disabled = false;
-        };
-        adxReader.readAsText(selectedAdxFile);
+        filesToRead.push({ key: 'xdl', file: selectedFile, mode: 'binary' });
+        filesToRead.push({ key: 'adx', file: selectedAdxFile, mode: 'text' });
     } else {
-        // CSV text path (original)
+        filesToRead.push({ key: 'csv', file: selectedFile, mode: 'text' });
+    }
+
+    // Optionally read bin + xdf
+    if (hasBin) {
+        filesToRead.push({ key: 'bin', file: selectedBinFile, mode: 'binary' });
+        filesToRead.push({ key: 'xdf', file: selectedXdfFile, mode: 'text' });
+    }
+
+    // Read all files then start worker
+    var remaining = filesToRead.length;
+    var readError = false;
+
+    filesToRead.forEach(function(item) {
         var reader = new FileReader();
         reader.onload = function() {
-            startWorkerCsv(reader.result);
+            fileResults[item.key] = reader.result;
+            remaining--;
+            if (remaining === 0 && !readError) startAnalysis(ext, hasBin, fileResults);
         };
         reader.onerror = function() {
+            readError = true;
             progressSection.hidden = true;
-            showError('Could not read the selected file.');
+            showError('Could not read file: ' + item.file.name);
             analyzeBtn.disabled = false;
         };
-        reader.readAsText(selectedFile);
-    }
+        if (item.mode === 'binary') {
+            reader.readAsArrayBuffer(item.file);
+        } else {
+            reader.readAsText(item.file);
+        }
+    });
 });
 
-function startWorkerCsv(logText) {
+function startAnalysis(ext, hasBin, files) {
     if (worker) { worker.terminate(); worker = null; }
 
-    var workerUrl = new URL('worker.js', window.location.href).href;
-    var blob = new Blob(['importScripts("' + workerUrl + '");'], { type: 'application/javascript' });
-    worker = new Worker(URL.createObjectURL(blob));
-    attachWorkerHandlers(worker);
-    worker.postMessage({ type: 'analyze', logText: logText });
-}
-
-function startWorkerXdl(xdlBuffer, adxText) {
-    if (worker) { worker.terminate(); worker = null; }
-
-    // Worker needs both xdl-parser.js and worker.js
+    // Build importScripts list
+    var scripts = [];
     var parserUrl = new URL('xdl-parser.js', window.location.href).href;
+    var binReaderUrl = new URL('bin-reader.js', window.location.href).href;
     var workerUrl = new URL('worker.js', window.location.href).href;
+
+    if (ext === 'xdl') scripts.push(parserUrl);
+    if (hasBin) scripts.push(binReaderUrl);
+    scripts.push(workerUrl);
+
     var blob = new Blob([
-        'importScripts("' + parserUrl + '", "' + workerUrl + '");'
+        'importScripts(' + scripts.map(function(s) { return '"' + s + '"'; }).join(',') + ');'
     ], { type: 'application/javascript' });
     worker = new Worker(URL.createObjectURL(blob));
     attachWorkerHandlers(worker);
-    worker.postMessage({ type: 'analyzeXdl', xdlBuffer: xdlBuffer, adxText: adxText }, [xdlBuffer]);
+
+    // Build message
+    var msg;
+    if (hasBin) {
+        // Full analysis with bin correlation
+        msg = { type: 'analyzeWithBin', binBuffer: files.bin, xdfText: files.xdf };
+        if (ext === 'xdl') {
+            msg.xdlBuffer = files.xdl;
+            msg.adxText = files.adx;
+        } else {
+            msg.logText = files.csv;
+        }
+        var transferables = [files.bin];
+        if (files.xdl) transferables.push(files.xdl);
+        worker.postMessage(msg, transferables);
+    } else if (ext === 'xdl') {
+        msg = { type: 'analyzeXdl', xdlBuffer: files.xdl, adxText: files.adx };
+        worker.postMessage(msg, [files.xdl]);
+    } else {
+        msg = { type: 'analyze', logText: files.csv };
+        worker.postMessage(msg);
+    }
 }
 
 function attachWorkerHandlers(w) {

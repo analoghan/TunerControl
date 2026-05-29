@@ -219,25 +219,59 @@ function analyzeShiftWindow(evt, data, ch, startIdx, endIdx, shiftIdx, sampleRat
         }
     }
 
-    // Max clutch slip during shift window (narrower: 0.5s after shift)
-    if (slipIdx !== -1) {
-        var slipWindow = Math.round(sampleRate * 0.5);
-        var maxSlip = 0;
-        var slipStarted = false;
-        var slipSamples = 0;
+    // Max clutch slip during shift — computed from input/output RPM and gear ratio.
+    // The TCU's "Slipt Gear Clutch %" channel is a shift progress indicator, not actual slip.
+    // Real slip occurs BEFORE the gear channel transitions (while clutches are handing off).
+    // We look backwards from the gear change point to find the slip window.
+    if (inputRpmIdx !== -1 && ch.output_rpm !== -1) {
+        var outputRpmIdx = ch.output_rpm;
+        var gearRatios = { 1: 4.71, 2: 3.14, 3: 2.11, 4: 1.67, 5: 1.28, 6: 1.0, 7: 0.84, 8: 0.67 };
+        var fromRatio = gearRatios[evt.fromGear] || 1;
+        var toRatio = gearRatios[evt.toGear] || 1;
 
-        for (var i = shiftIdx; i < Math.min(shiftIdx + slipWindow, data.length); i++) {
-            var slip = Math.abs(data[i][slipIdx]);
-            if (slip > 1) { // More than 1% slip
-                slipStarted = true;
+        var maxSlip = 0;
+        var slipSamples = 0;
+        var lookback = Math.round(sampleRate * 1.5); // 1.5s before gear change
+        var lookforward = Math.round(sampleRate * 0.3); // 0.3s after
+
+        // Scan backwards from shift point to find peak slip vs fromGear ratio
+        for (var i = Math.max(0, shiftIdx - lookback); i < Math.min(shiftIdx + lookforward, data.length); i++) {
+            var inRpm = data[i][inputRpmIdx];
+            var outRpm = data[i][outputRpmIdx];
+            if (isNaN(inRpm) || isNaN(outRpm) || inRpm < 100 || outRpm < 10) continue;
+
+            // Compute slip against the fromGear ratio (before shift completes)
+            var expectedOut = inRpm / fromRatio;
+            var slipPct = Math.abs((outRpm - expectedOut) / expectedOut * 100);
+
+            // Also check against toGear ratio (after shift starts engaging)
+            var expectedOutTo = inRpm / toRatio;
+            var slipPctTo = Math.abs((outRpm - expectedOutTo) / expectedOutTo * 100);
+
+            // Use the minimum of the two — during transition, the actual slip is
+            // relative to whichever gear the clutch pack is closer to engaging
+            var effectiveSlip = Math.min(slipPct, slipPctTo);
+
+            // Only count as slip if it exceeds a threshold (>3% means clutch is slipping)
+            if (effectiveSlip > 3) {
                 slipSamples++;
-                if (slip > maxSlip) maxSlip = slip;
-            } else if (slipStarted) {
-                break; // Slip ended
+                if (effectiveSlip > maxSlip) maxSlip = effectiveSlip;
             }
         }
+
         evt.maxSlip = Math.round(maxSlip * 10) / 10;
         evt.slipDuration = Math.round((slipSamples / sampleRate) * 1000); // ms
+    } else if (slipIdx !== -1) {
+        // Fallback to TCU slip channel if RPM data unavailable
+        var slipWindow = Math.round(sampleRate * 0.5);
+        var maxSlip = 0;
+        var slipSamples = 0;
+        for (var i = shiftIdx; i < Math.min(shiftIdx + slipWindow, data.length); i++) {
+            var slip = Math.abs(data[i][slipIdx]);
+            if (slip > 1) { slipSamples++; if (slip > maxSlip) maxSlip = slip; }
+        }
+        evt.maxSlip = Math.round(maxSlip * 10) / 10;
+        evt.slipDuration = Math.round((slipSamples / sampleRate) * 1000);
     }
 
     // RPM flare detection (input RPM spike above expected)
@@ -279,22 +313,32 @@ function analyzeShiftWindow(evt, data, ch, startIdx, endIdx, shiftIdx, sampleRat
 
 /**
  * Maps gear transitions to the clutch elements involved.
- * Based on ZF 8HP clutch engagement chart:
- * Gear 1: A+E, Gear 2: A+B, Gear 3: A+D, Gear 4: A+C
- * Gear 5: B+C, Gear 6: B+D, Gear 7: B+E, Gear 8: C+E
+ * Based on ZF 8HP/10R80 clutch engagement chart (5 clutch elements, 3 applied per gear):
  *
- * Returns { releasing: clutch being released, applying: clutch being applied }
+ *          A    B    C    D    E
+ * 1st      X    X    X
+ * 2nd      X    X              X
+ * 3rd           X    X         X
+ * 4th           B         X    X
+ * 5th           X    X    X
+ * 6th                X    X    X
+ * 7th      X         X    X
+ * 8th      X              X    X
+ * Rev      X    X         X
+ *
+ * For each shift, one clutch releases and one applies (the third stays engaged).
+ * Returns the applying (oncoming) clutch letter, which determines shift feel.
  */
 function getClutchForShift(fromGear, toGear, isUpshift) {
     var clutchStates = {
-        1: ['A', 'E'],
-        2: ['A', 'B'],
-        3: ['A', 'D'],
-        4: ['A', 'C'],
-        5: ['B', 'C'],
-        6: ['B', 'D'],
-        7: ['B', 'E'],
-        8: ['C', 'E'],
+        1: ['A', 'B', 'C'],
+        2: ['A', 'B', 'E'],
+        3: ['B', 'C', 'E'],
+        4: ['B', 'D', 'E'],
+        5: ['B', 'C', 'D'],
+        6: ['C', 'D', 'E'],
+        7: ['A', 'C', 'D'],
+        8: ['A', 'D', 'E'],
     };
 
     var fromClutches = clutchStates[fromGear];
@@ -395,8 +439,8 @@ function generateDiagnostics(events, clutchHealth) {
         avgHarsh = Math.round(avgHarsh / harsh32.length);
         diagnostics.push({
             severity: 'critical',
-            text: '3→2 downshift harshness detected: ' + harsh32.length + ' events with avg harshness score ' + avgHarsh + '/100. The B clutch (oncoming) is engaging too aggressively during decel, causing engine braking shudder. Gear 3 holds A+D, Gear 2 holds A+B — the shift releases D and applies B.',
-            action: 'In TunerPro, reduce the B clutch fill pressure for downshift engagement. Look at "Cor. Pres. Open Clutch" and the B clutch adaptation values. Also verify the downshift blip is matching RPM correctly — insufficient blip causes the B clutch to absorb the speed difference harshly.'
+            text: '3→2 downshift harshness detected: ' + harsh32.length + ' events with avg harshness score ' + avgHarsh + '/100. The A clutch (oncoming) is engaging too aggressively during decel. Gear 3 holds B+C+E, Gear 2 holds A+B+E — the shift releases C and applies A.',
+            action: 'In TunerPro, check the A clutch fill pressure and the 3-2 Downshift Correction Start/End tables. Also verify the downshift blip is matching RPM correctly — insufficient blip causes the A clutch to absorb the speed difference harshly. Review "Cor. Pres. Open Clutch" and A clutch adaptation values.'
         });
     }
 
@@ -551,6 +595,112 @@ self.onmessage = function(event) {
             runAnalysis(result.columnNames, result.data);
         } catch (err) {
             self.postMessage({ type: 'error', message: err.message || 'Unknown error during XDL analysis.' });
+        }
+    } else if (msg.type === 'readBin') {
+        // Bin config read (standalone)
+        try {
+            self.postMessage({ type: 'progress', phase: 'Parsing XDF definition...', percent: 10 });
+            var xdfDef = parseXdf(msg.xdfText);
+
+            self.postMessage({ type: 'progress', phase: 'Reading bin parameters...', percent: 50 });
+            var config = readBinConfig(msg.binBuffer, xdfDef);
+
+            self.postMessage({ type: 'progress', phase: 'Complete', percent: 100 });
+            self.postMessage({ type: 'binResult', config: config });
+        } catch (err) {
+            self.postMessage({ type: 'error', message: err.message || 'Unknown error reading bin config.' });
+        }
+    } else if (msg.type === 'analyzeWithBin') {
+        // Full analysis: XDL/CSV log + bin config correlation
+        try {
+            // Parse log
+            var columnNames, data;
+            if (msg.xdlBuffer && msg.adxText) {
+                self.postMessage({ type: 'progress', phase: 'Parsing ADX + XDL...', percent: 5 });
+                var adxDef = parseAdx(msg.adxText);
+                var logResult = parseXdl(msg.xdlBuffer, adxDef, function(done, total) {
+                    self.postMessage({ type: 'progress', phase: 'Parsing XDL...', percent: 5 + Math.round(done / total * 10) });
+                });
+                columnNames = logResult.columnNames;
+                data = logResult.data;
+            } else if (msg.logText) {
+                self.postMessage({ type: 'progress', phase: 'Parsing CSV...', percent: 5 });
+                var csvResult = parseTunerProCsv(msg.logText, function(done, total) {
+                    self.postMessage({ type: 'progress', phase: 'Parsing CSV...', percent: 5 + Math.round(done / total * 10) });
+                });
+                columnNames = csvResult.columnNames;
+                data = csvResult.data;
+            } else {
+                self.postMessage({ type: 'error', message: 'No log data provided.' });
+                return;
+            }
+
+            if (data.length < 10) {
+                self.postMessage({ type: 'error', message: 'Not enough data to analyze.' });
+                return;
+            }
+
+            // Parse bin config
+            var binConfig = null;
+            if (msg.binBuffer && msg.xdfText) {
+                self.postMessage({ type: 'progress', phase: 'Reading bin config...', percent: 20 });
+                var xdfDef = parseXdf(msg.xdfText);
+                binConfig = readBinConfig(msg.binBuffer, xdfDef);
+            }
+
+            // Run shift analysis
+            self.postMessage({ type: 'progress', phase: 'Resolving channels...', percent: 25 });
+            var ch = resolveChannels(columnNames);
+            var sampleRate = 30;
+            var timeIdx = ch.time;
+            if (timeIdx !== -1 && data.length > 10) {
+                var dt = data[10][timeIdx] - data[0][timeIdx];
+                if (dt > 0) sampleRate = 10 / dt;
+            }
+
+            if (ch.gear === -1) {
+                self.postMessage({ type: 'error', message: 'Required channel "Gear" not found.' });
+                return;
+            }
+
+            self.postMessage({ type: 'progress', phase: 'Detecting shift events...', percent: 40 });
+            var events = detectShiftEvents(data, ch, sampleRate);
+
+            self.postMessage({ type: 'progress', phase: 'Analyzing clutch health...', percent: 60 });
+            var clutchHealth = computeClutchHealth(events, data, ch);
+
+            self.postMessage({ type: 'progress', phase: 'Generating diagnostics...', percent: 80 });
+            var diagnostics = generateDiagnostics(events, clutchHealth);
+
+            // Build summary
+            var upshifts = events.filter(function(e) { return e.isUpshift; });
+            var downshifts = events.filter(function(e) { return e.isDownshift; });
+            var avgShiftTime = 0, stCount = 0;
+            for (var i = 0; i < events.length; i++) {
+                if (events[i].shiftTime !== null) { avgShiftTime += events[i].shiftTime; stCount++; }
+            }
+
+            var summary = {
+                totalShifts: events.length,
+                upshifts: upshifts.length,
+                downshifts: downshifts.length,
+                avgShiftTime: stCount > 0 ? Math.round(avgShiftTime / stCount) : 0,
+                logDuration: data.length > 0 && timeIdx !== -1 ? Math.round(data[data.length - 1][timeIdx]) : 0,
+                oilTemp: ch.oil_temp !== -1 ? Math.round(data[Math.floor(data.length / 2)][ch.oil_temp]) : null,
+            };
+
+            self.postMessage({ type: 'progress', phase: 'Complete', percent: 100 });
+            self.postMessage({
+                type: 'result',
+                summary: summary,
+                events: events,
+                clutchHealth: clutchHealth,
+                diagnostics: diagnostics,
+                binConfig: binConfig ? binConfig.shiftParams : null,
+                binMetadata: binConfig ? binConfig.metadata : null,
+            });
+        } catch (err) {
+            self.postMessage({ type: 'error', message: err.message || 'Unknown error during analysis.' });
         }
     }
 };
