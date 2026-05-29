@@ -55,8 +55,26 @@
 
         .card:hover {
             transform: translateY(-4px);
+        }
+
+        .card.card-motec:hover {
             border-color: #E31837;
             box-shadow: 0 8px 24px rgba(227, 24, 55, 0.2);
+        }
+
+        .card.card-haltech:hover {
+            border-color: #FFC72C;
+            box-shadow: 0 8px 24px rgba(255, 199, 44, 0.2);
+        }
+
+        .card.card-turbolamik:hover {
+            border-color: #036ffc;
+            box-shadow: 0 8px 24px rgba(3, 111, 252, 0.2);
+        }
+
+        .card.card-calculators:hover {
+            border-color: #32a852;
+            box-shadow: 0 8px 24px rgba(50, 168, 82, 0.2);
         }
 
         .card h2 {
@@ -90,19 +108,19 @@
     </header>
 
     <nav class="nav-cards">
-        <a href="motec/index.html" class="card">
+        <a href="motec/index.html" class="card card-motec">
             <h2>MoTeC M1 Tuning</h2>
             <p>VE table correction, injector characterization, knock analysis, idle behavior, DI fuel pressure, and cross-tool diagnostics for MoTeC M1 ECUs.</p>
         </a>
-        <a href="haltech/index.html" class="card">
+        <a href="haltech/index.html" class="card card-haltech">
             <h2>Haltech Tuning</h2>
             <p>Haltech Nexus ECU tuning tools — VE table correction from NSP datalogs with wideband lambda and fuel trim analysis.</p>
         </a>
-        <a href="turbolamik/index.html" class="card">
+        <a href="turbolamik/index.html" class="card card-turbolamik">
             <h2>TurboLamik Transmission</h2>
             <p>ZF 8HP shift quality analysis: downshift harshness, upshift clutch slip, per-clutch health, and shift time diagnostics.</p>
         </a>
-        <a href="calculators/index.html" class="card">
+        <a href="calculators/index.html" class="card card-calculators">
             <h2>Calculators</h2>
             <p>Quick bidirectional unit conversions: kPa↔PSI↔Bar, °C↔°F, AFR↔Lambda, km/h↔mph. Plus Lambda fuel charts for gasoline and E85.</p>
         </a>
