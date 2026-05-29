@@ -228,7 +228,8 @@ var VIEW_META = {
     newvalues: { label: 'Corrected VE Values', desc: 'Original VE with corrections applied. Highlighted cells were modified.' },
     hits: { label: 'Hit Count Map', desc: 'Number of valid samples per cell. Higher = more confidence.' },
     stddev: { label: 'Standard Deviation', desc: 'Per-cell correction variance. Green (≤1) = confident, Yellow (≤3) = moderate, Red (>3) = noisy.' },
-    trim: { label: 'CL Trim Contribution', desc: 'Average closed-loop fuel trim per cell. Shows how much the ECU is already compensating.' },
+    trim: { label: 'Total Trim (STFT + LTFT)', desc: 'Average combined short-term + long-term fuel trim per cell. Shows how much the ECU is compensating.' },
+    lambdaerr: { label: 'Lambda Error', desc: 'Percentage difference between actual and target lambda. Positive = lean of target, Negative = rich of target.' },
 };
 
 function renderCurrentView() {
@@ -308,6 +309,14 @@ function formatCell(td, cell, view, mapIdx, rpmIdx) {
             if (cell.clTrimAvg > 3) td.className = 'cell-pos';
             else if (cell.clTrimAvg < -3) td.className = 'cell-neg';
             else td.className = 'cell-zero';
+        } else { td.textContent = ''; td.className = 'cell-empty'; }
+    } else if (view === 'lambdaerr') {
+        if (cell.correction !== null && cell.clTrimAvg !== null) {
+            var lambdaErr = cell.correction - cell.clTrimAvg;
+            td.textContent = lambdaErr.toFixed(1);
+            if (lambdaErr > 1) { td.className = 'cell-pos'; if (lambdaErr > 5) td.className += ' cell-hot'; }
+            else if (lambdaErr < -1) { td.className = 'cell-neg'; if (lambdaErr < -5) td.className += ' cell-cold'; }
+            else { td.className = 'cell-zero'; }
         } else { td.textContent = ''; td.className = 'cell-empty'; }
     }
 }

@@ -457,57 +457,51 @@ function renderResults(msg) {
     const showNewValuesBtn = document.getElementById('show-new-values-btn');
     const showStddevBtn = document.getElementById('show-stddev-btn');
     const showCltrimBtn = document.getElementById('show-cltrim-btn');
+    const showLambdaErrBtn = document.getElementById('show-lambdaerr-btn');
+
+    const allToggleBtns = [showCorrectionsBtn, showHitsBtn, showNewValuesBtn, showStddevBtn, showCltrimBtn, showLambdaErrBtn].filter(Boolean);
+    function clearToggle() { allToggleBtns.forEach(b => b.classList.remove('active')); }
 
     showCorrectionsBtn.onclick = () => {
+        clearToggle();
         showCorrectionsBtn.classList.add('active');
-        showHitsBtn.classList.remove('active');
-        showNewValuesBtn.classList.remove('active');
-        showStddevBtn.classList.remove('active');
-        showCltrimBtn.classList.remove('active');
         renderCorrectionTable(correctionGrid, tableContainer, tableLabel);
     };
 
     showNewValuesBtn.onclick = () => {
+        clearToggle();
         showNewValuesBtn.classList.add('active');
-        showCorrectionsBtn.classList.remove('active');
-        showHitsBtn.classList.remove('active');
-        showStddevBtn.classList.remove('active');
-        showCltrimBtn.classList.remove('active');
         renderNewValuesTable(correctionGrid, msg.newValuesGrid, tableContainer, tableLabel);
     };
 
     showHitsBtn.onclick = () => {
+        clearToggle();
         showHitsBtn.classList.add('active');
-        showCorrectionsBtn.classList.remove('active');
-        showNewValuesBtn.classList.remove('active');
-        showStddevBtn.classList.remove('active');
-        showCltrimBtn.classList.remove('active');
         renderHitCountTable(correctionGrid, tableContainer, tableLabel);
     };
 
     showStddevBtn.onclick = () => {
+        clearToggle();
         showStddevBtn.classList.add('active');
-        showCorrectionsBtn.classList.remove('active');
-        showNewValuesBtn.classList.remove('active');
-        showHitsBtn.classList.remove('active');
-        showCltrimBtn.classList.remove('active');
         renderStdDevTable(correctionGrid, tableContainer, tableLabel);
     };
 
     showCltrimBtn.onclick = () => {
+        clearToggle();
         showCltrimBtn.classList.add('active');
-        showCorrectionsBtn.classList.remove('active');
-        showNewValuesBtn.classList.remove('active');
-        showHitsBtn.classList.remove('active');
-        showStddevBtn.classList.remove('active');
         renderClTrimTable(correctionGrid, tableContainer, tableLabel);
     };
 
+    if (showLambdaErrBtn) {
+        showLambdaErrBtn.onclick = () => {
+            clearToggle();
+            showLambdaErrBtn.classList.add('active');
+            renderLambdaErrorTable(correctionGrid, tableContainer, tableLabel);
+        };
+    }
+
     // Default: show corrections table
     showCorrectionsBtn.classList.add('active');
-    showNewValuesBtn.classList.remove('active');
-    showHitsBtn.classList.remove('active');
-    showStddevBtn.classList.remove('active');
     showCltrimBtn.classList.remove('active');
     renderCorrectionTable(correctionGrid, tableContainer, tableLabel);
 
@@ -1153,6 +1147,69 @@ function renderClTrimTable(correctionGrid, tableContainer, tableLabel) {
                 // Show both values: trim / lambda error
                 td.innerHTML = '<span style="font-size:0.7rem;display:block;">CL: ' + trim.toFixed(1) + '%</span>' +
                                '<span style="font-size:0.7rem;display:block;">\u03BB: ' + lambdaErr.toFixed(1) + '%</span>';
+            }
+
+            row.appendChild(td);
+        }
+        tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    tableContainer.appendChild(table);
+}
+
+/**
+ * Renders a Lambda Error table showing (actual/target - 1)*100 per cell.
+ * Positive = lean of target, Negative = rich of target.
+ */
+function renderLambdaErrorTable(correctionGrid, tableContainer, tableLabel) {
+    tableContainer.innerHTML = '';
+    tableLabel.textContent = 'Lambda Error — Percentage difference between actual and target lambda per cell. Positive = lean of target, Negative = rich of target. This is the residual error after CL trim is applied.';
+
+    const { mapBreakpoints, rpmBreakpoints, cells } = correctionGrid;
+
+    const table = document.createElement('table');
+    table.className = 'correction-table';
+
+    // Header row
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    const cornerTh = document.createElement('th');
+    cornerTh.textContent = 'MAP \\ RPM';
+    headerRow.appendChild(cornerTh);
+
+    for (let r = 0; r < rpmBreakpoints.length; r++) {
+        const th = document.createElement('th');
+        th.textContent = rpmBreakpoints[r];
+        headerRow.appendChild(th);
+    }
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    // Data rows
+    const tbody = document.createElement('tbody');
+    for (let m = 0; m < mapBreakpoints.length; m++) {
+        const row = document.createElement('tr');
+        const rowHeader = document.createElement('th');
+        rowHeader.textContent = mapBreakpoints[m];
+        row.appendChild(rowHeader);
+
+        for (let r = 0; r < rpmBreakpoints.length; r++) {
+            const td = document.createElement('td');
+            const cell = cells[m][r];
+
+            if (cell.lambdaError === null || cell.lambdaError === undefined) {
+                td.className = 'below-threshold';
+            } else {
+                const err = cell.lambdaError;
+                td.textContent = err.toFixed(1) + '%';
+
+                if (err > 2) {
+                    td.className = 'positive'; // lean of target
+                } else if (err < -2) {
+                    td.className = 'negative'; // rich of target
+                } else {
+                    td.className = 'zero'; // near target
+                }
             }
 
             row.appendChild(td);
