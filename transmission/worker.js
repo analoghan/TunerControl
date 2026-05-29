@@ -512,21 +512,45 @@ function runAnalysis(columnNames, data) {
 
 self.onmessage = function(event) {
     var msg = event.data;
-    if (!msg || msg.type !== 'analyze') return;
+    if (!msg) return;
 
-    try {
-        self.postMessage({ type: 'progress', phase: 'Parsing CSV...', percent: 5 });
-        var result = parseTunerProCsv(msg.logText, function(done, total) {
-            self.postMessage({ type: 'progress', phase: 'Parsing rows...', percent: 5 + Math.round(done / total * 20) });
-        });
+    if (msg.type === 'analyze') {
+        // CSV text analysis (original path)
+        try {
+            self.postMessage({ type: 'progress', phase: 'Parsing CSV...', percent: 5 });
+            var result = parseTunerProCsv(msg.logText, function(done, total) {
+                self.postMessage({ type: 'progress', phase: 'Parsing rows...', percent: 5 + Math.round(done / total * 20) });
+            });
 
-        if (result.data.length < 10) {
-            self.postMessage({ type: 'error', message: 'Not enough data rows to analyze.' });
-            return;
+            if (result.data.length < 10) {
+                self.postMessage({ type: 'error', message: 'Not enough data rows to analyze.' });
+                return;
+            }
+
+            runAnalysis(result.columnNames, result.data);
+        } catch (err) {
+            self.postMessage({ type: 'error', message: err.message || 'Unknown error during analysis.' });
         }
+    } else if (msg.type === 'analyzeXdl') {
+        // XDL binary + ADX definition analysis
+        try {
+            self.postMessage({ type: 'progress', phase: 'Parsing ADX channel definitions...', percent: 5 });
+            var adxDef = parseAdx(msg.adxText);
 
-        runAnalysis(result.columnNames, result.data);
-    } catch (err) {
-        self.postMessage({ type: 'error', message: err.message || 'Unknown error during analysis.' });
+            self.postMessage({ type: 'progress', phase: 'Parsing XDL binary log...', percent: 10 });
+            var result = parseXdl(msg.xdlBuffer, adxDef, function(done, total) {
+                var pct = 10 + Math.round(done / total * 15);
+                self.postMessage({ type: 'progress', phase: 'Parsing XDL records...', percent: pct });
+            });
+
+            if (result.data.length < 10) {
+                self.postMessage({ type: 'error', message: 'Not enough data records in XDL file.' });
+                return;
+            }
+
+            runAnalysis(result.columnNames, result.data);
+        } catch (err) {
+            self.postMessage({ type: 'error', message: err.message || 'Unknown error during XDL analysis.' });
+        }
     }
 };

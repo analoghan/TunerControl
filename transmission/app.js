@@ -3,6 +3,7 @@
  */
 
 var logInput = document.getElementById('log-input');
+var adxInput = document.getElementById('adx-input');
 var analyzeBtn = document.getElementById('analyze-btn');
 var errorContainer = document.getElementById('error-container');
 var progressSection = document.getElementById('progress-section');
@@ -12,6 +13,7 @@ var progressPhase = document.getElementById('progress-phase');
 var resultsSection = document.getElementById('results-section');
 
 var selectedFile = null;
+var selectedAdxFile = null;
 var worker = null;
 
 // ---------------------------------------------------------------------------
@@ -20,16 +22,48 @@ var worker = null;
 
 logInput.addEventListener('change', function() {
     var file = logInput.files[0] || null;
-    if (file && file.name.toLowerCase().endsWith('.csv')) {
-        selectedFile = file;
-        analyzeBtn.disabled = false;
-        errorContainer.hidden = true;
+    if (file) {
+        var ext = file.name.toLowerCase().split('.').pop();
+        if (ext === 'csv' || ext === 'xdl') {
+            selectedFile = file;
+            errorContainer.hidden = true;
+            updateAnalyzeButton();
+        } else {
+            selectedFile = null;
+            analyzeBtn.disabled = true;
+            showError('Please select a .csv or .xdl log file');
+        }
     } else {
         selectedFile = null;
         analyzeBtn.disabled = true;
-        if (file) showError('Please select a .csv file exported from TunerPro RT');
     }
 });
+
+if (adxInput) {
+    adxInput.addEventListener('change', function() {
+        var file = adxInput.files[0] || null;
+        if (file && file.name.toLowerCase().endsWith('.adx')) {
+            selectedAdxFile = file;
+            errorContainer.hidden = true;
+        } else {
+            selectedAdxFile = null;
+            if (file) showError('Please select an .adx channel definition file');
+        }
+        updateAnalyzeButton();
+    });
+}
+
+function updateAnalyzeButton() {
+    if (!selectedFile) { analyzeBtn.disabled = true; return; }
+    var ext = selectedFile.name.toLowerCase().split('.').pop();
+    if (ext === 'csv') {
+        analyzeBtn.disabled = false;
+    } else if (ext === 'xdl') {
+        analyzeBtn.disabled = !selectedAdxFile;
+    } else {
+        analyzeBtn.disabled = true;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Analysis
@@ -46,49 +80,101 @@ analyzeBtn.addEventListener('click', function() {
     progressPct.textContent = '0%';
     progressPhase.textContent = '';
 
-    var reader = new FileReader();
-    reader.onload = function() {
-        if (worker) { worker.terminate(); worker = null; }
+    var ext = selectedFile.name.toLowerCase().split('.').pop();
 
-        var workerUrl = new URL('worker.js', window.location.href).href;
-        var blob = new Blob(['importScripts("' + workerUrl + '");'], { type: 'application/javascript' });
-        worker = new Worker(URL.createObjectURL(blob));
-
-        worker.onmessage = function(e) {
-            var msg = e.data;
-            if (!msg) return;
-            if (msg.type === 'progress') {
-                progressBar.style.width = msg.percent + '%';
-                progressPct.textContent = msg.percent + '%';
-                progressPhase.textContent = msg.phase || '';
-            } else if (msg.type === 'error') {
-                progressSection.hidden = true;
-                showError(msg.message);
-                analyzeBtn.disabled = false;
-            } else if (msg.type === 'result') {
-                progressSection.hidden = true;
-                renderResults(msg);
-                analyzeBtn.disabled = false;
-            }
-        };
-
-        worker.onerror = function() {
+    if (ext === 'xdl') {
+        // XDL binary path: read both XDL (binary) and ADX (text)
+        if (!selectedAdxFile) {
+            showError('Please select an ADX channel definition file for XDL parsing.');
+            analyzeBtn.disabled = false;
             progressSection.hidden = true;
-            showError('An unexpected error occurred during analysis.');
+            return;
+        }
+
+        var adxReader = new FileReader();
+        adxReader.onload = function() {
+            var adxText = adxReader.result;
+            var xdlReader = new FileReader();
+            xdlReader.onload = function() {
+                startWorkerXdl(xdlReader.result, adxText);
+            };
+            xdlReader.onerror = function() {
+                progressSection.hidden = true;
+                showError('Could not read the XDL file.');
+                analyzeBtn.disabled = false;
+            };
+            xdlReader.readAsArrayBuffer(selectedFile);
+        };
+        adxReader.onerror = function() {
+            progressSection.hidden = true;
+            showError('Could not read the ADX file.');
             analyzeBtn.disabled = false;
         };
+        adxReader.readAsText(selectedAdxFile);
+    } else {
+        // CSV text path (original)
+        var reader = new FileReader();
+        reader.onload = function() {
+            startWorkerCsv(reader.result);
+        };
+        reader.onerror = function() {
+            progressSection.hidden = true;
+            showError('Could not read the selected file.');
+            analyzeBtn.disabled = false;
+        };
+        reader.readAsText(selectedFile);
+    }
+});
 
-        worker.postMessage({ type: 'analyze', logText: reader.result });
+function startWorkerCsv(logText) {
+    if (worker) { worker.terminate(); worker = null; }
+
+    var workerUrl = new URL('worker.js', window.location.href).href;
+    var blob = new Blob(['importScripts("' + workerUrl + '");'], { type: 'application/javascript' });
+    worker = new Worker(URL.createObjectURL(blob));
+    attachWorkerHandlers(worker);
+    worker.postMessage({ type: 'analyze', logText: logText });
+}
+
+function startWorkerXdl(xdlBuffer, adxText) {
+    if (worker) { worker.terminate(); worker = null; }
+
+    // Worker needs both xdl-parser.js and worker.js
+    var parserUrl = new URL('xdl-parser.js', window.location.href).href;
+    var workerUrl = new URL('worker.js', window.location.href).href;
+    var blob = new Blob([
+        'importScripts("' + parserUrl + '", "' + workerUrl + '");'
+    ], { type: 'application/javascript' });
+    worker = new Worker(URL.createObjectURL(blob));
+    attachWorkerHandlers(worker);
+    worker.postMessage({ type: 'analyzeXdl', xdlBuffer: xdlBuffer, adxText: adxText }, [xdlBuffer]);
+}
+
+function attachWorkerHandlers(w) {
+    w.onmessage = function(e) {
+        var msg = e.data;
+        if (!msg) return;
+        if (msg.type === 'progress') {
+            progressBar.style.width = msg.percent + '%';
+            progressPct.textContent = msg.percent + '%';
+            progressPhase.textContent = msg.phase || '';
+        } else if (msg.type === 'error') {
+            progressSection.hidden = true;
+            showError(msg.message);
+            analyzeBtn.disabled = false;
+        } else if (msg.type === 'result') {
+            progressSection.hidden = true;
+            renderResults(msg);
+            analyzeBtn.disabled = false;
+        }
     };
 
-    reader.onerror = function() {
+    w.onerror = function() {
         progressSection.hidden = true;
-        showError('Could not read the selected file.');
+        showError('An unexpected error occurred during analysis.');
         analyzeBtn.disabled = false;
     };
-
-    reader.readAsText(selectedFile);
-});
+}
 
 // ---------------------------------------------------------------------------
 // Rendering

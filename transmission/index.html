@@ -14,12 +14,16 @@
     </nav>
 
     <h1>Transmission Shift Analyzer</h1>
-    <p class="subtitle">TurboLamik 8HP shift quality analysis — load a TunerPro RT CSV log to analyze shift events, clutch slip, and downshift harshness.</p>
+    <p class="subtitle">TurboLamik 8HP shift quality analysis — load a TunerPro RT log (.csv or .xdl binary) to analyze shift events, clutch slip, and downshift harshness.</p>
 
     <section class="file-section">
       <div class="file-row">
-        <label for="log-input">TurboLamik Log (CSV):</label>
-        <input type="file" id="log-input" accept=".csv" />
+        <label for="log-input">TurboLamik Log (.csv or .xdl):</label>
+        <input type="file" id="log-input" accept=".csv,.xdl" />
+      </div>
+      <div class="file-row" id="adx-row">
+        <label for="adx-input">ADX Channel Definitions (required for .xdl):</label>
+        <input type="file" id="adx-input" accept=".adx" />
       </div>
       <div class="button-row">
         <button id="analyze-btn" disabled>Analyze Shifts</button>
@@ -70,7 +74,6 @@
     </section>
   </div>
 
-  <script src="worker.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
