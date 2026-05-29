@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DI Injection Timing Calculator — MoTeC M1</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>DI Injection Timing Calculator</h1>
+    <p class="subtitle">Computes optimal Start of Injection timing for direct injection engines based on cam profile and operating conditions. Outputs values in MoTeC M1's 720° reference scale.</p>
+
+    <div class="form-section">
+      <h2>Cam Profile</h2>
+      <div class="input-grid">
+        <div class="input-group">
+          <label for="intake-duration">Intake Duration @ .050" (°):</label>
+          <input type="number" id="intake-duration" value="229" step="1" />
+        </div>
+        <div class="input-group">
+          <label for="exhaust-duration">Exhaust Duration @ .050" (°):</label>
+          <input type="number" id="exhaust-duration" value="244" step="1" />
+        </div>
+        <div class="input-group">
+          <label for="intake-centerline">Intake Centerline (° ATDC):</label>
+          <input type="number" id="intake-centerline" value="114" step="0.5" />
+        </div>
+        <div class="input-group">
+          <label for="lsa">Lobe Separation Angle (°):</label>
+          <input type="number" id="lsa" value="118" step="0.5" />
+        </div>
+        <div class="input-group">
+          <label for="cam-advance">Cam Advance (°):</label>
+          <input type="number" id="cam-advance" value="4" step="0.5" />
+        </div>
+        <div class="input-group">
+          <label for="overlap">Overlap @ .050" (°):</label>
+          <input type="number" id="overlap" value="0.5" step="0.5" />
+        </div>
+      </div>
+
+      <h2>Engine Parameters</h2>
+      <div class="input-grid">
+        <div class="input-group">
+          <label for="max-rpm">Max RPM:</label>
+          <input type="number" id="max-rpm" value="7000" step="500" />
+        </div>
+        <div class="input-group">
+          <label for="rpm-step">RPM Step:</label>
+          <input type="number" id="rpm-step" value="500" step="100" />
+        </div>
+        <div class="input-group">
+          <label for="safety-margin">Safety Margin Before Ignition (°):</label>
+          <input type="number" id="safety-margin" value="15" step="1" />
+        </div>
+        <div class="input-group">
+          <label for="max-spark">Max Spark Advance (° BTDC):</label>
+          <input type="number" id="max-spark" value="35" step="1" />
+        </div>
+      </div>
+
+      <h2>Engine Info (optional)</h2>
+      <div class="input-grid">
+        <div class="input-group">
+          <label for="engine-name">Engine:</label>
+          <input type="text" id="engine-name" value="Gen 5 LT1 6.2" />
+        </div>
+        <div class="input-group">
+          <label for="cam-part">Cam Part #:</label>
+          <input type="text" id="cam-part" value="TPB002GVV2" />
+        </div>
+        <div class="input-group">
+          <label for="cam-desc">Description:</label>
+          <input type="text" id="cam-desc" value="Blower Stage 2" />
+        </div>
+      </div>
+
+      <div class="button-row">
+        <button id="calc-btn">Calculate</button>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="results-section" class="results-section" hidden>
+      <div class="report-block">
+        <h2>Valve Events (MoTeC 720° Reference)</h2>
+        <div id="valve-events"></div>
+        <div id="valve-diagram" class="diagram-container"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>DI Injection Window</h2>
+        <div id="injection-window"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Recommended SOI Timing Table</h2>
+        <p class="section-desc">Start of Injection values for the MoTeC Fuel Timing Primary Main table. Edge type: Start of Injection.</p>
+        <div id="soi-table"></div>
+        <div class="button-row">
+          <button id="copy-btn" class="secondary-btn">Copy Table to Clipboard</button>
+        </div>
+      </div>
+
+      <div class="report-block">
+        <h2>Notes</h2>
+        <div id="notes-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
