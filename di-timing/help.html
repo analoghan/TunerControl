@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DI Injection Timing Calculator — Help</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content h3 { color: #fff; margin-top: 16px; margin-bottom: 4px; font-size: 1rem; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #ff9800; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255,152,0,0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .danger { background: rgba(244,67,54,0.1); border-left: 3px solid #f44336; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .example-box { background: #111; border: 1px solid #333; border-radius: 6px; padding: 16px; margin: 12px 0; }
+    .help-content .example-box p { margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to DI Timing Calculator</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>DI Injection Timing Calculator — Help</h1>
+    <p>Computes optimal Start of Injection (SOI) timing for direct injection engines based on cam profile and engine parameters. Outputs values ready for the MoTeC M1 Fuel Timing Primary Main table.</p>
+
+    <h2>How DI Timing Differs from Port Injection</h2>
+    <p>In a port injection engine, fuel is sprayed onto the back of the intake valve and can sit there until the valve opens. The timing reference is <strong>End of Injection</strong> and values advance with RPM as pulse width grows.</p>
+    <p>In a direct injection engine, fuel is sprayed directly into the combustion chamber. The timing reference is <strong>Start of Injection</strong> and the window is much more constrained:</p>
+    <ul>
+      <li>Injection must start <strong>after the exhaust valve closes</strong> — otherwise fuel escapes out the exhaust</li>
+      <li>Injection must finish <strong>before the ignition event</strong> — otherwise fuel sprays into the flame front</li>
+      <li>Injection into the compression stroke should be <strong>avoided</strong> — it can cause misfires, detonation, and piston damage</li>
+    </ul>
+
+    <div class="danger">
+      <strong>Critical:</strong> Injecting fuel during the compression stroke risks spraying directly into the flame front. This can cause misfires, knock/detonation, and in severe cases, piston or injector damage. Always verify your pulse width stays within the available intake-stroke window.
+    </div>
+
+    <h2>Input Parameters</h2>
+
+    <h3>Cam Profile</h3>
+    <ul>
+      <li><strong>Intake Duration @ .050"</strong> — Total intake lobe duration measured at 0.050" lift (from cam card)</li>
+      <li><strong>Exhaust Duration @ .050"</strong> — Total exhaust lobe duration at 0.050" lift</li>
+      <li><strong>Intake Centerline (° ATDC)</strong> — The intake lobe centerline in degrees After Top Dead Center (overlap TDC). Found on the cam card or measured with a degree wheel.</li>
+      <li><strong>Lobe Separation Angle (LSA)</strong> — The angle between intake and exhaust lobe centerlines. Fixed by the cam grind.</li>
+      <li><strong>Cam Advance</strong> — How many degrees the cam is advanced from its neutral position. Positive = advanced (intake events happen earlier).</li>
+      <li><strong>Overlap @ .050"</strong> — Degrees of valve overlap at 0.050" lift. With mild cams this may be 0-5°; aggressive cams can be 20-40°+.</li>
+    </ul>
+
+    <div class="tip">
+      <strong>Where to find this data:</strong> Your cam manufacturer's cam card will list duration, lift, LSA, and recommended centerline. If you've degree'd the cam, use your measured intake centerline. If not, use the manufacturer's recommended installed centerline.
+    </div>
+
+    <h3>Engine Parameters</h3>
+    <ul>
+      <li><strong>Max RPM</strong> — The highest RPM you'll operate at. Used to generate the timing table breakpoints.</li>
+      <li><strong>RPM Step</strong> — Spacing between RPM breakpoints in the output table (typically 500).</li>
+      <li><strong>Safety Margin Before Ignition</strong> — Minimum degrees of crank rotation between end of injection and the spark event. Default 15° provides a safe buffer.</li>
+      <li><strong>Max Spark Advance (° BTDC)</strong> — The most advanced ignition timing your tune will use. This determines the earliest possible ignition event in the cycle.</li>
+    </ul>
+
+    <h2>Understanding the Outputs</h2>
+
+    <h3>Valve Events</h3>
+    <p>Shows all four valve events (EVO, EVC, IVO, IVC) converted to MoTeC's 720° reference scale:</p>
+    <div class="example-box">
+      <p><code>0°</code> = Power stroke TDC (firing)</p>
+      <p><code>180°</code> = BDC (end of power stroke)</p>
+      <p><code>360°</code> = TDC overlap (between exhaust and intake)</p>
+      <p><code>540°</code> = BDC (end of intake stroke / start of compression)</p>
+      <p><code>720°</code> = TDC compression (ignition point)</p>
+    </div>
+
+    <h3>DI Injection Window</h3>
+    <p>The safe zone for injection: starts after EVC (exhaust valve closed) and ends before the ignition event minus your safety margin. The tool reports:</p>
+    <ul>
+      <li><strong>Optimal SOI (° ATDC)</strong> — The recommended start point in degrees after TDC overlap</li>
+      <li><strong>MoTeC Programmed Value</strong> — The number to enter in the Fuel Timing Primary Main table. Calculated as <code>360 - SOI_ATDC</code>.</li>
+      <li><strong>Available window</strong> — Total crank degrees available for injection</li>
+    </ul>
+
+    <h3>Maximum Injection Time vs RPM</h3>
+    <p>Shows the maximum injector pulse width (in milliseconds) at each RPM before the injection event crosses into the compression stroke. This is the critical limit:</p>
+    <ul>
+      <li><strong style="color:#4caf50;">Green (>8ms)</strong> — Plenty of room, no concerns</li>
+      <li><strong style="color:#ff9800;">Orange (4-8ms)</strong> — Getting tight, monitor actual pulse width</li>
+      <li><strong style="color:#f44336;">Red (<4ms)</strong> — Very limited window, likely need split injection at this RPM</li>
+    </ul>
+
+    <div class="warning">
+      <strong>If your logged pulse width exceeds the max PW at a given RPM:</strong> The injection is extending into the compression stroke. Options: (1) verify injector sizing is adequate, (2) increase fuel pressure to reduce pulse width, (3) use split injection (two shorter events instead of one long one).
+    </div>
+
+    <h3>SOI Timing Table</h3>
+    <p>The recommended Start of Injection value for each RPM breakpoint. For DI engines, this is typically a flat value across all RPMs because the injection window is defined by crank angle (not time). Copy this directly into MoTeC's Fuel Timing Primary Main table.</p>
+
+    <h3>Injection Duration Analysis</h3>
+    <p>Shows what happens at a reference pulse width (6ms) across RPM. Validates that:</p>
+    <ul>
+      <li>Injection starts after EVC (fuel won't escape through exhaust)</li>
+      <li>Injection doesn't extend into compression (avoid flame-front contact)</li>
+      <li>End of injection is clear of the ignition zone</li>
+    </ul>
+
+    <h2>MoTeC M1 Setup</h2>
+    <ol>
+      <li>Navigate to <strong>Fuel Timing Primary</strong> in the M1 workbook</li>
+      <li>Set <strong>Edge</strong> to <code>Start of Injection</code></li>
+      <li>Enter the calculated programmed value across all RPM breakpoints</li>
+      <li>The MAP axis values can all be the same (DI timing doesn't typically vary with load)</li>
+      <li>Verify with logged data that SOI and EOI fall within the expected window</li>
+    </ol>
+
+    <div class="tip">
+      <strong>Tuning tip:</strong> Once your VE table is dialed in and lambda is on target, try adjusting SOI ±10-20° and watch for lambda changes. If the engine goes richer without any VE change, you've found a more efficient injection point where more fuel is being utilized in combustion.
+    </div>
+
+    <h2>Cam Overlap Considerations</h2>
+    <p>Engines with aggressive cams (high overlap) have a narrower DI injection window because the exhaust valve closes later. Key points:</p>
+    <ul>
+      <li><strong>Mild cams (0-10° overlap):</strong> Wide window, no concerns. SOI just after TDC overlap works well.</li>
+      <li><strong>Moderate cams (10-30° overlap):</strong> Window narrows. Verify max PW table at high RPM.</li>
+      <li><strong>Aggressive cams (30°+ overlap):</strong> May require retarding SOI significantly. Consider if DI-only fueling is viable or if supplemental port injection is needed at high RPM/load.</li>
+    </ul>
+
+    <h2>Split Injection</h2>
+    <p>When a single injection event can't fit within the intake stroke at high RPM/load, split injection divides the fuel into two events:</p>
+    <ol>
+      <li><strong>Primary event (intake stroke):</strong> ~70-80% of fuel mass, timed per this calculator</li>
+      <li><strong>Secondary event (compression stroke):</strong> ~20-30% of fuel mass, timed 30-60° BTDC compression for charge cooling and mixture preparation</li>
+    </ol>
+    <p>Split injection is configured separately in MoTeC using the secondary injection timing tables. This calculator covers the primary event only.</p>
+
+    <h2>Troubleshooting</h2>
+    <h3>Raw fuel smell from exhaust</h3>
+    <p>SOI is too early — fuel is being injected while the exhaust valve is still open. Increase the programmed SOI value (retard the injection start) to move it further into the intake stroke.</p>
+
+    <h3>Misfires at high RPM</h3>
+    <p>EOI may be too close to the ignition event, or injection is extending deep into the compression stroke. Check the max PW table and verify logged pulse width is within limits.</p>
+
+    <h3>Lambda reads lean at high RPM despite adequate injector sizing</h3>
+    <p>Injection may be finishing too late — fuel doesn't have time to vaporize and mix before ignition. Try advancing SOI slightly (lower programmed value) to give more mixing time.</p>
+  </div>
+</body>
+</html>

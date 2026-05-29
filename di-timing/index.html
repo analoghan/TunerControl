@@ -56,33 +56,30 @@
           <input type="number" id="rpm-step" value="500" step="100" />
         </div>
         <div class="input-group">
-          <label for="safety-margin">Safety Margin Before Ignition (°):</label>
-          <input type="number" id="safety-margin" value="15" step="1" />
-        </div>
-        <div class="input-group">
           <label for="max-spark">Max Spark Advance (° BTDC):</label>
           <input type="number" id="max-spark" value="35" step="1" />
         </div>
       </div>
 
-      <h2>Engine Info (optional)</h2>
+      <h2>MoTeC Injection Limits</h2>
       <div class="input-grid">
         <div class="input-group">
-          <label for="engine-name">Engine:</label>
-          <input type="text" id="engine-name" value="Gen 5 LT1 6.2" />
+          <label for="start-limit">Injection Start Limit (° dBTDC):</label>
+          <input type="number" id="start-limit" value="330" step="5" />
         </div>
         <div class="input-group">
-          <label for="cam-part">Cam Part #:</label>
-          <input type="text" id="cam-part" value="TPB002GVV2" />
+          <label for="start-margin">Start Limit Margin (°):</label>
+          <input type="number" id="start-margin" value="20" step="5" />
         </div>
         <div class="input-group">
-          <label for="cam-desc">Description:</label>
-          <input type="text" id="cam-desc" value="Blower Stage 2" />
+          <label for="primary-limit">Primary Limit / EOI Limit (° dBTDC):</label>
+          <input type="number" id="primary-limit" value="90" step="5" />
         </div>
       </div>
 
       <div class="button-row">
         <button id="calc-btn">Calculate</button>
+        <a href="help.html" class="secondary-btn" style="text-decoration:none;">Help</a>
       </div>
     </div>
 

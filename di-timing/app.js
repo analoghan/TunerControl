@@ -6,6 +6,7 @@
  * and before the ignition event (with safety margin).
  */
 
+// Only calculate when button is clicked — not on page load
 document.getElementById('calc-btn').addEventListener('click', calculate);
 
 function calculate() {
@@ -18,24 +19,42 @@ function calculate() {
     var overlap = parseFloat(document.getElementById('overlap').value) || 0;
     var maxRpm = parseInt(document.getElementById('max-rpm').value, 10) || 7000;
     var rpmStep = parseInt(document.getElementById('rpm-step').value, 10) || 500;
-    var safetyMargin = parseFloat(document.getElementById('safety-margin').value) || 15;
     var maxSpark = parseFloat(document.getElementById('max-spark').value) || 35;
+    var startLimit = parseFloat(document.getElementById('start-limit').value) || 330;
+    var startMargin = parseFloat(document.getElementById('start-margin').value) || 20;
+    var primaryLimit = parseFloat(document.getElementById('primary-limit').value) || 90;
 
     // Compute valve events in MoTeC 720° reference
-    // 0° = Power stroke TDC, 180° = BDC, 360° = TDC overlap, 540° = BDC, 720° = Compression TDC
     var exhaustCenterlineBTDC = lsa + camAdvance;
     var evo720 = 360 - (exhaustCenterlineBTDC + exhaustDuration / 2);
     var evc720 = 360 - (exhaustCenterlineBTDC - exhaustDuration / 2);
     var ivo720 = 360 + (intakeCenterline - intakeDuration / 2);
     var ivc720 = 360 + (intakeCenterline + intakeDuration / 2);
 
-    // DI injection window
-    var windowStart = Math.max(evc720, ivo720); // after EVC (and IVO if later)
-    var latestIgnition = 720 - maxSpark; // latest possible ignition point
-    var windowEnd = latestIgnition - safetyMargin; // must finish before ignition
+    // Convert valve events to dBTDC (degrees before TDC compression = 720)
+    var evc_dBTDC = 720 - evc720;
+    var ivo_dBTDC = 720 - ivo720;
 
-    // Recommended SOI: just after EVC with small buffer
-    var recommendedSOI = Math.ceil(windowStart + 5);
+    // MoTeC DI timing is in dBTDC:
+    // - Higher dBTDC = earlier in the cycle
+    // - Start Limit (330°) = earliest SOI allowed (just after EVC)
+    // - Primary Limit (90°) = latest EOI allowed (must finish by this point)
+    // - Table value = the SOI the ECU will use (clamped by start limit)
+
+    // Effective start limit with margin
+    var effectiveStartLimit = startLimit - startMargin; // 310° dBTDC
+
+    // The ideal SOI should be just after EVC
+    // EVC in dBTDC = 720 - evc720
+    // We want SOI slightly after EVC: SOI_dBTDC = EVC_dBTDC - small_buffer
+    // (lower dBTDC = later in cycle = after EVC)
+    var idealSOI_dBTDC = evc_dBTDC - 5; // 5° after EVC
+
+    // But SOI cannot exceed the start limit
+    var clampedSOI_dBTDC = Math.min(idealSOI_dBTDC, effectiveStartLimit);
+
+    // Compression stroke starts at 180° dBTDC (= 540° in 720° scale = BDC)
+    var compressionStart_dBTDC = 180;
 
     // Build RPM table
     var rpmPoints = [];
@@ -43,67 +62,68 @@ function calculate() {
         rpmPoints.push(rpm);
     }
 
-    // For DI, SOI timing varies with RPM because pulse width converts to more
-    // crank degrees at higher RPM. The Excel calculator shows:
-    // Crank degrees = (PW_ms / 1000) * (RPM / 60) * 360
-    // We need SOI early enough that EOI doesn't reach into compression/ignition zone.
-
-    // MoTeC DI programmed value convention:
-    // Programmed SOI = 360 - (SOI in degrees ATDC overlap)
-    // So if SOI is 43.75° ATDC overlap, programmed value = 316.25°
-    // This means higher programmed values = earlier in the cycle (more advance)
-
-    // Optimal SOI: midpoint between EVC and a reasonable point in the intake stroke
-    // The Excel shows: Optimal SOI = EVC_ATDC + (some offset based on overlap)
-    var evcATDC = evc720 - 360; // EVC relative to TDC overlap (positive = ATDC)
-    var ivoATDC = ivo720 - 360; // IVO relative to TDC overlap (negative = BTDC)
-
-    // Optimal SOI is just after EVC (or TDC if EVC is before TDC)
-    var optimalSOI_ATDC = Math.max(evcATDC, 0) + 5; // 5° buffer after EVC or TDC
-
-    // Programmed value for MoTeC: 360 - ATDC angle
-    var programmedSOI = 360 - optimalSOI_ATDC;
-
-    // Build RPM table with pulse-width-dependent validation
-    var rpmPoints = [];
-    for (var rpm = 0; rpm <= maxRpm; rpm += rpmStep) {
-        rpmPoints.push(rpm);
-    }
-
-    // For each RPM, compute how many crank degrees a typical pulse width spans
-    // and verify EOI doesn't hit the ignition zone
+    // For each RPM, compute the SOI that avoids compression stroke injection
+    // At higher RPM, pulse width spans more crank degrees, so SOI needs to advance (higher dBTDC)
     var soiValues = [];
     var validationResults = [];
-    var typicalPW = [2, 3, 4, 5, 6, 8, 10, 12]; // ms range for reference
+    var suggestions = [];
 
     for (var i = 0; i < rpmPoints.length; i++) {
         var rpm = rpmPoints[i];
-        soiValues.push(Math.round(programmedSOI * 10) / 10);
 
-        // Validate at a mid-range pulse width (6ms)
-        var pwMs = 6;
-        var crankDegrees = rpm > 0 ? (pwMs / 1000) * (rpm / 60) * 360 : 0;
-        var eoiATDC = optimalSOI_ATDC + crankDegrees;
-        var eoiBeforeIgnition = (360 - eoiATDC) > (maxSpark + safetyMargin); // degrees left before TDC compression
+        // At low RPM, use the ideal SOI (just after EVC)
+        // At high RPM, advance SOI so EOI stays before compression
+        // Assume a reference pulse width that scales with RPM (rough estimate)
+        var refPW_ms = 4; // typical mid-load DI pulse width
+        var crankDegPerMs = rpm > 0 ? (rpm / 60) * 360 / 1000 : 0;
+        var refCrankDeg = refPW_ms * crankDegPerMs;
+
+        // SOI needed to keep EOI before compression start:
+        // EOI_dBTDC = SOI_dBTDC - crankDeg (EOI is later = lower dBTDC)
+        // Want EOI_dBTDC >= compressionStart_dBTDC
+        // So SOI_dBTDC >= compressionStart_dBTDC + crankDeg
+        var minSOI_forCompression = compressionStart_dBTDC + refCrankDeg;
+
+        // Use the higher of: ideal SOI or the RPM-adjusted minimum
+        var soiForRpm = Math.max(clampedSOI_dBTDC, minSOI_forCompression);
+
+        // Clamp to start limit
+        soiForRpm = Math.min(soiForRpm, effectiveStartLimit);
+
+        soiValues.push(Math.round(soiForRpm));
+
+        // Validation at various pulse widths
+        var maxPW_beforeCompression = compressionStart_dBTDC < soiForRpm ?
+            (soiForRpm - compressionStart_dBTDC) / crankDegPerMs : 999;
+        var maxPW_beforePrimaryLimit = primaryLimit < soiForRpm ?
+            (soiForRpm - primaryLimit) / crankDegPerMs : 999;
 
         validationResults.push({
             rpm: rpm,
-            crankDeg: crankDegrees,
-            eoiATDC: eoiATDC,
-            startsAfterEVC: optimalSOI_ATDC >= evcATDC,
-            startsAfterTDC: optimalSOI_ATDC >= 0,
-            intoCompression: eoiATDC > 180, // past BDC = compression stroke
-            clearOfIgnition: eoiBeforeIgnition
+            soi_dBTDC: soiForRpm,
+            crankDegPerMs: crankDegPerMs,
+            maxPW_noCompression: rpm > 0 ? maxPW_beforeCompression : 999,
+            maxPW_withinLimit: rpm > 0 ? maxPW_beforePrimaryLimit : 999,
+            eoi6ms_dBTDC: soiForRpm - (6 * crankDegPerMs),
+            intoCompression: rpm > 0 && (soiForRpm - 6 * crankDegPerMs) < compressionStart_dBTDC,
+            exceedsPrimaryLimit: rpm > 0 && (soiForRpm - 6 * crankDegPerMs) < primaryLimit,
         });
+    }
+
+    // Check if start limit needs adjustment based on cam
+    if (evc_dBTDC > startLimit) {
+        suggestions.push('Your EVC is at ' + evc_dBTDC.toFixed(0) + '° dBTDC but the Injection Start Limit is ' + startLimit + '°. The start limit is already after EVC — this is correct.');
+    } else if (evc_dBTDC > effectiveStartLimit) {
+        suggestions.push('⚠ Your EVC is at ' + evc_dBTDC.toFixed(0) + '° dBTDC. With the ' + startMargin + '° margin, effective start is ' + effectiveStartLimit + '° which is before EVC. Consider increasing Start Limit to ' + (evc_dBTDC + startMargin + 5) + '° to ensure injection always starts after EVC.');
     }
 
     // Render results
     document.getElementById('results-section').hidden = false;
     renderValveEvents(evo720, evc720, ivo720, ivc720);
-    renderInjectionWindow(windowStart, windowEnd, programmedSOI, optimalSOI_ATDC, evcATDC, evc720, ivo720, latestIgnition, safetyMargin);
-    renderSOITable(rpmPoints, soiValues, validationResults);
-    renderDiagram(evo720, evc720, ivo720, ivc720, optimalSOI_ATDC + 360, windowEnd);
-    renderNotes(intakeDuration, exhaustDuration, intakeCenterline, lsa, camAdvance, overlap, windowStart, windowEnd, programmedSOI, optimalSOI_ATDC, validationResults);
+    renderInjectionWindow(evc_dBTDC, startLimit, startMargin, effectiveStartLimit, primaryLimit, clampedSOI_dBTDC, compressionStart_dBTDC, maxSpark);
+    renderSOITable(rpmPoints, soiValues, validationResults, startLimit, primaryLimit, compressionStart_dBTDC);
+    renderDiagram(evo720, evc720, ivo720, ivc720, 720 - clampedSOI_dBTDC, 720 - primaryLimit);
+    renderNotes(intakeDuration, exhaustDuration, intakeCenterline, lsa, camAdvance, overlap, clampedSOI_dBTDC, startLimit, startMargin, primaryLimit, validationResults, suggestions);
 }
 
 function renderValveEvents(evo, evc, ivo, ivc) {
@@ -130,51 +150,72 @@ function ivoDesc(ivo) {
     return (360 - ivo).toFixed(1) + '° BTDC overlap';
 }
 
-function renderInjectionWindow(windowStart, windowEnd, programmedSOI, optimalATDC, evcATDC, evc, ivo, latestIgnition, margin) {
-    var windowSize = windowEnd - windowStart;
+function renderInjectionWindow(evc_dBTDC, startLimit, startMargin, effectiveStart, primaryLimit, soiValue, compressionStart, maxSpark) {
     var html = '<div class="window-info">';
-    html += '<p>Exhaust valve closes at: <b>' + evc.toFixed(1) + '°</b> (' + evcATDC.toFixed(1) + '° ATDC overlap)</p>';
-    html += '<p>Intake valve opens at: <b>' + ivo.toFixed(1) + '°</b></p>';
-    html += '<p>Latest ignition event: <b>' + latestIgnition.toFixed(0) + '°</b> (' + (720 - latestIgnition).toFixed(0) + '° BTDC compression)</p>';
-    html += '<p>Safety margin: <b>' + margin + '°</b> before ignition</p>';
+    html += '<p>EVC: <b>' + evc_dBTDC.toFixed(0) + '° dBTDC</b></p>';
+    html += '<p>Injection Start Limit: <b>' + startLimit + '° dBTDC</b> (margin: ' + startMargin + '° → effective: ' + effectiveStart + '°)</p>';
+    html += '<p>Primary Limit (EOI must finish by): <b>' + primaryLimit + '° dBTDC</b></p>';
+    html += '<p>Compression stroke starts at: <b>' + compressionStart + '° dBTDC</b></p>';
     html += '<hr style="border-color:#333;margin:12px 0;">';
-    html += '<p>Optimal SOI: <b class="safe">' + optimalATDC.toFixed(1) + '° ATDC</b> (intake stroke)</p>';
-    html += '<p>MoTeC Programmed Value: <b class="safe">' + programmedSOI.toFixed(1) + '°</b> (enter this in Fuel Timing Primary Main)</p>';
-    html += '<p>Available window: <b>' + windowSize.toFixed(0) + '°</b> of crank rotation</p>';
+    html += '<p>Calculated SOI: <b class="safe">' + soiValue.toFixed(0) + '° dBTDC</b></p>';
+    html += '<p>Available window (SOI to compression): <b>' + (soiValue - compressionStart).toFixed(0) + '°</b> of crank rotation before compression</p>';
+    html += '<p>Hard EOI limit window (SOI to Primary Limit): <b>' + (soiValue - primaryLimit).toFixed(0) + '°</b></p>';
 
-    if (windowSize < 100) {
-        html += '<p class="warn">⚠ Narrow injection window (' + windowSize.toFixed(0) + '°). Consider split injection at high RPM/load.</p>';
-    }
-    if (windowSize > 250) {
-        html += '<p class="safe">✓ Wide injection window — single-shot injection viable across all RPM.</p>';
+    if (soiValue > effectiveStart) {
+        html += '<p class="warn">⚠ Calculated SOI (' + soiValue.toFixed(0) + '°) exceeds effective start limit (' + effectiveStart + '°). The ECU will clamp to ' + effectiveStart + '°.</p>';
     }
     html += '</div>';
     document.getElementById('injection-window').innerHTML = html;
 }
 
-function renderSOITable(rpmPoints, soiValues, validationResults) {
+function renderSOITable(rpmPoints, soiValues, validationResults, startLimit, primaryLimit, compressionStart) {
     var container = document.getElementById('soi-table');
 
-    // Main SOI table
+    // Main SOI table (dBTDC values for MoTeC)
     var html = '<table class="soi-table"><thead><tr><th>RPM</th>';
     for (var i = 0; i < rpmPoints.length; i++) html += '<th>' + rpmPoints[i] + '</th>';
-    html += '</tr></thead><tbody><tr><td style="font-weight:600;color:#b0b0b0;">SOI (°)</td>';
+    html += '</tr></thead><tbody><tr><td style="font-weight:600;color:#b0b0b0;">SOI (° dBTDC)</td>';
     for (var i = 0; i < soiValues.length; i++) html += '<td>' + soiValues[i] + '</td>';
     html += '</tr></tbody></table>';
 
-    // Validation table (pulse width analysis at 6ms)
-    html += '<h3 style="margin-top:16px;font-size:0.9rem;color:#b0b0b0;">Injection Duration Analysis (at 6ms pulse width)</h3>';
-    html += '<table class="soi-table"><thead><tr><th>RPM</th><th>Crank °</th><th>EOI (°ATDC)</th><th>After EVC?</th><th>Into Compression?</th><th>Clear of Ignition?</th></tr></thead><tbody>';
+    // Max injection time vs RPM (before compression)
+    html += '<h3 style="margin-top:20px;font-size:0.95rem;color:#fff;">Maximum Injection Time vs RPM</h3>';
+    html += '<p style="font-size:0.8rem;color:#888;margin-bottom:8px;">Maximum pulse width before injection extends into the compression stroke (180° dBTDC). Exceeding this means fuel is injected during compression — avoid if possible.</p>';
+    html += '<table class="soi-table"><thead><tr><th>RPM</th>';
+    for (var i = 0; i < validationResults.length; i++) {
+        if (validationResults[i].rpm === 0) continue;
+        html += '<th>' + validationResults[i].rpm + '</th>';
+    }
+    html += '</tr></thead><tbody><tr><td style="font-weight:600;color:#b0b0b0;">Max PW (ms)</td>';
+    for (var i = 0; i < validationResults.length; i++) {
+        var v = validationResults[i];
+        if (v.rpm === 0) continue;
+        var maxPW = v.maxPW_noCompression;
+        var cls = maxPW < 4 ? 'color:#f44336;font-weight:600;' : maxPW < 8 ? 'color:#ff9800;' : 'color:#4caf50;';
+        html += '<td style="' + cls + '">' + (maxPW > 50 ? '>50' : maxPW.toFixed(1)) + '</td>';
+    }
+    html += '</tr><tr><td style="font-weight:600;color:#b0b0b0;">Max PW to Limit (ms)</td>';
+    for (var i = 0; i < validationResults.length; i++) {
+        var v = validationResults[i];
+        if (v.rpm === 0) continue;
+        var maxPW = v.maxPW_withinLimit;
+        html += '<td style="color:#b0b0b0;">' + (maxPW > 50 ? '>50' : maxPW.toFixed(1)) + '</td>';
+    }
+    html += '</tr></tbody></table>';
+    html += '<p style="font-size:0.75rem;color:#666;margin-top:4px;">Row 1: max PW before compression stroke. Row 2: max PW before Primary Limit (' + primaryLimit + '° dBTDC) truncates the pulse.</p>';
+
+    // Validation at 6ms
+    html += '<h3 style="margin-top:20px;font-size:0.95rem;color:#fff;">Injection Duration Analysis (at 6ms pulse width)</h3>';
+    html += '<table class="soi-table"><thead><tr><th>RPM</th><th>Crank °</th><th>EOI (° dBTDC)</th><th>Into Compression?</th><th>Exceeds Primary Limit?</th></tr></thead><tbody>';
     for (var i = 0; i < validationResults.length; i++) {
         var v = validationResults[i];
         if (v.rpm === 0) continue;
         html += '<tr>';
         html += '<td style="color:#b0b0b0;">' + v.rpm + '</td>';
-        html += '<td>' + v.crankDeg.toFixed(1) + '°</td>';
-        html += '<td>' + v.eoiATDC.toFixed(1) + '°</td>';
-        html += '<td style="color:' + (v.startsAfterEVC ? '#4caf50' : '#f44336') + ';">' + (v.startsAfterEVC ? 'Yes' : 'No') + '</td>';
-        html += '<td style="color:' + (v.intoCompression ? '#ff9800' : '#4caf50') + ';">' + (v.intoCompression ? 'Yes' : 'No') + '</td>';
-        html += '<td style="color:' + (v.clearOfIgnition ? '#4caf50' : '#f44336') + ';">' + (v.clearOfIgnition ? 'Yes' : 'No') + '</td>';
+        html += '<td>' + (6 * v.crankDegPerMs).toFixed(1) + '°</td>';
+        html += '<td>' + v.eoi6ms_dBTDC.toFixed(0) + '°</td>';
+        html += '<td style="color:' + (v.intoCompression ? '#f44336' : '#4caf50') + ';font-weight:' + (v.intoCompression ? '600' : 'normal') + ';">' + (v.intoCompression ? 'YES — avoid' : 'No') + '</td>';
+        html += '<td style="color:' + (v.exceedsPrimaryLimit ? '#f44336' : '#4caf50') + ';">' + (v.exceedsPrimaryLimit ? 'YES — pulse truncated' : 'No') + '</td>';
         html += '</tr>';
     }
     html += '</tbody></table>';
@@ -280,25 +321,28 @@ function renderDiagram(evo, evc, ivo, ivc, soi, windowEnd) {
     ctx.fillText('Latest EOI ' + windowEnd + '°', xPos(windowEnd) - 3, barY + 68);
 }
 
-function renderNotes(intDur, exhDur, intCL, lsa, advance, overlap, winStart, winEnd, programmedSOI, optimalATDC, validationResults) {
+function renderNotes(intDur, exhDur, intCL, lsa, advance, overlap, soiValue, startLimit, startMargin, primaryLimit, validationResults, suggestions) {
     var notes = [];
-    notes.push('<b>MoTeC Setup:</b> Set Fuel Timing Primary Edge to "Start of Injection". Enter <b>' + programmedSOI.toFixed(1) + '°</b> across all RPM breakpoints as starting value.');
-    notes.push('<b>Reference convention:</b> MoTeC DI programmed value = 360 - (SOI degrees ATDC overlap). Higher values = earlier injection (more advance into exhaust stroke).');
-    notes.push('<b>Optimal SOI:</b> ' + optimalATDC.toFixed(1) + '° ATDC overlap — just after exhaust valve closes, fuel enters as intake valve opens.');
+    notes.push('<b>MoTeC Setup:</b> Set Fuel Timing Primary Edge to "Start of Injection". Enter <b>' + soiValue.toFixed(0) + '° dBTDC</b> across all RPM/MAP breakpoints as starting value.');
+    notes.push('<b>Injection Start Limit:</b> Currently ' + startLimit + '° with ' + startMargin + '° margin (effective ' + (startLimit - startMargin) + '°). This prevents injection from starting before EVC.');
+    notes.push('<b>Primary Limit:</b> Currently ' + primaryLimit + '° dBTDC. Injection will be truncated if EOI would exceed this point — engine will run lean.');
+    notes.push('<b>⚠ Avoid compression stroke injection:</b> Injecting during compression risks spraying fuel into the flame front, causing misfires, detonation, and piston damage. The Max PW table shows the limit at each RPM.');
 
-    // Check if any RPM points have issues
-    var compressionIssues = validationResults.filter(function(v) { return v.intoCompression && v.rpm > 0; });
-    if (compressionIssues.length > 0) {
-        notes.push('<b>Note:</b> At 6ms pulse width, injection extends into the compression stroke above ' + compressionIssues[0].rpm + ' RPM. This is normal for DI — fuel can be injected up to ~10-15° before ignition.');
+    for (var i = 0; i < suggestions.length; i++) {
+        notes.push(suggestions[i]);
     }
 
-    var clearanceIssues = validationResults.filter(function(v) { return !v.clearOfIgnition && v.rpm > 0; });
-    if (clearanceIssues.length > 0) {
-        notes.push('<b>⚠ Warning:</b> At 6ms pulse width, EOI approaches the ignition zone above ' + clearanceIssues[0].rpm + ' RPM. Consider split injection or verify actual pulse width at these RPMs.');
+    var compressionIssues = validationResults.filter(function(v) { return v.intoCompression && v.rpm > 0; });
+    if (compressionIssues.length > 0) {
+        notes.push('<b>Note:</b> At 6ms pulse width, injection extends into compression above ' + compressionIssues[0].rpm + ' RPM. Verify actual pulse width — if exceeded, consider split injection or higher fuel pressure.');
+    }
+
+    var truncationIssues = validationResults.filter(function(v) { return v.exceedsPrimaryLimit && v.rpm > 0; });
+    if (truncationIssues.length > 0) {
+        notes.push('<b>⚠ Warning:</b> At 6ms pulse width, the Primary Limit (' + primaryLimit + '°) would truncate injection above ' + truncationIssues[0].rpm + ' RPM. Engine will run lean at these points.');
     }
 
     notes.push('<b>Tuning tip:</b> After VE table is dialed in, try adjusting SOI ±10-20° and watch for lambda changes. Richer without VE change = more efficient injection point found.');
-    notes.push('<b>Split injection:</b> For high-load conditions, some DI systems split into two events (intake + compression). The primary SOI covers the main intake-stroke event.');
     notes.push('<b>Cam specs:</b> Intake ' + intDur + '°/' + exhDur + '° duration @ .050", ' + intCL + '° ICL, ' + lsa + '°+' + advance + '° LSA, ' + overlap + '° overlap.');
 
     var html = '<ul class="notes-list">';
@@ -307,5 +351,4 @@ function renderNotes(intDur, exhDur, intCL, lsa, advance, overlap, winStart, win
     document.getElementById('notes-content').innerHTML = html;
 }
 
-// Auto-calculate on page load with defaults
-document.addEventListener('DOMContentLoaded', calculate);
+// Wait for user to click Calculate
