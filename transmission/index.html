@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transmission Shift Analyzer — TunerControl</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../turbolamik/index.html" aria-label="Back to TurboLamik Transmission">&larr; Back to TurboLamik Transmission</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Transmission Shift Analyzer</h1>
+    <p class="subtitle">TurboLamik 8HP shift quality analysis — load a TunerPro RT CSV log to analyze shift events, clutch slip, and downshift harshness.</p>
+
+    <section class="file-section">
+      <div class="file-row">
+        <label for="log-input">TurboLamik Log (CSV):</label>
+        <input type="file" id="log-input" accept=".csv" />
+      </div>
+      <div class="button-row">
+        <button id="analyze-btn" disabled>Analyze Shifts</button>
+      </div>
+      <div id="file-error" class="error-message" hidden></div>
+    </section>
+
+    <div id="error-container" class="error-banner" hidden></div>
+
+    <div id="progress-section" class="progress-section" hidden>
+      <div class="progress-bar-track">
+        <div id="progress-bar" class="progress-bar-fill" style="width:0%"></div>
+      </div>
+      <div class="progress-text">
+        <span id="progress-pct">0%</span>
+        <span id="progress-phase"></span>
+      </div>
+    </div>
+
+    <section id="results-section" class="results-section" hidden>
+      <div class="report-block">
+        <h2>Shift Summary</h2>
+        <div id="summary-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Downshift Harshness Analysis</h2>
+        <p class="section-desc">Downshifts sorted by harshness score. High scores indicate aggressive clutch engagement causing engine braking shudder.</p>
+        <div id="downshift-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Upshift Clutch Slip Analysis</h2>
+        <p class="section-desc">Upshifts under power sorted by slip duration. Long slip = excessive clutch wear and heat generation.</p>
+        <div id="upshift-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Per-Clutch Health</h2>
+        <p class="section-desc">Aggregated statistics per clutch element (A through E). The 8HP uses specific clutches for specific gear transitions.</p>
+        <div id="clutch-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Diagnostics &amp; Recommendations</h2>
+        <div id="diagnostics-content"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="worker.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

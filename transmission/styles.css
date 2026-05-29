@@ -1,0 +1,45 @@
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.5; color: #ffffff; background: #0a0a0a; }
+.app-container { max-width: 1100px; margin: 0 auto; padding: 24px; background: #1a1a1a; border-radius: 8px; border: 1px solid #333; }
+.top-nav { display: flex; align-items: center; margin-bottom: 20px; }
+.top-nav a { color: #E31837; text-decoration: none; font-size: 0.9rem; }
+.top-nav a:hover { text-decoration: underline; color: #ff2d4a; }
+.nav-logo { height: 64px; margin-left: auto; }
+h1 { margin: 0 0 4px; font-size: 1.6rem; font-weight: 600; }
+h2 { margin: 0 0 8px; font-size: 1.2rem; color: #E31837; }
+.subtitle { color: #b0b0b0; margin: 0 0 20px; font-size: 0.9rem; }
+.section-desc { color: #888; font-size: 0.85rem; margin: 0 0 12px; font-style: italic; }
+.file-section { margin-bottom: 16px; }
+.file-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.file-row label { min-width: 160px; font-weight: 500; color: #b0b0b0; }
+.file-row input[type="file"]::file-selector-button { padding: 6px 14px; font-size: 0.85rem; color: #fff; background: #222; border: 1px solid #E31837; border-radius: 4px; cursor: pointer; }
+.button-row { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
+#analyze-btn { padding: 10px 28px; font-size: 1rem; font-weight: 600; color: #fff; background: #E31837; border: none; border-radius: 4px; cursor: pointer; }
+#analyze-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+#analyze-btn:hover:not(:disabled) { background: #ff2d4a; }
+.error-banner { background: rgba(244,67,54,0.15); border: 1px solid #f44336; border-radius: 4px; padding: 12px 16px; margin: 16px 0; color: #f44336; font-weight: 500; }
+.error-message { color: #f44336; font-size: 0.85rem; margin-top: 8px; }
+.progress-section { margin: 16px 0; }
+.progress-bar-track { width: 100%; height: 22px; background: #222; border-radius: 11px; overflow: hidden; }
+.progress-bar-fill { height: 100%; background: linear-gradient(90deg, #E31837, #ff2d4a); border-radius: 11px; transition: width 0.3s; }
+.progress-text { display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.85rem; color: #b0b0b0; }
+.results-section { margin-top: 20px; }
+.report-block { background: #111; border: 1px solid #333; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.summary-stat { background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 12px; text-align: center; }
+.summary-stat .stat-value { display: block; font-size: 1.3rem; font-weight: 700; color: #fff; }
+.summary-stat .stat-label { display: block; font-size: 0.75rem; color: #888; margin-top: 4px; }
+.shift-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 8px; }
+.shift-table th, .shift-table td { padding: 6px 10px; border: 1px solid #333; text-align: center; }
+.shift-table thead th { background: #222; color: #fff; font-weight: 600; position: sticky; top: 0; }
+.shift-table tbody tr:nth-child(even) { background: #1a1a1a; }
+.shift-table td { color: #ccc; }
+.severity-high { color: #f44336; font-weight: 600; }
+.severity-medium { color: #ff9800; font-weight: 600; }
+.severity-low { color: #4caf50; }
+.diagnostic { padding: 10px 14px; margin-bottom: 8px; border-radius: 4px; border-left: 3px solid; font-size: 0.9rem; }
+.diagnostic-critical { background: rgba(244,67,54,0.1); border-left-color: #f44336; color: #f44336; }
+.diagnostic-warning { background: rgba(255,152,0,0.1); border-left-color: #ff9800; color: #ff9800; }
+.diagnostic-info { background: rgba(33,150,243,0.1); border-left-color: #2196f3; color: #2196f3; }
+.diagnostic-healthy { background: rgba(76,175,80,0.1); border-left-color: #4caf50; color: #4caf50; }
+[hidden] { display: none !important; }

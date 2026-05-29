@@ -70,6 +70,18 @@
             color: #b0b0b0;
             line-height: 1.4;
         }
+
+        .card.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .card.disabled h2::after {
+            content: ' (Coming Soon)';
+            font-size: 0.75rem;
+            color: #666;
+            font-weight: 400;
+        }
     </style>
 </head>
 <body>
@@ -78,33 +90,21 @@
     </header>
 
     <nav class="nav-cards">
-        <a href="ve-table/index.html" class="card">
-            <h2>VE Table Tuning</h2>
-            <p>Analyze and correct volumetric efficiency tables using MoTeC log data and existing VE maps.</p>
+        <a href="motec/index.html" class="card">
+            <h2>MoTeC M1 Tuning</h2>
+            <p>VE table correction, injector characterization, knock analysis, idle behavior, DI fuel pressure, and cross-tool diagnostics for MoTeC M1 ECUs.</p>
         </a>
-        <a href="injector/index.html" class="card">
-            <h2>Injector Characterization</h2>
-            <p>Lean spike analysis, injector pulsewidth stability, DI fuel pressure, injection timing, and closed-loop fuel trim diagnostics.</p>
+        <a href="#" class="card disabled">
+            <h2>Haltech Tuning</h2>
+            <p>Haltech ECU tuning tools — log analysis, fuel and ignition diagnostics.</p>
         </a>
-        <a href="knock/index.html" class="card">
-            <h2>Knock Analyzer</h2>
-            <p>Per-cylinder knock event detection, operating condition correlation, and timing adjustment recommendations from MoTeC log data.</p>
-        </a>
-        <a href="idle/index.html" class="card">
-            <h2>Idle Behavior Analyzer</h2>
-            <p>Deceleration idle hang detection, settle time analysis, and mass flow correlation from MoTeC log data.</p>
-        </a>
-        <a href="fuel-pressure/index.html" class="card">
-            <h2>DI Fuel Pressure Deep Dive</h2>
-            <p>Rail pressure vs aim analysis, overshoot/undershoot detection, and operating condition correlation for DI fuel system diagnostics.</p>
+        <a href="turbolamik/index.html" class="card">
+            <h2>TurboLamik Transmission</h2>
+            <p>ZF 8HP shift quality analysis: downshift harshness, upshift clutch slip, per-clutch health, and shift time diagnostics.</p>
         </a>
         <a href="calculators/index.html" class="card">
             <h2>Calculators</h2>
-            <p>Quick unit conversions for tuning: kPa↔PSI, °C↔°F, AFR↔Lambda, km/h↔mph. Bidirectional — edit either value.</p>
-        </a>
-        <a href="diagnostics/index.html" class="card">
-            <h2>Cross-Tool Diagnostics</h2>
-            <p>Unified analysis: load one log file and get correlated diagnostics across fueling, knock, pressure, and idle — identifying root causes, not just symptoms.</p>
+            <p>Quick bidirectional unit conversions: kPa↔PSI↔Bar, °C↔°F, AFR↔Lambda, km/h↔mph. Plus Lambda fuel charts for gasoline and E85.</p>
         </a>
     </nav>
 </body>
