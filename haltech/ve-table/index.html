@@ -3,80 +3,144 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VE Table Tuning — Haltech Nexus — TunerControl</title>
+  <title>VE Table Tuning Tool — Haltech Nexus</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="app-container">
     <nav class="top-nav">
-      <a href="../index.html" aria-label="Back to Haltech">&larr; Back to Haltech</a>
+      <a href="../index.html" aria-label="Back to Haltech Tuning">&larr; Back to Haltech Tuning</a>
       <img src="../../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
     </nav>
 
-    <h1>VE Table Tuning</h1>
-    <p class="subtitle">Analyze Haltech NSP datalogs against the current VE table to compute per-cell corrections. Load a log and optionally a VE table CSV export.</p>
+    <h1>VE Table Tuning Tool</h1>
 
-    <section class="file-section">
+    <!-- File inputs and settings -->
+    <div class="form-section">
       <div class="file-row">
-        <label for="log-input">NSP Datalog (.csv):</label>
+        <label for="log-input">NSP Datalog:</label>
         <input type="file" id="log-input" accept=".csv" />
+        <span id="log-filename" class="filename-display">No file selected</span>
       </div>
-      <div class="file-row">
-        <label for="ve-input">VE Table Export (.csv, optional):</label>
-        <input type="file" id="ve-input" accept=".csv" />
-      </div>
-      <div class="button-row">
-        <button id="analyze-btn" disabled>Analyze VE</button>
-      </div>
-    </section>
 
+      <div class="file-row">
+        <label for="ve-input">VE Table CSV:</label>
+        <input type="file" id="ve-input" accept=".csv" />
+        <span id="ve-filename" class="filename-display">No file selected</span>
+      </div>
+
+      <div class="file-row">
+        <label for="hit-threshold">Min Hit Count:</label>
+        <input type="number" id="hit-threshold" min="1" value="50" style="width: 80px;" />
+        <span class="filename-display">Cells need more than this many samples to be included</span>
+      </div>
+
+      <div class="file-row">
+        <label for="min-coolant-temp">Min Coolant Temp (°C):</label>
+        <input type="number" id="min-coolant-temp" min="0" max="120" value="55" step="1" style="width: 80px;" />
+        <span class="filename-display">Discard samples below this coolant temperature</span>
+      </div>
+
+      <div class="file-row">
+        <label for="min-run-time">Min Run Time (s):</label>
+        <input type="number" id="min-run-time" min="0" max="600" value="60" step="1" style="width: 80px;" />
+        <span class="filename-display">Discard samples before this many seconds from log start</span>
+      </div>
+
+      <div class="file-row">
+        <label for="min-change-amount">Min Change Amount (%):</label>
+        <input type="number" id="min-change-amount" min="0" max="50" value="0" step="0.1" style="width: 80px;" />
+        <span class="filename-display">Zero out corrections smaller than this absolute value</span>
+      </div>
+
+      <div class="file-row">
+        <label for="scaling-factor">Scaling Factor (%):</label>
+        <input type="number" id="scaling-factor" min="1" max="100" value="100" step="1" style="width: 80px;" />
+        <span class="filename-display">Apply only this percentage of the recommended correction (e.g., 75 for conservative)</span>
+      </div>
+
+      <div class="file-row">
+        <label for="outlier-sigma">Outlier Filter (σ):</label>
+        <input type="number" id="outlier-sigma" min="0" max="10" value="0" step="0.5" style="width: 80px;" />
+        <span class="filename-display">Discard samples beyond N standard deviations from cell mean (0 = disabled)</span>
+      </div>
+
+      <div class="file-row">
+        <label for="max-tps-rate">Max TPS Rate (%/s):</label>
+        <input type="number" id="max-tps-rate" min="0" max="1000" value="0" step="10" style="width: 80px;" />
+        <span class="filename-display">Discard samples where throttle is changing faster than this rate (0 = disabled)</span>
+      </div>
+
+      <div class="file-row">
+        <label for="smoothing">Smoothing:</label>
+        <input type="number" id="smoothing" min="0" max="10" value="0" step="0.5" style="width: 80px;" />
+        <span class="filename-display">Gaussian smoothing radius for corrections (0 = disabled, 1–3 = light, 4+ = heavy)</span>
+      </div>
+
+      <div class="button-row">
+        <button id="analyze-btn" disabled>Process</button>
+        <a href="help.html" class="help-link-btn">Help</a>
+      </div>
+    </div>
+
+    <!-- Error banner -->
     <div id="error-container" class="error-banner" hidden></div>
 
+    <!-- Warning banner -->
+    <div id="warning-container" class="warning-banner" hidden></div>
+
+    <!-- Progress bar -->
     <div id="progress-section" class="progress-section" hidden>
       <div class="progress-bar-track">
-        <div id="progress-bar" class="progress-bar-fill" style="width:0%"></div>
+        <div id="progress-bar" class="progress-bar-fill" style="width: 0%"></div>
       </div>
-      <div class="progress-text">
+      <div class="progress-labels">
         <span id="progress-pct">0%</span>
         <span id="progress-phase"></span>
       </div>
     </div>
 
-    <section id="results-section" class="results-section" hidden>
-      <div class="report-block">
-        <h2>Analysis Summary</h2>
-        <div id="summary-content"></div>
+    <!-- Results -->
+    <div id="results-section" class="results-section" hidden>
+      <p id="stats-line" class="stats-line"></p>
+
+      <div id="download-btns" class="download-buttons" hidden>
+        <button id="download-diff-btn">Download VE_Difference.csv</button>
+        <button id="download-new-btn">Download VE_New_Values.csv</button>
+        <button id="copy-table-btn">Copy Table to Clipboard</button>
       </div>
 
-      <div class="report-block">
-        <h2>VE Correction Map (%)</h2>
-        <p class="section-desc">Percentage change needed per cell. Green = needs more fuel (lean), Red = needs less fuel (rich). Empty cells have insufficient data (&lt;50 hits).</p>
-        <div id="diff-grid" class="grid-container"></div>
-        <div class="button-row">
-          <button id="copy-diff-btn" class="secondary-btn" hidden>Copy Correction CSV</button>
+      <div id="table-toggle" class="table-toggle" hidden>
+        <button class="toggle-btn active" data-view="correction">Correction %</button>
+        <button class="toggle-btn" data-view="newvalues">New VE Values</button>
+        <button class="toggle-btn" data-view="hits">Hit Counts</button>
+        <button class="toggle-btn" data-view="stddev">Std Dev</button>
+        <button class="toggle-btn" data-view="trim">CL Trim</button>
+      </div>
+
+      <h3 id="table-label" class="table-label" hidden></h3>
+      <div id="table-grid" class="table-container"></div>
+
+      <!-- 3D Surface Plot -->
+      <div id="surface-section" class="surface-section" hidden>
+        <h3 class="table-label">3D Surface Plot — Drag to rotate, scroll to zoom</h3>
+        <div class="surface-controls">
+          <label for="surface-data-select">Data:</label>
+          <select id="surface-data-select">
+            <option value="corrections">Correction %</option>
+            <option value="newValues">New VE Values</option>
+            <option value="stddev">Std Dev</option>
+          </select>
+          <button id="reset-view-btn">Reset View</button>
         </div>
+        <canvas id="surface-canvas" width="700" height="500"></canvas>
       </div>
+    </div>
 
-      <div class="report-block">
-        <h2>Hit Count Map</h2>
-        <p class="section-desc">Number of valid samples per cell. Higher counts = more confidence in the correction value.</p>
-        <div id="hit-grid" class="grid-container"></div>
-      </div>
-
-      <div class="report-block" id="new-values-section" hidden>
-        <h2>Corrected VE Table</h2>
-        <p class="section-desc">Original VE values with corrections applied. Cells below the hit threshold retain their original values.</p>
-        <div id="new-values-grid" class="grid-container"></div>
-        <div class="button-row">
-          <button id="copy-new-btn" class="secondary-btn">Copy Corrected VE CSV</button>
-        </div>
-      </div>
-
-      <div class="report-block" id="warnings-section" hidden>
-        <h2>Warnings</h2>
-        <div id="warnings-content"></div>
-      </div>
-    </section>
+    <!-- Warnings (below results) -->
+    <div id="warnings-section" hidden>
+      <div id="warnings-content" class="warning-banner"></div>
+    </div>
   </div>
 
   <script src="app.js"></script>

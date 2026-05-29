@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VE Table Tuning — Help — Haltech Nexus</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #FFC72C; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content h3 { color: #fff; margin-top: 16px; margin-bottom: 4px; font-size: 1rem; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #ff9800; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255,152,0,0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to VE Table Tool</a>
+      <img src="../../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>VE Table Tuning — Help</h1>
+    <p>Analyzes Haltech NSP datalogs against your VE table to compute per-cell corrections.</p>
+
+    <h2>Quick Start</h2>
+    <ol>
+      <li>Export a datalog from NSP as CSV.</li>
+      <li>In NSP, right-click your VE table → Copy Table → paste into a text file and save as .csv.</li>
+      <li>Load both files, adjust filter settings, click <strong>Analyze VE</strong>.</li>
+      <li>Review the correction map — positive = add fuel, negative = remove fuel.</li>
+      <li>Download the corrected VE CSV and paste it back into NSP.</li>
+    </ol>
+
+    <h2>Input Files</h2>
+    <h3>NSP Datalog (.csv)</h3>
+    <p>Required channels: <strong>RPM</strong>, <strong>Manifold Pressure</strong> or <strong>Fuel - Load (MAP)</strong>, <strong>Wideband O2 Bank 1/2</strong>, <strong>Target Lambda</strong>.</p>
+    <p>Optional: <strong>O2 Control Short/Long Term Fuel Trim</strong>, <strong>Coolant Temperature</strong>, <strong>Throttle Position</strong>.</p>
+
+    <h3>VE Table CSV</h3>
+    <p>Exported from NSP using Copy Table. The tool expects the Haltech format with <code>AxisValues1:</code> (MAP in mbar), <code>AxisValues2:</code> (RPM), and <code>CellValues:</code> sections.</p>
+
+    <h2>Filter Settings</h2>
+    <h3>Min Hit Count (default: 50)</h3>
+    <p>Cells need more than this many samples to produce a correction. Higher = more confidence but needs more data.</p>
+
+    <h3>Min Coolant Temp (default: 55°C)</h3>
+    <p>Discards cold-engine samples where fueling is in warmup enrichment mode.</p>
+
+    <h3>Min Run Time (default: 60s)</h3>
+    <p>Skips the first N seconds of the log to avoid cold-start enrichment and sensor stabilization.</p>
+
+    <h3>Min Change Amount (default: 0%)</h3>
+    <p>Zeros out corrections smaller than this. Set to 1-2% to ignore noise on a final pass.</p>
+
+    <h3>Scaling Factor (default: 100%)</h3>
+    <p>Apply only a fraction of the correction. Use 75% for a conservative first pass, 100% for final tuning.</p>
+    <div class="tip"><strong>Tip:</strong> Start at 75% and iterate. Each pass should show smaller corrections as the table converges.</div>
+
+    <h3>Outlier Filter (default: 0 = off)</h3>
+    <p>Two-pass analysis: first computes per-cell mean and standard deviation, then discards samples beyond Nσ. Removes transient spikes from tip-in/tip-out.</p>
+    <div class="tip"><strong>Recommended:</strong> 2.0–3.0σ. Start with 2.5 if unsure.</div>
+
+    <h3>Max TPS Rate (default: 0 = off)</h3>
+    <p>Discards samples where throttle is changing faster than this rate (%/second). Ensures only steady-state data where lambda accurately reflects VE table contribution.</p>
+    <div class="tip"><strong>Recommended:</strong> 30–100 %/s. Lower = stricter steady-state. For track data try 50, for street driving try 100.</div>
+
+    <h3>Smoothing (default: 0 = off)</h3>
+    <p>Gaussian spatial smoothing applied to the correction grid. Blends each cell with its neighbors to reduce cell-to-cell noise.</p>
+    <div class="warning"><strong>Caution:</strong> Over-smoothing can mask real VE transitions (cam changeover, resonance effects). Keep at 1-2 unless data is very noisy.</div>
+
+    <h2>Display Views</h2>
+    <h3>Correction %</h3>
+    <p>Primary output. Green = add fuel (lean), Red = remove fuel (rich), Grey = insufficient data.</p>
+
+    <h3>New VE Values</h3>
+    <p>Complete corrected table. Green-highlighted cells were modified; grey cells retained original values.</p>
+
+    <h3>Hit Counts</h3>
+    <p>Sample density per cell. Identifies areas needing more driving time.</p>
+
+    <h3>Std Dev</h3>
+    <p>Data quality indicator. Green (≤1) = tight data, Yellow (≤3) = moderate, Red (>3) = noisy. High stddev cells benefit from the outlier filter.</p>
+
+    <h3>CL Trim</h3>
+    <p>Shows the closed-loop fuel trim contribution per cell. Large trim values indicate the ECU is already compensating heavily — the VE table needs the most work in those areas.</p>
+
+    <h2>Recommended Workflow</h2>
+    <ol>
+      <li><strong>Gather data:</strong> Drive through varied RPM/MAP conditions after warmup. 10+ minutes of mixed driving.</li>
+      <li><strong>First pass:</strong> Scaling 75%, Outlier 2.5σ, TPS rate 50, Min change 1%.</li>
+      <li><strong>Review Std Dev:</strong> Red cells = noisy data. Consider more driving or stricter TPS filter.</li>
+      <li><strong>Apply and re-log:</strong> Paste corrected table into NSP, drive again, re-analyze.</li>
+      <li><strong>Final pass:</strong> Scaling 100%, lower min change to 0. Corrections should be small (±1-2%).</li>
+      <li><strong>Done:</strong> When the correction map shows mostly zeros across your operating range.</li>
+    </ol>
+    <div class="tip"><strong>Pro tip:</strong> Save your VE_Difference.csv from each iteration to track convergence.</div>
+  </div>
+</body>
+</html>
