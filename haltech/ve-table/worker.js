@@ -282,7 +282,10 @@ function computeCorrection(sample) {
     else { stft = stftB2; ltft = ltftB2; }
 
     var totalTrim = stft + ltft;
-    var correction = ((sample.lambdaTarget / lambdaActual) - 1) * 100 + totalTrim;
+    // VE correction: (actual/target - 1) is positive when lean (need more VE/fuel),
+    // negative when rich (need less VE/fuel). Trim is added to capture what the
+    // ECU is already compensating for.
+    var correction = ((lambdaActual / sample.lambdaTarget) - 1) * 100 + totalTrim;
     return { correction: correction, lambdaActual: lambdaActual, totalTrim: totalTrim, isValid: true };
 }
 
