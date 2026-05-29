@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VE Table Tuning — Haltech Nexus — TunerControl</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../index.html" aria-label="Back to Haltech">&larr; Back to Haltech</a>
+      <img src="../../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>VE Table Tuning</h1>
+    <p class="subtitle">Analyze Haltech NSP datalogs against the current VE table to compute per-cell corrections. Load a log and optionally a VE table CSV export.</p>
+
+    <section class="file-section">
+      <div class="file-row">
+        <label for="log-input">NSP Datalog (.csv):</label>
+        <input type="file" id="log-input" accept=".csv" />
+      </div>
+      <div class="file-row">
+        <label for="ve-input">VE Table Export (.csv, optional):</label>
+        <input type="file" id="ve-input" accept=".csv" />
+      </div>
+      <div class="button-row">
+        <button id="analyze-btn" disabled>Analyze VE</button>
+      </div>
+    </section>
+
+    <div id="error-container" class="error-banner" hidden></div>
+
+    <div id="progress-section" class="progress-section" hidden>
+      <div class="progress-bar-track">
+        <div id="progress-bar" class="progress-bar-fill" style="width:0%"></div>
+      </div>
+      <div class="progress-text">
+        <span id="progress-pct">0%</span>
+        <span id="progress-phase"></span>
+      </div>
+    </div>
+
+    <section id="results-section" class="results-section" hidden>
+      <div class="report-block">
+        <h2>Analysis Summary</h2>
+        <div id="summary-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>VE Correction Map (%)</h2>
+        <p class="section-desc">Percentage change needed per cell. Green = needs more fuel (lean), Red = needs less fuel (rich). Empty cells have insufficient data (&lt;50 hits).</p>
+        <div id="diff-grid" class="grid-container"></div>
+        <div class="button-row">
+          <button id="copy-diff-btn" class="secondary-btn" hidden>Copy Correction CSV</button>
+        </div>
+      </div>
+
+      <div class="report-block">
+        <h2>Hit Count Map</h2>
+        <p class="section-desc">Number of valid samples per cell. Higher counts = more confidence in the correction value.</p>
+        <div id="hit-grid" class="grid-container"></div>
+      </div>
+
+      <div class="report-block" id="new-values-section" hidden>
+        <h2>Corrected VE Table</h2>
+        <p class="section-desc">Original VE values with corrections applied. Cells below the hit threshold retain their original values.</p>
+        <div id="new-values-grid" class="grid-container"></div>
+        <div class="button-row">
+          <button id="copy-new-btn" class="secondary-btn">Copy Corrected VE CSV</button>
+        </div>
+      </div>
+
+      <div class="report-block" id="warnings-section" hidden>
+        <h2>Warnings</h2>
+        <div id="warnings-content"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

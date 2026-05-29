@@ -241,6 +241,10 @@ function renderResults(msg) {
     renderDownshifts(msg.events);
     renderUpshifts(msg.events);
     renderClutchHealth(msg.clutchHealth);
+    if (msg.binConfig) {
+        renderBinCorrelation(msg.events, msg.binConfig, msg.binMetadata);
+        renderAdaptationMonitor(msg.binConfig, msg.summary);
+    }
     renderDiagnostics(msg.diagnostics);
 }
 
@@ -425,6 +429,244 @@ function renderDiagnostics(diagnostics) {
 
         content.appendChild(div);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Shift-to-Bin Correlator
+// ---------------------------------------------------------------------------
+
+function renderBinCorrelation(events, binConfig, binMetadata) {
+    var container = document.getElementById('bin-correlation-content');
+    if (!container) return;
+    container.innerHTML = '';
+
+    // Group downshifts by transition and find the problematic ones
+    var downshifts = events.filter(function(e) { return e.isDownshift; });
+    var byTransition = {};
+    downshifts.forEach(function(e) {
+        var key = e.fromGear + '->' + e.toGear;
+        if (!byTransition[key]) byTransition[key] = [];
+        byTransition[key].push(e);
+    });
+
+    // For each transition with harshness issues, show the relevant bin params
+    var transitions = Object.keys(byTransition).sort(function(a, b) {
+        var avgA = byTransition[a].reduce(function(s,e){return s+e.harshness;},0) / byTransition[a].length;
+        var avgB = byTransition[b].reduce(function(s,e){return s+e.harshness;},0) / byTransition[b].length;
+        return avgB - avgA;
+    });
+
+    transitions.forEach(function(key) {
+        var evts = byTransition[key];
+        var avgHarsh = Math.round(evts.reduce(function(s,e){return s+e.harshness;},0) / evts.length);
+        var maxHarsh = Math.max.apply(null, evts.map(function(e){return e.harshness;}));
+        var avgSlipDur = Math.round(evts.reduce(function(s,e){return s+e.slipDuration;},0) / evts.length);
+
+        var section = document.createElement('div');
+        section.className = 'correlation-block';
+
+        var severityClass = avgHarsh > 30 ? 'severity-high' : avgHarsh > 15 ? 'severity-medium' : 'severity-low';
+
+        var header = document.createElement('h3');
+        header.innerHTML = key.replace('->', '→') + ' Downshift <span class="' + severityClass + '">(' + evts.length + ' events, avg harshness ' + avgHarsh + '/100)</span>';
+        section.appendChild(header);
+
+        // Stats row
+        var stats = document.createElement('div');
+        stats.className = 'correlation-stats';
+        stats.innerHTML =
+            '<span>Max harshness: <b>' + maxHarsh + '</b></span>' +
+            '<span>Avg slip duration: <b>' + avgSlipDur + 'ms</b></span>' +
+            '<span>Clutch applying: <b>' + (evts[0].clutchInvolved || '?') + '</b></span>';
+        section.appendChild(stats);
+
+        // Correction tables from bin
+        var transKey = key.replace('->', '-');
+        var corrections = binConfig.perGearCorrections[transKey];
+        if (corrections) {
+            if (corrections.start) {
+                var startDiv = document.createElement('div');
+                startDiv.className = 'correction-table-block';
+                startDiv.innerHTML = '<h4>' + key.replace('->', '→') + ' Correction Start</h4>' + renderCorrectionTable(corrections.start);
+                section.appendChild(startDiv);
+            }
+            if (corrections.end) {
+                var endDiv = document.createElement('div');
+                endDiv.className = 'correction-table-block';
+                endDiv.innerHTML = '<h4>' + key.replace('->', '→') + ' Correction End</h4>' + renderCorrectionTable(corrections.end);
+                section.appendChild(endDiv);
+            }
+        }
+
+        // Blip status for this transition
+        var blipFired = evts.filter(function(e) { return e.blipActive; }).length;
+        var avgInputRpm = Math.round(evts.reduce(function(s,e){return s+(e.inputRpmAtShift||0);},0) / evts.length);
+        var blipDiv = document.createElement('div');
+        blipDiv.className = 'blip-status';
+        var blipMinRpm = binConfig.blip.minRpmForBlip;
+        var minRpmStr = blipMinRpm ? (Array.isArray(blipMinRpm[0]) ? blipMinRpm.map(function(r){return r[0];}).join('/') : blipMinRpm.join('/')) : '?';
+        blipDiv.innerHTML =
+            '<h4>Blip Status</h4>' +
+            '<p>Blip fired: <b>' + blipFired + '/' + evts.length + '</b> shifts' +
+            (blipFired === 0 ? ' <span class="severity-medium">(never active)</span>' : '') + '</p>' +
+            '<p>Avg input RPM at shift: <b>' + avgInputRpm + '</b> | Min RPM for blip: <b>' + minRpmStr + '</b></p>';
+        section.appendChild(blipDiv);
+
+        container.appendChild(section);
+    });
+
+    // Global pressure/timing params
+    var globalDiv = document.createElement('div');
+    globalDiv.className = 'correlation-block';
+    globalDiv.innerHTML =
+        '<h3>Global Shift Parameters</h3>' +
+        '<div class="param-grid">' +
+        paramRow('Pulse Time', binConfig.timing.pulseTime, 'ms') +
+        paramRow('Clutch Closing Time', binConfig.timing.clutchClosingTime ? binConfig.timing.clutchClosingTime.toFixed(1) : 'N/A', 'ms') +
+        paramRow('Min Clutch Press', binConfig.pressures.minClutchPress, '') +
+        paramRow('Min Clutch Press Drive', binConfig.pressures.minClutchPressDrive, '') +
+        paramRow('Start Press', binConfig.pressures.startPress ? binConfig.pressures.startPress.join(', ') : 'N/A', '') +
+        paramRow('TQ Reduction Threshold', binConfig.torqueReduction.outputThreshold ? binConfig.torqueReduction.outputThreshold.toFixed(1) : 'N/A', '%') +
+        paramRow('TQ Reduction Advance Time', binConfig.torqueReduction.advanceTime ? binConfig.torqueReduction.advanceTime.join(', ') : 'N/A', 'ms') +
+        paramRow('Max TPS for Blip', binConfig.blip.maxTpsForBlip, '%') +
+        paramRow('Max TQ for Blip', binConfig.blip.maxTqForBlip, 'NM') +
+        '</div>';
+    container.appendChild(globalDiv);
+}
+
+function renderCorrectionTable(tableData) {
+    if (!tableData) return '<p style="color:#666;">Not available</p>';
+    var isFlat = !Array.isArray(tableData[0]);
+    var rows = isFlat ? [tableData] : tableData;
+
+    var html = '<table class="correction-table"><tbody>';
+    for (var r = 0; r < rows.length; r++) {
+        html += '<tr>';
+        for (var c = 0; c < rows[r].length; c++) {
+            var val = rows[r][c];
+            var cls = val > 0 ? 'val-pos' : val < 0 ? 'val-neg' : 'val-zero';
+            html += '<td class="' + cls + '">' + (typeof val === 'number' ? val.toFixed(1) : val) + '</td>';
+        }
+        html += '</tr>';
+    }
+    html += '</tbody></table>';
+    return html;
+}
+
+function paramRow(label, value, unit) {
+    return '<div class="param-row"><span class="param-label">' + label + '</span><span class="param-value">' + value + (unit ? ' ' + unit : '') + '</span></div>';
+}
+
+// ---------------------------------------------------------------------------
+// Adaptation Monitor
+// ---------------------------------------------------------------------------
+
+function renderAdaptationMonitor(binConfig, summary) {
+    var container = document.getElementById('adaptation-content');
+    if (!container) return;
+    container.innerHTML = '';
+
+    var adapt = binConfig.adaptation;
+
+    // Oil temp check — adaptation requires >50C
+    var oilTemp = summary.oilTemp;
+    var tempWarning = '';
+    if (oilTemp !== null && oilTemp < 50) {
+        tempWarning = '<div class="adapt-warning"><b>Oil temp during log: ' + oilTemp + '°C</b> — below 50°C threshold for Standard Clutch Filling Adaptation. The TCU will not learn adaptation values until oil is above 50°C (122°F).</div>';
+    }
+
+    // Downshift adaptation
+    var downAdap = adapt.downshiftAdap;
+    var downAdapMax = adapt.downshiftAdapMaxValue;
+    var brakeAdap = adapt.brakeAdap;
+    var endAdap = adapt.endAdap;
+    var tqAdap = adapt.torqueReductionAdap;
+
+    var html = tempWarning;
+
+    // Downshift ADAP (per gear 2-8)
+    html += '<div class="adapt-section">';
+    html += '<h4>Downshift Adaptation (per gear)</h4>';
+    html += '<p class="adapt-desc">Learned pressure correction for downshift engagement. Zero = no adaptation learned yet.</p>';
+    html += renderAdaptBar('Downshift ADAP', downAdap, downAdapMax, ['2', '3', '4', '5', '6', '7', '8']);
+    html += '</div>';
+
+    // Brake ADAP (per clutch A-E)
+    html += '<div class="adapt-section">';
+    html += '<h4>Brake Adaptation (per clutch)</h4>';
+    html += '<p class="adapt-desc">Learned pressure correction when braking. Applied to the oncoming clutch during braking downshifts.</p>';
+    html += renderAdaptBar('Brake ADAP', brakeAdap, null, ['A', 'B', 'E', 'C', 'D']);
+    html += '</div>';
+
+    // End ADAP (per gear 2-8)
+    if (endAdap) {
+        html += '<div class="adapt-section">';
+        html += '<h4>End Adaptation (per gear)</h4>';
+        html += '<p class="adapt-desc">Learned correction for shift completion phase timing.</p>';
+        html += renderAdaptBar('End ADAP', endAdap, null, ['2', '3', '4', '5', '6', '7', '8']);
+        html += '</div>';
+    }
+
+    // Torque Reduction ADAP (per gear 2-8)
+    html += '<div class="adapt-section">';
+    html += '<h4>Torque Reduction Adaptation (per gear)</h4>';
+    html += '<p class="adapt-desc">Learned torque reduction timing. Higher values = more torque cut during shift. Non-zero values indicate active learning.</p>';
+    html += renderAdaptBar('TQ Reduction', tqAdap, null, ['2', '3', '4', '5', '6', '7', '8']);
+    html += '</div>';
+
+    // Adaptation status summary
+    var allZero = true;
+    if (downAdap) { for (var i = 0; i < downAdap.length; i++) { if (downAdap[i] !== 0) allZero = false; } }
+    if (brakeAdap) { for (var i = 0; i < brakeAdap.length; i++) { if (brakeAdap[i] !== 0) allZero = false; } }
+
+    html += '<div class="adapt-section adapt-summary">';
+    if (allZero) {
+        html += '<p class="adapt-status adapt-status-none"><b>No clutch adaptation learned.</b> The Downshift and Brake adaptation values are all zero. This typically means:</p>';
+        html += '<ul>';
+        html += '<li>The adaptation was recently reset</li>';
+        html += '<li>The vehicle has not been driven in conditions that trigger learning (oil temp >50°C, specific RPM/torque windows)</li>';
+        html += '<li>The TCU needs more drive cycles to converge</li>';
+        html += '</ul>';
+        html += '<p>Drive the vehicle with oil temp above 50°C through normal city/highway conditions to allow adaptation learning. See the ZF 8HP adaptation procedure for specific conditions per clutch.</p>';
+    } else {
+        html += '<p class="adapt-status adapt-status-active"><b>Adaptation values present.</b> The TCU has learned some clutch corrections.</p>';
+    }
+    html += '</div>';
+
+    container.innerHTML = html;
+}
+
+function renderAdaptBar(title, values, maxValues, labels) {
+    if (!values) return '<p style="color:#666;">Not available in bin</p>';
+
+    var flat = Array.isArray(values[0]) ? values.map(function(r){return r[0];}) : values;
+    var maxFlat = maxValues ? (Array.isArray(maxValues[0]) ? maxValues.map(function(r){return r[0];}) : maxValues) : null;
+
+    var html = '<div class="adapt-bars">';
+    for (var i = 0; i < flat.length; i++) {
+        var val = flat[i];
+        var label = labels && labels[i] ? labels[i] : String(i);
+        var maxVal = maxFlat ? maxFlat[i] : null;
+        var isZero = val === 0;
+        var barClass = isZero ? 'bar-zero' : val > 0 ? 'bar-pos' : 'bar-neg';
+
+        // Normalize bar width (use max adaptation value or fixed scale)
+        var scale = maxVal ? Math.abs(maxVal) : 50;
+        var barWidth = scale > 0 ? Math.min(100, Math.abs(val) / scale * 100) : 0;
+
+        html += '<div class="adapt-bar-row">';
+        html += '<span class="adapt-label">' + label + '</span>';
+        html += '<div class="adapt-bar-track">';
+        html += '<div class="adapt-bar-fill ' + barClass + '" style="width:' + barWidth + '%"></div>';
+        html += '</div>';
+        html += '<span class="adapt-value ' + barClass + '">' + (typeof val === 'number' ? val.toFixed(1) : val) + '</span>';
+        if (maxVal !== null) {
+            html += '<span class="adapt-max">(max: ' + maxVal.toFixed(1) + ')</span>';
+        }
+        html += '</div>';
+    }
+    html += '</div>';
+    return html;
 }
 
 // ---------------------------------------------------------------------------
