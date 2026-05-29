@@ -433,14 +433,14 @@ function render3DSurface(grid) {
             var row = [];
             for (var r = 0; r < grid.cells[m].length; r++) {
                 var c = grid.cells[m][r];
-                if (mode === 'corrections') row.push(c.correction !== null ? c.correction : NaN);
-                else if (mode === 'stddev') row.push(c.stddev !== null ? c.stddev : NaN);
+                if (mode === 'corrections') row.push(c.correction !== null ? c.correction : 0);
+                else if (mode === 'stddev') row.push(c.stddev !== null ? c.stddev : 0);
                 else if (mode === 'newValues') {
                     if (!lastResult._newValuesGrid) lastResult._newValuesGrid = parseNewValuesCsv(lastResult.newValuesCsv || '');
                     var nv = lastResult._newValuesGrid;
-                    row.push(nv && nv[m] && nv[m][r] !== undefined ? nv[m][r] : NaN);
+                    row.push(nv && nv[m] && nv[m][r] !== undefined ? nv[m][r] : 0);
                 }
-                else row.push(NaN);
+                else row.push(0);
             }
             data.push(row);
         }
@@ -468,33 +468,22 @@ function render3DSurface(grid) {
         ctx.fillStyle = '#111111';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Find data range for color mapping (skip NaN)
+        // Find data range for color mapping
         var minVal = Infinity, maxVal = -Infinity;
-        var hasData = false;
         for (var m = 0; m < numRows; m++) {
             for (var r = 0; r < numCols; r++) {
                 var v = data[m][r];
-                if (isNaN(v)) continue;
-                hasData = true;
                 if (v < minVal) minVal = v;
                 if (v > maxVal) maxVal = v;
             }
         }
-        if (!hasData) {
-            ctx.fillStyle = '#666';
-            ctx.font = '14px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('No data to display — cells below hit threshold are excluded', canvas.width/2, canvas.height/2);
-            return;
-        }
         var range = maxVal - minVal || 1;
 
-        // Build quads with depth for painter's algorithm (skip if any vertex is NaN)
+        // Build quads with depth for painter's algorithm
         var quads = [];
         for (var m = 0; m < numRows - 1; m++) {
             for (var r = 0; r < numCols - 1; r++) {
                 var v00 = data[m][r], v10 = data[m][r+1], v01 = data[m+1][r], v11 = data[m+1][r+1];
-                if (isNaN(v00) || isNaN(v10) || isNaN(v01) || isNaN(v11)) continue;
 
                 var x0 = (r / (numCols - 1)) * 2 - 1;
                 var x1 = ((r + 1) / (numCols - 1)) * 2 - 1;
