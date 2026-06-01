@@ -109,6 +109,8 @@
         <li><a href="#outlier">Outlier Filtering</a></li>
         <li><a href="#tps">TPS Rate Filter</a></li>
         <li><a href="#smoothing">Correction Smoothing</a></li>
+        <li><a href="#decel">Decel/Overrun Filter</a></li>
+        <li><a href="#min-map">Min MAP for Corrections</a></li>
         <li><a href="#views">Display Views</a></li>
         <li><a href="#3d-plot">3D Surface Plot</a></li>
         <li><a href="#clipboard">Copy to Clipboard</a></li>
@@ -253,6 +255,42 @@
     </div>
     <div class="warning">
       <strong>Caution:</strong> Over-smoothing can mask real cell-to-cell differences in VE (e.g., around cam changeover points or resonance effects). If your engine has known sharp transitions in the VE map, keep smoothing low or disabled in those regions.
+    </div>
+
+    <!-- Decel/Overrun Filter -->
+    <h2 id="decel">Decel/Overrun Filter</h2>
+    <p>Default: <code>Enabled</code>.</p>
+    <p>Automatically rejects samples captured during deceleration and engine overrun conditions. During decel, the throttle is closed, MAP is falling rapidly, and the lambda reading is unreliable due to:</p>
+    <ul>
+      <li>Exhaust reversion pulling fresh air past the wideband sensor</li>
+      <li>Fuel cut (if active) causing unburned O2 to reach the sensor</li>
+      <li>Residual fuel film evaporating without combustion</li>
+    </ul>
+    <p>The filter detects decel by combining two conditions:</p>
+    <ul>
+      <li><strong>TPS &lt; 1% AND MAP falling faster than 50 kPa/s</strong> — active deceleration with closed throttle</li>
+      <li><strong>TPS &lt; 0.5% AND MAP &lt; 40 kPa</strong> — closed-throttle coasting at high vacuum</li>
+    </ul>
+    <p>This preserves legitimate light-cruise data (where TPS is 2-5% even at low MAP) while rejecting the overrun samples that would otherwise skew low-MAP cells lean.</p>
+    <div class="warning">
+      <strong>Why this matters:</strong> Without this filter, decel samples accumulate in the 20-40 kPa cells with artificially lean lambda readings. The tool then recommends reducing VE in those cells, which makes the engine too lean during actual light-cruise driving at those MAP values.
+    </div>
+    <div class="tip">
+      <strong>Requires:</strong> "Throttle Position" channel in your log. If not present, the filter is automatically disabled and a warning is shown. In that case, use the Min MAP filter as a fallback.
+    </div>
+
+    <!-- Min MAP for Corrections -->
+    <h2 id="min-map">Min MAP for Corrections</h2>
+    <p>Default: <code>0</code> (disabled).</p>
+    <p>A hard cutoff that excludes all samples below the specified MAP value from the correction calculation. Cells below this MAP will show as empty (no correction) regardless of how many samples they have.</p>
+    <div class="example-box">
+      <p><strong>Example:</strong> Set to <code>25</code> — all cells at 25 kPa and below will be excluded. Useful if you know your engine never operates at those MAP values under normal driving conditions.</p>
+    </div>
+    <div class="tip">
+      <strong>When to use:</strong> As a safety net in addition to the decel filter, or as a standalone solution if the decel filter can't be used (no TPS channel). Typical values: 20-30 kPa for naturally aspirated engines.
+    </div>
+    <div class="warning">
+      <strong>Trade-off:</strong> Unlike the decel filter, this blanks out ALL data below the threshold — including legitimate light-cruise data. If you cruise at 25 kPa in top gear, setting this to 30 would prevent those cells from being corrected. Prefer the decel filter when possible.
     </div>
 
     <!-- Display Views -->

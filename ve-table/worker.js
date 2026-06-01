@@ -1000,7 +1000,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
         if (!msg || (msg.type !== 'process' && msg.type !== 'process_ld')) return;
 
         try {
-            const { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing } = msg;
+            const { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing, minMapForCorrection, decelFilterEnabled } = msg;
             const threshold = (typeof hitThreshold === 'number' && hitThreshold >= 1) ? hitThreshold : HIT_THRESHOLD;
             const coolantThreshold = (typeof minCoolantTemp === 'number') ? minCoolantTemp : 55;
             const runTimeThreshold = (typeof minRunTime === 'number') ? minRunTime : 60;
@@ -1009,6 +1009,8 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
             const outlierSigma = (typeof outlierStddev === 'number' && outlierStddev > 0) ? outlierStddev : 0;
             const tpsRateLimit = (typeof maxTpsRate === 'number' && maxTpsRate > 0) ? maxTpsRate : 0;
             const smoothingSigma = (typeof smoothing === 'number' && smoothing > 0) ? smoothing : 0;
+            const minMapFilter = (typeof minMapForCorrection === 'number' && minMapForCorrection > 0) ? minMapForCorrection : 0;
+            const decelFilter = (decelFilterEnabled !== false); // enabled by default
 
             // 1. Parse VE table
             const veTable = parseVETable(veText);
@@ -1055,6 +1057,22 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
                 }
             }
 
+            // 4c. Compute MAP rate of change for decel detection
+            let mapRates = null;
+            if (decelFilter) {
+                mapRates = new Float64Array(samples.length);
+                mapRates[0] = 0;
+                for (let i = 1; i < samples.length; i++) {
+                    const dt = samples[i].time - samples[i - 1].time;
+                    const dMap = samples[i].map - samples[i - 1].map;
+                    if (dt > 0 && !Number.isNaN(dMap)) {
+                        mapRates[i] = dMap / dt; // negative = MAP falling = decel
+                    } else {
+                        mapRates[i] = 0;
+                    }
+                }
+            }
+
             // 5. First pass: compute corrections, apply basic filters, bin into grid
             //    Also store per-sample binning info for potential second pass (outlier filtering)
             let totalSamples = 0;
@@ -1062,6 +1080,8 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
             let filteredByCoolant = 0;
             let filteredByTps = 0;
             let filteredByOutlier = 0;
+            let filteredByDecel = 0;
+            let filteredByMinMap = 0;
 
             // Store binned samples for outlier filtering second pass
             const binnedSamples = []; // { mapIdx, rpmIdx, correction }
@@ -1084,6 +1104,29 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
                 // Filter: discard samples where TPS is changing too fast
                 if (tpsRateLimit > 0 && tpsRates !== null && tpsRates[i] > tpsRateLimit) {
                     filteredByTps++;
+                    continue;
+                }
+
+                // Filter: decel detection — discard samples where TPS is near-zero AND MAP is falling
+                // This catches overrun/decel conditions where lambda is unreliable
+                if (decelFilter && mapRates !== null) {
+                    const tps = sample.throttlePos;
+                    const mapRate = mapRates[i];
+                    // TPS < 1% and MAP falling faster than -50 kPa/s = decel/overrun
+                    if (!Number.isNaN(tps) && tps < 1 && mapRate < -50) {
+                        filteredByDecel++;
+                        continue;
+                    }
+                    // Also catch: TPS = 0 at low MAP (closed throttle coasting)
+                    if (!Number.isNaN(tps) && tps < 0.5 && !Number.isNaN(sample.map) && sample.map < 40) {
+                        filteredByDecel++;
+                        continue;
+                    }
+                }
+
+                // Filter: minimum MAP for corrections
+                if (minMapFilter > 0 && !Number.isNaN(sample.map) && sample.map < minMapFilter) {
+                    filteredByMinMap++;
                     continue;
                 }
 
@@ -1386,6 +1429,8 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
                 filteredByCoolant,
                 filteredByTps,
                 filteredByOutlier,
+                filteredByDecel,
+                filteredByMinMap,
                 newValuesGrid,
             });
 

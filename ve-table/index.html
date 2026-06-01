@@ -77,6 +77,21 @@
         <span class="filename-display">Gaussian smoothing radius for corrections (0 = disabled, 1–3 = light, 4+ = heavy)</span>
       </div>
 
+      <div class="file-row">
+        <label for="min-map-correction">Min MAP for Corrections (kPa):</label>
+        <input type="number" id="min-map-correction" min="0" max="100" value="0" step="5" style="width: 80px;" />
+        <span class="filename-display">Ignore cells below this MAP value (0 = disabled, 20–30 = typical for decel exclusion)</span>
+      </div>
+
+      <div class="file-row">
+        <label for="decel-filter">Decel/Overrun Filter:</label>
+        <select id="decel-filter" style="width: 120px; padding: 6px 10px; background: #222; border: 1px solid #333; border-radius: 4px; color: #fff;">
+          <option value="on" selected>Enabled</option>
+          <option value="off">Disabled</option>
+        </select>
+        <span class="filename-display">Auto-reject samples with TPS≈0 + falling MAP (decel/overrun conditions)</span>
+      </div>
+
       <div class="button-row">
         <button id="process-btn" disabled>Process</button>
         <a href="help.html" class="help-link-btn">Help</a>
