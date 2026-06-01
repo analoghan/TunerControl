@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transient Fuel Analyzer — MoTeC M1</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Transient Fuel Analyzer</h1>
+    <p class="subtitle">Detects throttle transient events in MoTeC logs and measures lambda excursions to diagnose fuel film table calibration. Identifies lean spikes (fuel film too low) and rich overshoot (time constants too aggressive).</p>
+
+    <div class="form-section">
+      <div class="file-row">
+        <label for="log-input">MoTeC Log (.csv or .ld):</label>
+        <input type="file" id="log-input" accept=".csv,.ld" />
+        <span id="log-filename" class="filename-display">No file selected</span>
+      </div>
+
+      <div class="file-row">
+        <label for="map-rate-threshold">MAP Rate Threshold (kPa/s):</label>
+        <input type="number" id="map-rate-threshold" min="50" max="2000" value="200" step="50" style="width:80px;" />
+        <span class="filename-display">Minimum MAP change rate to detect a transient event</span>
+      </div>
+
+      <div class="file-row">
+        <label for="min-map-change">Min MAP Change (kPa):</label>
+        <input type="number" id="min-map-change" min="5" max="100" value="15" step="5" style="width:80px;" />
+        <span class="filename-display">Minimum total MAP change to qualify as a transient</span>
+      </div>
+
+      <div class="file-row">
+        <label for="lambda-target">Lambda Target:</label>
+        <input type="number" id="lambda-target" min="0.7" max="1.1" value="1.0" step="0.01" style="width:80px;" />
+        <span class="filename-display">Expected lambda during transient (used if target channel unavailable)</span>
+      </div>
+
+      <div class="button-row">
+        <button id="analyze-btn" disabled>Analyze Transients</button>
+        <a href="help.html" class="help-link-btn">Help</a>
+      </div>
+    </div>
+
+    <div id="error-container" class="error-banner" hidden></div>
+
+    <div id="progress-section" class="progress-section" hidden>
+      <div class="progress-bar-track">
+        <div id="progress-bar" class="progress-bar-fill" style="width:0%"></div>
+      </div>
+      <div class="progress-labels">
+        <span id="progress-pct">0%</span>
+        <span id="progress-phase"></span>
+      </div>
+    </div>
+
+    <section id="results-section" class="results-section" hidden>
+      <div class="report-block">
+        <h2>Summary</h2>
+        <div id="summary-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Tip-In Events (Lean Spikes)</h2>
+        <p class="section-desc">Throttle opening events sorted by lean spike severity. Large lean spikes indicate fuel film primary values are too low for that MAP transition zone.</p>
+        <div id="tipin-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Tip-Out Events (Rich Overshoot)</h2>
+        <p class="section-desc">Throttle closing events sorted by rich overshoot. Persistent rich after tip-out indicates fuel film decrease time constant is too slow.</p>
+        <div id="tipout-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Fuel Film Recommendations</h2>
+        <p class="section-desc">Suggested adjustments to the fuel film primary table and time constants based on the transient analysis.</p>
+        <div id="recommendations-content"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="worker.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

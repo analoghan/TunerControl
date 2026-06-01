@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transient Fuel Analyzer — Help</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content h3 { color: #fff; margin-top: 16px; margin-bottom: 4px; font-size: 1rem; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #ff9800; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255,152,0,0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .danger { background: rgba(244,67,54,0.1); border-left: 3px solid #f44336; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .example-box { background: #111; border: 1px solid #333; border-radius: 6px; padding: 16px; margin: 12px 0; }
+    .help-content .example-box p { margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Transient Fuel Analyzer</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Transient Fuel Analyzer — Help</h1>
+    <p>Analyzes throttle transient events in MoTeC logs to diagnose fuel film table calibration. Identifies lean spikes on tip-in and rich overshoot, then recommends fuel film primary and time constant adjustments.</p>
+
+    <h2>Prerequisites</h2>
+    <p>Before using this tool, the following must already be calibrated:</p>
+    <ol>
+      <li><strong>VE Table</strong> — must be dialed in so that at steady-state conditions, lambda hits the target. If your VE table is off, transient analysis will be meaningless.</li>
+      <li><strong>Injection Timing</strong> — must be optimized for your engine. Poor injection timing increases the amount of fuel film compensation needed.</li>
+      <li><strong>Charge Cooling Gain</strong> — must be calibrated so the ECU correctly accounts for charge air temperature effects on fueling.</li>
+      <li><strong>Closed Loop Lambda</strong> — should be disabled or its correction noted. The tool works best with open-loop data where lambda directly reflects VE + fuel film accuracy.</li>
+    </ol>
+
+    <div class="warning">
+      <strong>Important:</strong> If your VE table is not calibrated, this tool will show transient errors that are actually steady-state VE errors. Always dial in VE first, then address transient fueling.
+    </div>
+
+    <h2>How Fuel Film Works in MoTeC M1</h2>
+    <p>When fuel is injected onto the intake port walls (port injection), some fuel sticks as a "film" rather than entering the cylinder immediately. During throttle transients:</p>
+    <ul>
+      <li><strong>Tip-in (throttle opening):</strong> MAP rises rapidly. More fuel sticks to the walls because the pressure/temperature conditions change. Without compensation, the engine momentarily runs lean.</li>
+      <li><strong>Tip-out (throttle closing):</strong> MAP drops rapidly. Fuel that was stuck to the walls now evaporates and enters the cylinder. Without compensation, the engine momentarily runs rich.</li>
+    </ul>
+    <p>MoTeC's fuel film model predicts how much extra fuel to add (or subtract) during these transitions using three main components:</p>
+
+    <h3>Fuel Film Primary Table</h3>
+    <p>A MAP-based table that defines how much fuel film compensation to apply as a percentage. Higher values = more compensation for larger MAP changes. This is the main table you tune.</p>
+
+    <h3>Fast Time Constant</h3>
+    <p>Controls the initial burst of compensation. The "percentage" setting (20-50% recommended) determines how much of the primary table value is applied in the fast phase. The increase/decrease time constants control how quickly it ramps on and off.</p>
+    <div class="example-box">
+      <p><strong>Fast increase time constant:</strong> How quickly the fast compensation ramps on (lower = faster). Typical: 0.1-0.3s</p>
+      <p><strong>Fast decrease time constant:</strong> How quickly the fast compensation ramps off (lower = faster). Typical: 0.1-0.2s</p>
+    </div>
+
+    <h3>Slow Time Constant</h3>
+    <p>Controls the sustained compensation after the fast phase. This handles the longer-term fuel film behavior as the walls reach thermal equilibrium at the new operating point.</p>
+    <div class="example-box">
+      <p><strong>Slow increase time constant:</strong> How quickly the slow compensation builds (lower = faster). Typical: 0.3-1.0s</p>
+      <p><strong>Slow decrease time constant:</strong> How quickly the slow compensation decays (lower = faster). Typical: 0.1-0.5s</p>
+    </div>
+
+    <h2>Input Parameters</h2>
+
+    <h3>MoTeC Log File</h3>
+    <p>A CSV export from MoTeC i2. Required channels:</p>
+    <ul>
+      <li><strong>Time</strong> — sample timestamps</li>
+      <li><strong>Inlet Manifold Pressure</strong> — MAP for detecting transients</li>
+      <li><strong>Exhaust Lambda Bank 1/2</strong> (or Exhaust Lambda) — actual lambda measurement</li>
+    </ul>
+    <p>Optional but recommended:</p>
+    <ul>
+      <li><strong>Fuel Mixture Aim</strong> — target lambda (if absent, uses the manual setting)</li>
+      <li><strong>Engine Speed</strong> — for RPM context in the event table</li>
+      <li><strong>Throttle Position</strong> — additional context</li>
+      <li><strong>Coolant Temperature</strong> — for warm-engine filtering</li>
+    </ul>
+
+    <h3>MAP Rate Threshold (default: 200 kPa/s)</h3>
+    <p>The minimum rate of MAP change to qualify as a transient event. Lower values detect more events (including mild throttle changes); higher values only catch aggressive tip-ins.</p>
+    <div class="tip">
+      <strong>Recommended:</strong> 150-300 kPa/s for street driving logs. 300-500 for track/dyno pulls where throttle changes are more aggressive.
+    </div>
+
+    <h3>Min MAP Change (default: 15 kPa)</h3>
+    <p>The minimum total MAP change for an event to be counted. Filters out small throttle adjustments that don't meaningfully exercise the fuel film model.</p>
+
+    <h3>Lambda Target (default: 1.0)</h3>
+    <p>Fallback target lambda if the "Fuel Mixture Aim" channel is not present in the log. If the channel exists, the tool uses the logged target value instead.</p>
+
+    <h2>Understanding the Results</h2>
+
+    <h3>Tip-In Events (Lean Spikes)</h3>
+    <p>Each row represents a detected throttle-opening event. Key columns:</p>
+    <ul>
+      <li><strong>Lean Spike %</strong> — How far lambda went above target (lean) during the transient. This is the primary indicator that fuel film primary values are too low.</li>
+      <li><strong>Rich Overshoot %</strong> — How far lambda went below target (rich) after the initial lean spike. Indicates the compensation overshot — time constants may be too aggressive.</li>
+      <li><strong>Recovery Time</strong> — Milliseconds until lambda settles within 2% of target. Long recovery = time constants need adjustment.</li>
+      <li><strong>MAP Change</strong> — The transition zone (e.g., 40→80 kPa). Maps directly to which cells in the fuel film primary table need adjustment.</li>
+    </ul>
+
+    <h3>Severity Color Coding</h3>
+    <ul>
+      <li><strong style="color:#4caf50;">Green (&lt;5%)</strong> — Acceptable. Minor excursion, likely not noticeable in drivability.</li>
+      <li><strong style="color:#ff9800;">Orange (5-10%)</strong> — Moderate. May cause a perceptible stumble or hesitation.</li>
+      <li><strong style="color:#f44336;">Red (&gt;10%)</strong> — Severe. Will cause noticeable stumble, hesitation, or misfire risk.</li>
+    </ul>
+
+    <h3>Tip-Out Events (Rich Overshoot)</h3>
+    <p>Throttle-closing events. Rich overshoot on tip-out indicates the fuel film model isn't removing compensation quickly enough when MAP drops.</p>
+
+    <h2>Interpreting Recommendations</h2>
+
+    <h3>"Fuel Film Primary too low at X-Y kPa"</h3>
+    <p>The fuel film primary table needs higher values in the specified MAP range. The suggested percentage increase is approximate — apply it, re-log, and re-analyze.</p>
+
+    <h3>"Fast decrease time constant too slow"</h3>
+    <p>After the initial burst of compensation, the fast phase is hanging too long, causing rich overshoot. Reduce the fast decrease time constant (e.g., 0.5 → 0.2).</p>
+
+    <h3>"Slow decrease time constant too high"</h3>
+    <p>On tip-out, the slow compensation isn't being removed quickly enough. Reduce the slow decrease time constant.</p>
+
+    <h3>"Average recovery time &gt;500ms"</h3>
+    <p>Lambda takes too long to settle after transients. The slow increase time constant may need to be reduced so compensation builds faster.</p>
+
+    <h2>Recommended Workflow</h2>
+    <ol>
+      <li><strong>Confirm VE is dialed in:</strong> Run the VE Table tool first. Corrections should be small (±2%) before addressing transients.</li>
+      <li><strong>Log transient data:</strong> Drive with varied throttle inputs — quick tip-ins from cruise, partial throttle sweeps, full-throttle launches. Hold each condition for 2-3 seconds between changes so lambda can settle.</li>
+      <li><strong>Run this tool:</strong> Load the log, review the lean spike severity by MAP zone.</li>
+      <li><strong>Adjust fuel film primary:</strong> Increase values in the MAP zones showing lean spikes. Start with the tool's suggested percentage.</li>
+      <li><strong>Re-log and check:</strong> Drive again, re-analyze. Lean spikes should be smaller.</li>
+      <li><strong>Tune time constants:</strong> If you see rich overshoot after fixing lean spikes, reduce the fast/slow decrease time constants.</li>
+      <li><strong>Iterate:</strong> Repeat until lean spikes are &lt;3% and recovery time is &lt;300ms.</li>
+    </ol>
+
+    <div class="tip">
+      <strong>Pro tip:</strong> Test at a fixed RPM on a dyno (e.g., 2000 RPM) with throttle sweeps between specific MAP breakpoints (30→40, 40→50, etc.). This isolates each cell in the fuel film table and makes calibration much faster than street driving.
+    </div>
+
+    <h2>Direct Injection Note</h2>
+    <p>For direct injection engines, fuel film effects are significantly reduced because fuel is sprayed directly into the combustion chamber rather than onto intake port walls. You may find that fuel film primary values are much lower (or even zero) compared to port injection. However, DI engines can still benefit from transient compensation due to:</p>
+    <ul>
+      <li>Injector response lag at very short pulse widths</li>
+      <li>Fuel pressure transients during rapid load changes</li>
+      <li>Air charge dynamics that the VE table doesn't fully capture</li>
+    </ul>
+    <p>If you're running a DI engine and seeing minimal transient issues, the fuel film table may not need much calibration.</p>
+
+    <h2>Troubleshooting</h2>
+
+    <h3>No events detected</h3>
+    <p>Lower the MAP Rate Threshold (try 100-150 kPa/s) or the Min MAP Change (try 10 kPa). Your driving may not have included aggressive enough throttle changes.</p>
+
+    <h3>All events show large lean spikes</h3>
+    <p>If every event is severely lean regardless of MAP zone, check that your VE table is actually calibrated at steady-state. A globally lean VE table will show as transient lean spikes.</p>
+
+    <h3>Events detected but lambda data is NaN</h3>
+    <p>The wideband sensor may not be logging at a high enough rate, or there's a gap in the lambda data during transients. Ensure your log rate is at least 50Hz for lambda channels.</p>
+  </div>
+</body>
+</html>
