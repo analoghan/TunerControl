@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Charge Cooling Gain Calculator — MoTeC M1</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Charge Cooling Gain Calculator</h1>
+    <p class="subtitle">Analyzes lambda step-test logs to determine the correct charge cooling gain value. Load a log where you changed target lambda from 1.0 to 0.9 (and back) in open loop with closed loop disabled.</p>
+
+    <div class="form-section">
+      <div class="file-row">
+        <label for="log-input">MoTeC Log (.csv or .ld):</label>
+        <input type="file" id="log-input" accept=".csv,.ld" />
+        <span id="log-filename" class="filename-display">No file selected</span>
+      </div>
+
+      <div class="file-row">
+        <label for="current-gain">Current Charge Cooling Gain (°C):</label>
+        <input type="number" id="current-gain" value="13" step="1" min="0" max="80" style="width:80px;" />
+        <span class="filename-display">Current value in your MoTeC config (default 13 for petrol)</span>
+      </div>
+
+      <div class="file-row">
+        <label for="fuel-type">Fuel Type:</label>
+        <select id="fuel-type" style="width:140px;padding:6px 10px;background:#222;border:1px solid #333;border-radius:4px;color:#fff;">
+          <option value="petrol">Petrol (E0-E10)</option>
+          <option value="e85">E85</option>
+          <option value="ethanol">Pure Ethanol</option>
+          <option value="methanol">Methanol</option>
+        </select>
+        <span class="filename-display">Affects the expected cooling gain range</span>
+      </div>
+
+      <div class="file-row">
+        <label for="step-target">Step Test Target Lambda:</label>
+        <input type="number" id="step-target" value="0.9" step="0.05" min="0.7" max="0.95" style="width:80px;" />
+        <span class="filename-display">The lambda value you commanded during the rich step (typically 0.9)</span>
+      </div>
+
+      <div class="button-row">
+        <button id="analyze-btn" disabled>Analyze</button>
+        <a href="help.html" class="help-link-btn">Help</a>
+      </div>
+    </div>
+
+    <div id="error-container" class="error-banner" hidden></div>
+
+    <div id="progress-section" class="progress-section" hidden>
+      <div class="progress-bar-track">
+        <div id="progress-bar" class="progress-bar-fill" style="width:0%"></div>
+      </div>
+      <div class="progress-labels">
+        <span id="progress-pct">0%</span>
+        <span id="progress-phase"></span>
+      </div>
+    </div>
+
+    <section id="results-section" class="results-section" hidden>
+      <div class="report-block">
+        <h2>Step Test Analysis</h2>
+        <div id="analysis-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Recommendation</h2>
+        <div id="recommendation-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Detected Step Events</h2>
+        <p class="section-desc">Lambda target changes detected in the log. The tool measures how well actual lambda tracked each target change.</p>
+        <div id="events-content"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="../lib/ld-parser.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
