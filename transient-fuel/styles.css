@@ -47,3 +47,8 @@ h2 { margin: 0 0 8px; font-size: 1.1rem; color: #E31837; }
 .rec-info { background: rgba(33,150,243,0.1); border-left-color: #2196f3; color: #2196f3; }
 .rec-good { background: rgba(76,175,80,0.1); border-left-color: #4caf50; color: #4caf50; }
 [hidden] { display: none !important; }
+
+/* Severity font colors for table cells */
+.event-table td.severity-high { color: #f44336; font-weight: 600; }
+.event-table td.severity-med { color: #ff9800; font-weight: 600; }
+.event-table td.severity-low { color: #4caf50; }
