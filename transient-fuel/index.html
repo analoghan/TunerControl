@@ -24,6 +24,24 @@
       </div>
 
       <div class="file-row">
+        <label for="ff-table-input">Fuel Film Primary Table (.csv, optional):</label>
+        <input type="file" id="ff-table-input" accept=".csv" />
+        <span id="ff-filename" class="filename-display">No file selected</span>
+      </div>
+
+      <div class="file-row">
+        <label for="ff-scale">Fuel Film Scale (%):</label>
+        <input type="number" id="ff-scale" min="0" max="500" value="100" step="5" style="width:80px;" />
+        <span class="filename-display">MoTeC Fuel Film Primary Scale (default 100%)</span>
+      </div>
+
+      <div class="file-row">
+        <label for="ff-offset">Fuel Film Offset (ul):</label>
+        <input type="number" id="ff-offset" min="-500" max="500" value="0" step="5" style="width:80px;" />
+        <span class="filename-display">MoTeC Fuel Film Primary Offset (default 0)</span>
+      </div>
+
+      <div class="file-row">
         <label for="map-rate-threshold">MAP Rate Threshold (kPa/s):</label>
         <input type="number" id="map-rate-threshold" min="50" max="2000" value="200" step="50" style="width:80px;" />
         <span class="filename-display">Minimum MAP change rate to detect a transient event</span>
@@ -82,9 +100,20 @@
         <p class="section-desc">Suggested adjustments to the fuel film primary table and time constants based on the transient analysis.</p>
         <div id="recommendations-content"></div>
       </div>
+
+      <div class="report-block" id="corrected-table-section" hidden>
+        <h2>Corrected Fuel Film Primary Table</h2>
+        <p class="section-desc">Original values vs recommended values per MAP breakpoint. Download the corrected CSV to import back into MoTeC M1 Tune.</p>
+        <div id="corrected-table-content"></div>
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn-secondary" id="download-ff-btn">Download Corrected CSV</button>
+          <button class="btn-secondary" id="copy-ff-btn">Copy to Clipboard</button>
+        </div>
+      </div>
     </section>
   </div>
 
+  <script src="../lib/ld-parser.js"></script>
   <script src="worker.js"></script>
   <script src="app.js"></script>
 </body>
