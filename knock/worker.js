@@ -1302,7 +1302,6 @@ function generateDiagnostics(distribution, worstConditions, retardStats) {
     var messages = [];
 
     // Message 1: Cylinder with highest knock percentage
-    // ranking[0] is the cylinder number (1–8) with the most events
     var worstCyl = distribution.ranking[0];
     var worstPct = distribution.percentages[worstCyl - 1];
     messages.push('Cylinder ' + worstCyl + ' has the highest knock activity at ' + worstPct + '% of total events.');
@@ -1315,6 +1314,26 @@ function generateDiagnostics(distribution, worstConditions, retardStats) {
     // Message 3: Worst load range (skip if null)
     if (worstConditions.worstLoadBin !== null) {
         messages.push('Most knock events occur in the ' + worstConditions.worstLoadBin.loadRange + ' load range (' + worstConditions.worstLoadBin.count + ' events).');
+    }
+
+    // Message 4: Cylinder trim advisor
+    // If one cylinder has significantly more knock than others, recommend a per-cylinder trim
+    var avgCount = distribution.total / distribution.counts.length;
+    for (var c = 0; c < distribution.counts.length; c++) {
+        var cylCount = distribution.counts[c];
+        if (cylCount > avgCount * 2 && cylCount > 5) {
+            var cylNum = c + 1;
+            var pct = distribution.percentages[c];
+            var rpmZone = worstConditions.worstRpmBin ? worstConditions.worstRpmBin.rpmRange : 'all RPM';
+            var loadZone = worstConditions.worstLoadBin ? worstConditions.worstLoadBin.loadRange : 'all loads';
+
+            messages.push('CYLINDER TRIM RECOMMENDATION: Cylinder ' + cylNum + ' accounts for ' + pct + '% of knock events (' + cylCount + ' total). Consider adding -2° to -3° cylinder trim for Cyl ' + cylNum + ' in the ' + rpmZone + ' RPM / ' + loadZone + ' zone. After applying the trim, re-log and verify: if knock disappears, it was real knock and the trim is correct. If knock persists at the same level, it is likely sensor noise — reduce the knock sensor gain for Cyl ' + cylNum + ' instead.');
+        }
+    }
+
+    // Message 5: Noise vs real knock guidance
+    if (distribution.total > 20 && retardStats && retardStats.avgRetard < 0.5) {
+        messages.push('NOTE: High event count but very low average retard (' + retardStats.avgRetard.toFixed(1) + '°) suggests the knock threshold may be set too low, causing false triggers. Consider raising the knock threshold by 10-20% before adding cylinder trims.');
     }
 
     return messages;

@@ -285,11 +285,14 @@ var CHANNEL_MAP = {
     coolant_temp:       ['Coolant Temperature'],
     idle_mass_flow:     ['Idle Mass Flow'],
     idle_mass_flow_ff:  ['Idle Mass Flow Feed Forward'],
-    clutch_pos:         ['Clutch Switch Position', 'Clutch Position']
+    clutch_pos:         ['Clutch Switch Position', 'Clutch Position'],
+    spark_timing:       ['Ignition Timing', 'Spark Timing'],
+    idle_spark_corr:    ['Idle Spark Correction', 'Idle Ignition Correction'],
+    idle_air_corr:      ['Idle Air Correction', 'Idle Airflow Correction'],
 };
 
 var REQUIRED_CHANNELS = ['rpm', 'tps', 'clutch_pos'];
-var OPTIONAL_WARN_CHANNELS = ['idle_aim', 'map', 'coolant_temp', 'idle_mass_flow', 'idle_mass_flow_ff'];
+var OPTIONAL_WARN_CHANNELS = ['idle_aim', 'map', 'coolant_temp', 'idle_mass_flow', 'idle_mass_flow_ff', 'spark_timing', 'idle_spark_corr'];
 
 function resolveChannels(columnNames) {
     var nameToIdx = {};
@@ -824,6 +827,147 @@ function buildChartData(data, channels, events) {
 }
 
 // ---------------------------------------------------------------------------
+// Feed-Forward Diagnostics
+// ---------------------------------------------------------------------------
+
+/**
+ * Analyzes idle spark timing correction and airflow correction to diagnose
+ * feed-forward table calibration issues.
+ *
+ * Key diagnostics:
+ * - If spark correction is consistently large (>5°), feed-forward airflow is wrong
+ * - If RPM oscillates with a regular period, PID gains need adjustment
+ * - If idle is stable but spark is far from optimal, feed-forward provides wrong air amount
+ */
+function computeFeedForwardDiagnostics(data, channels, sampleRate) {
+    var diags = [];
+    var sparkCorrIdx = channels.idle_spark_corr;
+    var sparkIdx = channels.spark_timing;
+    var rpmIdx = channels.rpm;
+    var mapIdx = channels.map;
+    var tpsIdx = channels.tps;
+    var idleAimIdx = channels.idle_aim;
+    var airCorrIdx = channels.idle_air_corr;
+
+    // Find idle samples (low RPM, low TPS)
+    var idleSamples = [];
+    for (var i = 0; i < data.length; i++) {
+        var rpm = rpmIdx >= 0 ? data[i][rpmIdx] : NaN;
+        var tps = tpsIdx >= 0 ? data[i][tpsIdx] : NaN;
+        if (isNaN(rpm) || isNaN(tps)) continue;
+        if (rpm > 400 && rpm < 1500 && tps < 5) {
+            idleSamples.push(i);
+        }
+    }
+
+    if (idleSamples.length < 50) {
+        diags.push({ severity: 'info', text: 'Insufficient idle data for feed-forward analysis (need 50+ idle samples).' });
+        return diags;
+    }
+
+    // Analyze spark timing correction at idle
+    if (sparkCorrIdx >= 0) {
+        var sparkCorrSum = 0;
+        var sparkCorrAbsSum = 0;
+        var sparkCorrCount = 0;
+        var sparkCorrMax = 0;
+        var sparkCorrMin = 0;
+
+        for (var i = 0; i < idleSamples.length; i++) {
+            var corr = data[idleSamples[i]][sparkCorrIdx];
+            if (isNaN(corr)) continue;
+            sparkCorrSum += corr;
+            sparkCorrAbsSum += Math.abs(corr);
+            sparkCorrCount++;
+            if (corr > sparkCorrMax) sparkCorrMax = corr;
+            if (corr < sparkCorrMin) sparkCorrMin = corr;
+        }
+
+        if (sparkCorrCount > 0) {
+            var avgCorr = sparkCorrSum / sparkCorrCount;
+            var avgAbsCorr = sparkCorrAbsSum / sparkCorrCount;
+
+            if (Math.abs(avgCorr) > 5) {
+                diags.push({
+                    severity: 'warning',
+                    text: 'Idle spark correction is consistently ' + (avgCorr > 0 ? 'advancing' : 'retarding') + ' by ' + Math.abs(avgCorr).toFixed(1) + '° on average. This indicates the feed-forward airflow table is providing ' + (avgCorr > 0 ? 'too little' : 'too much') + ' air — the ECU is using spark timing to compensate. Adjust the idle feed-forward table to provide ' + (avgCorr > 0 ? 'more' : 'less') + ' airflow so spark correction returns closer to 0°.'
+                });
+            } else if (avgAbsCorr > 8) {
+                diags.push({
+                    severity: 'warning',
+                    text: 'Idle spark correction is oscillating widely (avg |correction| = ' + avgAbsCorr.toFixed(1) + '°, range ' + sparkCorrMin.toFixed(1) + '° to +' + sparkCorrMax.toFixed(1) + '°). This suggests the idle PID gains are too aggressive — the fast-path (spark) control is hunting. Try reducing the idle spark gain.'
+                });
+            } else if (Math.abs(avgCorr) < 2 && avgAbsCorr < 3) {
+                diags.push({
+                    severity: 'good',
+                    text: 'Idle spark correction is well-centered (avg ' + avgCorr.toFixed(1) + '°, |avg| ' + avgAbsCorr.toFixed(1) + '°). Feed-forward airflow appears correctly calibrated.'
+                });
+            }
+        }
+    } else {
+        diags.push({ severity: 'info', text: 'Idle Spark Correction channel not found — cannot assess feed-forward calibration. Log "Idle Spark Correction" or "Idle Ignition Correction" for this analysis.' });
+    }
+
+    // Analyze RPM stability (oscillation detection)
+    if (rpmIdx >= 0 && idleSamples.length > 100) {
+        var rpmValues = [];
+        for (var i = 0; i < idleSamples.length; i++) {
+            rpmValues.push(data[idleSamples[i]][rpmIdx]);
+        }
+
+        // Compute RPM standard deviation
+        var rpmMean = 0;
+        for (var i = 0; i < rpmValues.length; i++) rpmMean += rpmValues[i];
+        rpmMean /= rpmValues.length;
+
+        var rpmVariance = 0;
+        for (var i = 0; i < rpmValues.length; i++) {
+            var diff = rpmValues[i] - rpmMean;
+            rpmVariance += diff * diff;
+        }
+        var rpmStdDev = Math.sqrt(rpmVariance / rpmValues.length);
+
+        if (rpmStdDev > 50) {
+            diags.push({
+                severity: 'warning',
+                text: 'Idle RPM is unstable (std dev = ' + rpmStdDev.toFixed(0) + ' RPM, mean = ' + rpmMean.toFixed(0) + ' RPM). Possible causes: feed-forward table not providing enough base airflow (forcing PID to work too hard), PID gains too aggressive, or mechanical issue (vacuum leak, sticky throttle).'
+            });
+        } else if (rpmStdDev > 25) {
+            diags.push({
+                severity: 'info',
+                text: 'Idle RPM has moderate variation (std dev = ' + rpmStdDev.toFixed(0) + ' RPM). Acceptable for most applications but could be tightened with feed-forward refinement.'
+            });
+        } else {
+            diags.push({
+                severity: 'good',
+                text: 'Idle RPM is stable (std dev = ' + rpmStdDev.toFixed(0) + ' RPM, mean = ' + rpmMean.toFixed(0) + ' RPM). ✓'
+            });
+        }
+    }
+
+    // Analyze MAP at idle (cam size indicator)
+    if (mapIdx >= 0) {
+        var mapSum = 0;
+        var mapCount = 0;
+        for (var i = 0; i < idleSamples.length; i++) {
+            var map = data[idleSamples[i]][mapIdx];
+            if (!isNaN(map)) { mapSum += map; mapCount++; }
+        }
+        if (mapCount > 0) {
+            var avgMap = mapSum / mapCount;
+            if (avgMap > 60) {
+                diags.push({
+                    severity: 'info',
+                    text: 'Idle MAP is high (' + avgMap.toFixed(0) + ' kPa) — indicates a large cam with reduced vacuum. The feed-forward table needs higher airflow values to maintain idle with less vacuum available. Ensure your VE table is calibrated for this MAP range at idle RPM.'
+                });
+            }
+        }
+    }
+
+    return diags;
+}
+
+// ---------------------------------------------------------------------------
 // Main Analysis Pipeline
 // ---------------------------------------------------------------------------
 
@@ -866,7 +1010,12 @@ function runAnalysis(columnNames, data, sampleRate) {
     self.postMessage({ type: 'progress', phase: 'Computing statistics...', percent: 80 });
     var analysis = computeStatistics(events, channels);
 
-    // Step 5: Build chart data
+    // Step 5: Compute feed-forward diagnostics (if spark/air correction channels available)
+    self.postMessage({ type: 'progress', phase: 'Analyzing feed-forward...', percent: 85 });
+    var feedForwardDiags = computeFeedForwardDiagnostics(data, channels, sampleRate);
+    analysis.feedForwardDiags = feedForwardDiags;
+
+    // Step 6: Build chart data
     self.postMessage({ type: 'progress', phase: 'Building chart data...', percent: 90 });
     var chartData = buildChartData(data, channels, events);
 

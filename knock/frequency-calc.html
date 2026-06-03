@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Knock Frequency Calculator — MoTeC M1</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .calc-section { margin-bottom: 24px; }
+    .calc-input-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .calc-input-row label { min-width: 160px; font-weight: 500; color: #b0b0b0; font-size: 0.9rem; }
+    .calc-input-row input, .calc-input-row select { width: 120px; padding: 6px 10px; background: #222; border: 1px solid #333; border-radius: 4px; color: #fff; font-size: 0.9rem; }
+    .calc-input-row .hint { font-size: 0.8rem; color: #666; font-style: italic; }
+    .freq-results { margin-top: 16px; }
+    .freq-card { background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 14px; margin-bottom: 10px; }
+    .freq-card h3 { margin: 0 0 6px; font-size: 0.95rem; color: #fff; }
+    .freq-card .value { font-size: 1.4rem; font-weight: 700; color: #E31837; }
+    .freq-card .detail { font-size: 0.8rem; color: #888; margin-top: 4px; }
+    .freq-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+    .sweep-table { border-collapse: collapse; font-size: 0.85rem; margin-top: 12px; width: 100%; }
+    .sweep-table th, .sweep-table td { padding: 8px 12px; border: 1px solid #333; text-align: center; }
+    .sweep-table thead th { background: #222; color: #fff; font-weight: 600; }
+    .sweep-table td { color: #ccc; }
+    .sweep-table .recommended { color: #4caf50; font-weight: 600; }
+    .process-list { list-style: none; padding: 0; counter-reset: step; }
+    .process-list li { padding: 10px 14px; margin-bottom: 8px; background: #1a1a1a; border: 1px solid #333; border-radius: 4px; font-size: 0.85rem; color: #ccc; position: relative; padding-left: 40px; }
+    .process-list li::before { counter-increment: step; content: counter(step); position: absolute; left: 12px; top: 10px; width: 20px; height: 20px; background: #E31837; border-radius: 50%; color: #fff; font-size: 0.75rem; font-weight: 700; text-align: center; line-height: 20px; }
+    .process-list li b { color: #fff; }
+    .note-box { background: rgba(255,152,0,0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; font-size: 0.85rem; color: #ff9800; }
+    .tip-box { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; font-size: 0.85rem; color: #4caf50; }
+    .btn-row { margin-top: 16px; display: flex; gap: 12px; }
+    .btn-primary { padding: 10px 28px; font-size: 1rem; font-weight: 600; color: #fff; background: #E31837; border: none; border-radius: 4px; cursor: pointer; }
+    .btn-primary:hover { background: #ff2d4a; }
+    .btn-secondary { padding: 8px 18px; font-size: 0.85rem; color: #fff; background: #222; border: 1px solid #E31837; border-radius: 4px; cursor: pointer; text-decoration: none; }
+    .btn-secondary:hover { background: #333; }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Knock Analyzer</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Knock Frequency Calculator</h1>
+    <p class="subtitle">Computes optimal knock sensor frequencies based on engine bore size. Generates MoTeC M1 frequency channel assignments (A/B/C/D) for the calibration sweep process.</p>
+
+    <div class="calc-section">
+      <div class="calc-input-row">
+        <label for="bore-mm">Bore Diameter (mm):</label>
+        <input type="number" id="bore-mm" value="103.3" step="0.1" min="50" max="200" />
+        <span class="hint">or</span>
+        <input type="number" id="bore-in" value="4.065" step="0.001" min="2" max="8" style="width:100px;" />
+        <label style="min-width:auto;">inches</label>
+      </div>
+      <div class="calc-input-row">
+        <label for="sensor-type">Sensor Type:</label>
+        <select id="sensor-type">
+          <option value="bosch">Bosch Flat Response</option>
+          <option value="oem">OEM Resonant</option>
+        </select>
+        <span class="hint">Bosch broadband recommended for aftermarket installations</span>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="calc-btn">Calculate Frequencies</button>
+      </div>
+    </div>
+
+    <div id="results-section" hidden>
+      <div class="calc-section">
+        <h2 style="color:#E31837;">Calculated Frequencies</h2>
+        <div class="freq-grid" id="freq-cards"></div>
+      </div>
+
+      <div class="calc-section">
+        <h2 style="color:#E31837;">Recommended Sweep Configuration</h2>
+        <p style="color:#b0b0b0;font-size:0.85rem;">Enter these values into MoTeC's knock frequency channels A–D for your initial calibration sweep.</p>
+        <table class="sweep-table" id="sweep-table"></table>
+        <div class="btn-row">
+          <button class="btn-secondary" id="copy-btn">Copy Values</button>
+        </div>
+      </div>
+
+      <div class="calc-section">
+        <h2 style="color:#E31837;">Narrowing Sweep (Round 2)</h2>
+        <p style="color:#b0b0b0;font-size:0.85rem;">After the initial sweep, set A–D to these values centered on the second order frequency for final refinement.</p>
+        <table class="sweep-table" id="narrow-table"></table>
+      </div>
+
+      <div class="calc-section">
+        <h2 style="color:#E31837;">Calibration Process</h2>
+        <ol class="process-list" id="process-list"></ol>
+      </div>
+
+      <div class="calc-section">
+        <h2 style="color:#E31837;">Notes</h2>
+        <div id="notes-section"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var boreMMInput = document.getElementById('bore-mm');
+    var boreInInput = document.getElementById('bore-in');
+    var sensorType = document.getElementById('sensor-type');
+
+    // Sync bore inputs
+    boreMMInput.addEventListener('input', function() {
+      boreInInput.value = (parseFloat(boreMMInput.value) / 25.4).toFixed(3);
+    });
+    boreInInput.addEventListener('input', function() {
+      boreMMInput.value = (parseFloat(boreInInput.value) * 25.4).toFixed(1);
+    });
+
+    document.getElementById('calc-btn').addEventListener('click', calculate);
+
+    function calculate() {
+      var boreMM = parseFloat(boreMMInput.value) || 103.3;
+      var sensor = sensorType.value;
+
+      // Calculate frequencies
+      var firstOrder = Math.round(900000 / boreMM);
+      var secondOrder = firstOrder * 2;
+
+      // Sweep range depends on sensor type
+      var sweepSpread = sensor === 'bosch' ? 3000 : 2000;
+      var sweepA = secondOrder - sweepSpread;
+      var sweepB = secondOrder - Math.round(sweepSpread / 2);
+      var sweepC = secondOrder;
+      var sweepD = secondOrder + Math.round(sweepSpread / 2);
+
+      // Narrow sweep (±1500 Hz around second order)
+      var narrowA = secondOrder - 1500;
+      var narrowB = secondOrder - 500;
+      var narrowC = secondOrder + 500;
+      var narrowD = secondOrder + 1500;
+
+      // Show results
+      document.getElementById('results-section').hidden = false;
+
+      // Frequency cards
+      document.getElementById('freq-cards').innerHTML =
+        freqCard('First Order', firstOrder, 'Too noisy for production use — reference only') +
+        freqCard('Second Order (Target)', secondOrder, 'Best knock-to-noise ratio — start here') +
+        freqCard('Recommended Range', (secondOrder - 2000) + ' – ' + (secondOrder + 2000) + ' Hz', 'Final frequency typically within ±2000 Hz of second order');
+
+      // Sweep table
+      document.getElementById('sweep-table').innerHTML =
+        '<thead><tr><th>Channel</th><th>Frequency (Hz)</th><th>Purpose</th></tr></thead><tbody>' +
+        '<tr><td>A</td><td>' + sweepA + '</td><td>Below second order</td></tr>' +
+        '<tr><td>B</td><td>' + sweepB + '</td><td>Approaching second order</td></tr>' +
+        '<tr><td class="recommended">C</td><td class="recommended">' + sweepC + '</td><td class="recommended">Second order (most likely winner)</td></tr>' +
+        '<tr><td>D</td><td>' + sweepD + '</td><td>Above second order</td></tr>' +
+        '</tbody>';
+
+      // Narrow table
+      document.getElementById('narrow-table').innerHTML =
+        '<thead><tr><th>Channel</th><th>Frequency (Hz)</th><th>Offset from 2nd Order</th></tr></thead><tbody>' +
+        '<tr><td>A</td><td>' + narrowA + '</td><td>-1500 Hz</td></tr>' +
+        '<tr><td>B</td><td>' + narrowB + '</td><td>-500 Hz</td></tr>' +
+        '<tr><td>C</td><td>' + narrowC + '</td><td>+500 Hz</td></tr>' +
+        '<tr><td>D</td><td>' + narrowD + '</td><td>+1500 Hz</td></tr>' +
+        '</tbody>';
+
+      // Process steps
+      var steps = [
+        '<b>Set safe timing:</b> Reduce spark timing to 10-12° at your test RPM (e.g., 2500 RPM WOT). This ensures no knock occurs during baseline measurement.',
+        '<b>Enter sweep frequencies:</b> Set channels A=' + sweepA + ', B=' + sweepB + ', C=' + sweepC + ', D=' + sweepD + ' Hz in MoTeC knock control.',
+        '<b>Balance cylinder gains:</b> Run at low timing (no knock) and adjust per-cylinder gains so all cylinders show approximately equal noise levels. Cylinders closer to the sensor will be louder — reduce their gain by 10-15%.',
+        '<b>Establish baseline:</b> Log the knock levels at each frequency with safe timing. Note the noise floor for each channel.',
+        '<b>Induce controlled knock:</b> Briefly advance timing at your test RPM (e.g., to 30°) to cause knock. Keep bursts under 2-3 seconds. Confirm with knock headphones if possible.',
+        '<b>Compare channels:</b> The best frequency shows: (a) low noise during no-knock, (b) clear sharp spike during knock, (c) even response across all cylinders.',
+        '<b>Narrow down:</b> Set A/B/C/D to the narrowing sweep values (' + narrowA + '/' + narrowB + '/' + narrowC + '/' + narrowD + ') and repeat steps 4-6.',
+        '<b>Final selection:</b> Choose the single best frequency. Set ALL channels to that value for production use. Set threshold 10-20% above the noise floor measured at that frequency.',
+      ];
+      document.getElementById('process-list').innerHTML = steps.map(function(s) { return '<li>' + s + '</li>'; }).join('');
+
+      // Notes
+      var notes = '';
+      notes += '<div class="tip-box"><b>Skip first order entirely.</b> The first order frequency (' + firstOrder + ' Hz) picks up too much mechanical noise on every engine. It is not usable for knock detection — start your sweep at or above the second order.</div>';
+
+      if (sensor === 'oem') {
+        notes += '<div class="note-box"><b>OEM resonant sensors</b> have a narrower bandwidth than Bosch flat-response. Your optimal frequency may be slightly below the calculated second order (within 1000-2000 Hz lower). Consider upgrading to a Bosch flat-response sensor for better broadband detection.</div>';
+      } else {
+        notes += '<div class="tip-box"><b>Bosch flat-response sensors</b> work well across a wide range. The second order frequency is almost always the correct choice. You may find the optimal is within ±1000 Hz of the calculated value.</div>';
+      }
+
+      notes += '<div class="note-box"><b>After calibration:</b> You only need ONE frequency for production. Set all channels to your final optimized value. The A/B/C/D multi-frequency setup is only for the calibration/discovery process.</div>';
+      notes += '<div class="tip-box"><b>Per-cylinder gain:</b> The knock sensor reads louder for cylinders physically closer to it. On a V8, you may need two sensors (one per bank). On an inline engine, cylinders adjacent to the sensor need 10-15% gain reduction to balance the readings.</div>';
+
+      document.getElementById('notes-section').innerHTML = notes;
+
+      // Copy button
+      document.getElementById('copy-btn').onclick = function() {
+        var text = 'Initial Sweep:\nA: ' + sweepA + ' Hz\nB: ' + sweepB + ' Hz\nC: ' + sweepC + ' Hz\nD: ' + sweepD + ' Hz\n\nNarrowing Sweep:\nA: ' + narrowA + ' Hz\nB: ' + narrowB + ' Hz\nC: ' + narrowC + ' Hz\nD: ' + narrowD + ' Hz';
+        navigator.clipboard.writeText(text).catch(function(){});
+        this.textContent = 'Copied!';
+        var btn = this;
+        setTimeout(function() { btn.textContent = 'Copy Values'; }, 1500);
+      };
+    }
+
+    function freqCard(title, value, detail) {
+      return '<div class="freq-card"><h3>' + title + '</h3><div class="value">' + value + (typeof value === 'number' ? ' Hz' : '') + '</div><div class="detail">' + detail + '</div></div>';
+    }
+  </script>
+</body>
+</html>

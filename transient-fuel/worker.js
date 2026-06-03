@@ -32,18 +32,22 @@ var TRANSIENT_CHANNELS = {
 // ---------------------------------------------------------------------------
 
 function parseTransientLog(text, onProgress) {
-    var lines = text.split('\n');
+    // Strip null bytes and BOM
+    text = text.replace(/\0/g, '').replace(/^\uFEFF/, '');
+    var lines = text.split('\n').map(function(l) { return l.replace(/\r$/, ''); });
 
-    // Find header row (first field = "Time")
+    // Find header row (first field = "Time", case-sensitive, handles quotes)
     var headerIdx = -1;
     for (var i = 0; i < Math.min(25, lines.length); i++) {
-        var first = lines[i].split(',')[0].trim().replace(/"/g, '');
-        if (first === 'Time') { headerIdx = i; break; }
+        var firstField = lines[i].split(',')[0].trim().replace(/^"|"$/g, '');
+        if (firstField === 'Time') { headerIdx = i; break; }
     }
-    if (headerIdx === -1) throw new Error('Could not find "Time" header in first 25 rows.');
+    if (headerIdx === -1) throw new Error('Could not find "Time" header in first 25 rows. Ensure this is a MoTeC M1 CSV or .ld export.');
 
-    // Parse column names
-    var colNames = lines[headerIdx].split(',').map(function(s) { return s.trim().replace(/"/g, '').toLowerCase(); });
+    // Parse column names (handle quoted fields)
+    var colNames = lines[headerIdx].split(',').map(function(s) {
+        return s.trim().replace(/^"|"$/g, '').toLowerCase();
+    });
 
     // Resolve channels
     var timeIdx = colNames.indexOf(TRANSIENT_CHANNELS.TIME);
@@ -69,7 +73,7 @@ function parseTransientLog(text, onProgress) {
     for (var i = dataStart; i < lines.length; i++) {
         var line = lines[i].trim();
         if (line === '') continue;
-        var fields = line.split(',');
+        var fields = line.split(',').map(function(f) { return f.trim().replace(/^"|"$/g, ''); });
 
         var time = parseFloat(fields[timeIdx]);
         var map = parseFloat(fields[mapIdx]);
