@@ -49,14 +49,47 @@
 
       <div class="file-row">
         <label for="min-map-change">Min MAP Change (kPa):</label>
-        <input type="number" id="min-map-change" min="5" max="100" value="15" step="5" style="width:80px;" />
+        <input type="number" id="min-map-change" min="5" max="100" value="20" step="5" style="width:80px;" />
         <span class="filename-display">Minimum total MAP change to qualify as a transient</span>
+      </div>
+
+      <div class="file-row">
+        <label for="map-window">Detection Window (ms):</label>
+        <input type="number" id="map-window" min="50" max="2000" value="500" step="50" style="width:80px;" />
+        <span class="filename-display">Time window to measure total MAP change (catches slower transients)</span>
       </div>
 
       <div class="file-row">
         <label for="lambda-target">Lambda Target:</label>
         <input type="number" id="lambda-target" min="0.7" max="1.1" value="1.0" step="0.01" style="width:80px;" />
         <span class="filename-display">Expected lambda during transient (used if target channel unavailable)</span>
+      </div>
+
+      <h2 style="color:#E31837;margin-top:20px;font-size:1rem;">Current Time Constants (for recommendations)</h2>
+      <div class="file-row">
+        <label for="fast-pct">Fast Percentage (%):</label>
+        <input type="number" id="fast-pct" min="0" max="100" value="30" step="5" style="width:80px;" />
+        <span class="filename-display">Current MoTeC Fuel Film Fast Percentage setting</span>
+      </div>
+      <div class="file-row">
+        <label for="fast-increase">Fast Increase (s):</label>
+        <input type="number" id="fast-increase" min="0" max="5" value="0.2" step="0.05" style="width:80px;" />
+        <span class="filename-display">Current Fast Increase Time Constant</span>
+      </div>
+      <div class="file-row">
+        <label for="fast-decrease">Fast Decrease (s):</label>
+        <input type="number" id="fast-decrease" min="0" max="5" value="0.3" step="0.05" style="width:80px;" />
+        <span class="filename-display">Current Fast Decrease Time Constant</span>
+      </div>
+      <div class="file-row">
+        <label for="slow-increase">Slow Increase (s):</label>
+        <input type="number" id="slow-increase" min="0" max="5" value="0.5" step="0.05" style="width:80px;" />
+        <span class="filename-display">Current Slow Increase Time Constant</span>
+      </div>
+      <div class="file-row">
+        <label for="slow-decrease">Slow Decrease (s):</label>
+        <input type="number" id="slow-decrease" min="0" max="5" value="0.3" step="0.05" style="width:80px;" />
+        <span class="filename-display">Current Slow Decrease Time Constant</span>
       </div>
 
       <div class="button-row">

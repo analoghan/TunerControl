@@ -113,45 +113,80 @@ function parseTransientLog(text, onProgress) {
 
 function detectTransientEvents(samples, settings) {
     var mapRateThreshold = settings.mapRateThreshold || 200; // kPa/s
-    var minMapChange = settings.minMapChange || 15; // kPa total
+    var minMapChange = settings.minMapChange || 20; // kPa total
+    var mapWindowMs = (settings.mapWindow || 500) / 1000; // convert ms to seconds
     var defaultTarget = settings.lambdaTarget || 1.0;
 
     var events = [];
     var i = 0;
+    var lastEventEndIdx = -20; // prevent overlapping detections
 
     while (i < samples.length - 10) {
+        if (i <= lastEventEndIdx) { i++; continue; }
+
         var s = samples[i];
-        var sNext = samples[i + 1];
-        if (!sNext || isNaN(s.map) || isNaN(sNext.map)) { i++; continue; }
+        if (isNaN(s.map)) { i++; continue; }
 
-        var dt = sNext.time - s.time;
-        if (dt <= 0) { i++; continue; }
+        // Method 1: Rate-based detection (catches fast transients)
+        var rateTriggered = false;
+        if (i < samples.length - 1) {
+            var sNext = samples[i + 1];
+            var dt = sNext.time - s.time;
+            if (dt > 0 && !isNaN(sNext.map)) {
+                var mapRate = (sNext.map - s.map) / dt;
+                if (Math.abs(mapRate) >= mapRateThreshold) rateTriggered = true;
+            }
+        }
 
-        var mapRate = (sNext.map - s.map) / dt;
+        // Method 2: Window-based detection (catches slower but significant transients)
+        var windowTriggered = false;
+        if (!rateTriggered) {
+            // Look ahead within the window to see total MAP change
+            for (var w = i + 1; w < samples.length; w++) {
+                if (samples[w].time - s.time > mapWindowMs) break;
+                if (isNaN(samples[w].map)) continue;
+                var totalChange = Math.abs(samples[w].map - s.map);
+                if (totalChange >= minMapChange) {
+                    windowTriggered = true;
+                    break;
+                }
+            }
+        }
 
-        // Detect tip-in (positive MAP rate) or tip-out (negative MAP rate)
-        if (Math.abs(mapRate) >= mapRateThreshold) {
-            var isTipIn = mapRate > 0;
-            var eventStart = i;
+        if (rateTriggered || windowTriggered) {
             var mapAtStart = s.map;
             var timeAtStart = s.time;
+            var isTipIn = false;
 
-            // Find the end of the transient (MAP rate drops below threshold)
+            // Find the end of the transient (MAP stabilizes or direction reverses)
             var j = i + 1;
+            var peakMap = mapAtStart;
+            var troughMap = mapAtStart;
             while (j < samples.length - 1) {
-                var dtj = samples[j + 1].time - samples[j].time;
-                if (dtj <= 0) { j++; continue; }
-                var rate = (samples[j + 1].map - samples[j].map) / dtj;
-                if (isTipIn && rate < mapRateThreshold * 0.3) break;
-                if (!isTipIn && rate > -mapRateThreshold * 0.3) break;
+                if (isNaN(samples[j].map)) { j++; continue; }
+                if (samples[j].map > peakMap) peakMap = samples[j].map;
+                if (samples[j].map < troughMap) troughMap = samples[j].map;
+
+                // Check if MAP has stabilized (rate drops to near zero)
+                var dtj = samples[j].time - samples[Math.max(j - 3, i)].time;
+                if (dtj > 0.1) { // need at least 100ms of data
+                    var recentRate = Math.abs(samples[j].map - samples[Math.max(j - 3, i)].map) / dtj;
+                    if (recentRate < mapRateThreshold * 0.2 && (samples[j].time - timeAtStart) > 0.1) break;
+                }
+                // Time limit: don't look more than 2s ahead
+                if (samples[j].time - timeAtStart > 2.0) break;
                 j++;
             }
 
             var mapAtEnd = samples[j].map;
             var totalMapChange = Math.abs(mapAtEnd - mapAtStart);
+            isTipIn = mapAtEnd > mapAtStart;
+
+            // Also check peak-to-start (in case MAP overshot then returned)
+            var maxChange = Math.max(peakMap - mapAtStart, mapAtStart - troughMap);
+            if (maxChange > totalMapChange) totalMapChange = maxChange;
 
             if (totalMapChange >= minMapChange) {
-                // Measure lambda excursion in the window after the transient
                 var target = !isNaN(samples[j].lambdaTarget) && samples[j].lambdaTarget > 0.5 ? samples[j].lambdaTarget : defaultTarget;
                 var excursion = measureLambdaExcursion(samples, j, target, isTipIn);
 
@@ -162,16 +197,18 @@ function detectTransientEvents(samples, settings) {
                     mapFrom: Math.round(mapAtStart),
                     mapTo: Math.round(mapAtEnd),
                     mapChange: Math.round(totalMapChange),
-                    mapRate: Math.round(Math.abs(mapRate)),
+                    mapRate: Math.round(totalMapChange / Math.max(samples[j].time - timeAtStart, 0.01)),
                     lambdaTarget: target,
                     leanSpike: excursion.leanSpike,
                     richOvershoot: excursion.richOvershoot,
                     recoveryTime: excursion.recoveryTime,
                     peakError: excursion.peakError,
                 });
+
+                lastEventEndIdx = j + 5;
             }
 
-            i = j + 10; // skip past this event
+            i = j + 5; // skip past event
         } else {
             i++;
         }
@@ -240,7 +277,7 @@ function measureLambdaExcursion(samples, transientEndIdx, target, isTipIn) {
 // Recommendations Generator
 // ---------------------------------------------------------------------------
 
-function generateRecommendations(events) {
+function generateRecommendations(events, settings) {
     var recs = [];
     var tipIns = events.filter(function(e) { return e.type === 'tip-in'; });
     var tipOuts = events.filter(function(e) { return e.type === 'tip-out'; });
@@ -306,28 +343,47 @@ function generateRecommendations(events) {
         });
     }
 
-    // Suggested time constant values based on measured behavior
+    // Suggested time constant values based on measured behavior AND current values
     if (tipIns.length > 3) {
-        var suggestedFastIncrease, suggestedFastDecrease, suggestedSlowIncrease, suggestedSlowDecrease;
+        var tc = settings.currentTimeConstants || {};
+        var curFastInc = tc.fastIncrease || 0.2;
+        var curFastDec = tc.fastDecrease || 0.3;
+        var curSlowInc = tc.slowIncrease || 0.5;
+        var curSlowDec = tc.slowDecrease || 0.3;
+        var curFastPct = tc.fastPct || 30;
 
-        // Fast increase: should be quick enough to catch the initial lean spike
-        // If avg lean spike duration is short, fast needs to be very quick
-        suggestedFastIncrease = 0.1; // always aggressive
-
-        // Fast decrease: if rich overshoot is present, decrease faster
-        suggestedFastDecrease = avgRichTipIn > 5 ? 0.1 : 0.2;
-
-        // Slow increase: based on recovery time
-        suggestedSlowIncrease = avgRecovery > 800 ? 0.3 : avgRecovery > 500 ? 0.5 : 0.8;
-
-        // Slow decrease: based on tip-out rich
         var tipOutRich = tipOuts.length > 0 ? tipOuts.reduce(function(a,e){return a+e.richOvershoot;},0)/tipOuts.length : 0;
-        suggestedSlowDecrease = tipOutRich > 5 ? 0.1 : 0.3;
 
-        recs.push({
-            severity: 'info',
-            text: 'Suggested time constants based on this log: Fast Increase = ' + suggestedFastIncrease + 's, Fast Decrease = ' + suggestedFastDecrease + 's, Slow Increase = ' + suggestedSlowIncrease + 's, Slow Decrease = ' + suggestedSlowDecrease + 's. Fast Percentage = ' + (avgRichTipIn > 8 ? '15' : avgRichTipIn > 3 ? '25' : '35') + '%. These are starting points — fine-tune by re-logging after each change.'
-        });
+        var sugFastIncrease = Math.max(0.05, curFastInc * 0.5);
+        var sugFastDecrease = avgRichTipIn > 5 ? Math.max(0.05, curFastDec * 0.5) : curFastDec;
+        var sugSlowIncrease = avgRecovery > 800 ? Math.max(0.1, curSlowInc * 0.5) : avgRecovery > 500 ? Math.max(0.1, curSlowInc * 0.7) : curSlowInc;
+        var sugSlowDecrease = tipOutRich > 5 ? Math.max(0.05, curSlowDec * 0.5) : curSlowDec;
+        var sugFastPct = avgRichTipIn > 8 ? Math.max(10, curFastPct - 10) : avgRichTipIn > 3 ? curFastPct : Math.min(50, curFastPct + 5);
+
+        var tcText = 'Suggested time constants (current → suggested): ';
+        tcText += 'Fast Increase: ' + curFastInc + 's → ' + sugFastIncrease.toFixed(2) + 's, ';
+        tcText += 'Fast Decrease: ' + curFastDec + 's → ' + sugFastDecrease.toFixed(2) + 's, ';
+        tcText += 'Slow Increase: ' + curSlowInc + 's → ' + sugSlowIncrease.toFixed(2) + 's, ';
+        tcText += 'Slow Decrease: ' + curSlowDec + 's → ' + sugSlowDecrease.toFixed(2) + 's, ';
+        tcText += 'Fast Percentage: ' + curFastPct + '% → ' + sugFastPct + '%. ';
+        tcText += 'Apply changes incrementally and re-log to verify.';
+
+        recs.push({ severity: 'info', text: tcText });
+    }
+
+    // Detect timing mismatch pattern: both lean spikes AND rich overshoot are significant
+    // This indicates the compensation magnitude may be correct but the timing (time constants)
+    // don't match the actual fuel film dynamics. Increasing scale/table values makes BOTH worse.
+    if (tipIns.length > 3) {
+        var avgLeanSpike = tipIns.reduce(function(a, e) { return a + e.leanSpike; }, 0) / tipIns.length;
+        if (avgLeanSpike > 3 && avgRichTipIn > 3) {
+            // Both directions are off — this is a timing problem, not a magnitude problem
+            var severity = (avgLeanSpike > 8 && avgRichTipIn > 8) ? 'critical' : 'warning';
+            recs.unshift({
+                severity: severity,
+                text: 'TIMING MISMATCH DETECTED: Both lean spikes (' + avgLeanSpike.toFixed(1) + '%) AND rich overshoot (' + avgRichTipIn.toFixed(1) + '%) are present on tip-in events. This pattern means the fuel film compensation is arriving too late and then hanging too long — increasing the table values or scale will make BOTH directions worse. Do NOT increase the primary table or scale. Instead: (1) Reduce the Slow Increase Time Constant so compensation arrives sooner and catches the lean spike earlier. (2) Reduce the Slow Decrease Time Constant so compensation is removed faster, preventing the rich overshoot. (3) For DI engines, time constants should be very short (0.1–0.2s) since fuel film effects are much faster than port injection.'
+            });
+        }
     }
 
     // Good state
@@ -427,7 +483,7 @@ function analyzeTransientSamples(samples, settings) {
     });
 
     var events = detectTransientEvents(warmSamples, settings);
-    var recommendations = generateRecommendations(events);
+    var recommendations = generateRecommendations(events, settings);
 
     var tipIns = events.filter(function(e) { return e.type === 'tip-in'; });
     var tipOuts = events.filter(function(e) { return e.type === 'tip-out'; });

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Injector Duty Cycle Monitor — MoTeC M1</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Injector Duty Cycle Monitor</h1>
+    <p class="subtitle">Analyzes injector duty cycle across RPM and load to identify headroom limits. Flags zones approaching maximum capacity and correlates with DI injection timing window constraints.</p>
+
+    <div class="form-section">
+      <div class="file-row">
+        <label for="log-input">MoTeC Log (.csv or .ld):</label>
+        <input type="file" id="log-input" accept=".csv,.ld" />
+        <span id="log-filename" class="filename-display">No file selected</span>
+      </div>
+      <div class="file-row">
+        <label for="warn-threshold">Warning Threshold (%):</label>
+        <input type="number" id="warn-threshold" value="80" min="50" max="95" step="5" style="width:80px;" />
+        <span class="filename-display">Duty cycle above this is flagged as approaching limit</span>
+      </div>
+      <div class="file-row">
+        <label for="critical-threshold">Critical Threshold (%):</label>
+        <input type="number" id="critical-threshold" value="90" min="60" max="100" step="5" style="width:80px;" />
+        <span class="filename-display">Duty cycle above this indicates injector is at or beyond capacity</span>
+      </div>
+      <div class="button-row">
+        <button id="analyze-btn" disabled>Analyze</button>
+      </div>
+    </div>
+
+    <div id="error-container" class="error-banner" hidden></div>
+    <div id="progress-section" class="progress-section" hidden>
+      <div class="progress-bar-track"><div id="progress-bar" class="progress-bar-fill" style="width:0%"></div></div>
+      <div class="progress-labels"><span id="progress-pct">0%</span><span id="progress-phase"></span></div>
+    </div>
+
+    <section id="results-section" class="results-section" hidden>
+      <div class="report-block">
+        <h2>Summary</h2>
+        <div id="summary-content"></div>
+      </div>
+      <div class="report-block">
+        <h2>Peak Duty Cycle by RPM</h2>
+        <p class="section-desc">Maximum observed injector duty cycle at each RPM band. Red = critical, Orange = warning, Green = headroom available.</p>
+        <div id="rpm-table-content"></div>
+      </div>
+      <div class="report-block">
+        <h2>High Duty Cycle Events</h2>
+        <p class="section-desc">Instances where duty cycle exceeded the warning threshold, sorted by severity.</p>
+        <div id="events-content"></div>
+      </div>
+      <div class="report-block">
+        <h2>Recommendations</h2>
+        <div id="recommendations-content"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="../lib/ld-parser.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

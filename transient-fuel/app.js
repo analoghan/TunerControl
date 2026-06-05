@@ -32,10 +32,18 @@ analyzeBtn.addEventListener('click', function() {
     var ffFile = ffTableInput.files[0] || null;
     var settings = {
         mapRateThreshold: parseInt(document.getElementById('map-rate-threshold').value, 10) || 200,
-        minMapChange: parseInt(document.getElementById('min-map-change').value, 10) || 15,
+        minMapChange: parseInt(document.getElementById('min-map-change').value, 10) || 20,
+        mapWindow: parseInt(document.getElementById('map-window').value, 10) || 500,
         lambdaTarget: parseFloat(document.getElementById('lambda-target').value) || 1.0,
         ffScale: parseFloat(document.getElementById('ff-scale').value) || 100,
         ffOffset: parseFloat(document.getElementById('ff-offset').value) || 0,
+        currentTimeConstants: {
+            fastPct: parseFloat(document.getElementById('fast-pct').value) || 30,
+            fastIncrease: parseFloat(document.getElementById('fast-increase').value) || 0.2,
+            fastDecrease: parseFloat(document.getElementById('fast-decrease').value) || 0.3,
+            slowIncrease: parseFloat(document.getElementById('slow-increase').value) || 0.5,
+            slowDecrease: parseFloat(document.getElementById('slow-decrease').value) || 0.3,
+        },
     };
 
     // Read log file (and optionally FF table)

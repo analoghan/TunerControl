@@ -61,6 +61,14 @@
         </select>
         <span class="hint">Bosch broadband recommended for aftermarket installations</span>
       </div>
+      <div class="calc-input-row">
+        <label for="injection-type">Injection Type:</label>
+        <select id="injection-type">
+          <option value="port">Port Injection</option>
+          <option value="di" selected>Direct Injection</option>
+        </select>
+        <span class="hint">DI engines may respond to slightly higher frequencies due to combustion characteristics</span>
+      </div>
       <div class="btn-row">
         <button class="btn-primary" id="calc-btn">Calculate Frequencies</button>
       </div>
@@ -103,6 +111,7 @@
     var boreMMInput = document.getElementById('bore-mm');
     var boreInInput = document.getElementById('bore-in');
     var sensorType = document.getElementById('sensor-type');
+    var injectionType = document.getElementById('injection-type');
 
     // Sync bore inputs
     boreMMInput.addEventListener('input', function() {
@@ -117,32 +126,42 @@
     function calculate() {
       var boreMM = parseFloat(boreMMInput.value) || 103.3;
       var sensor = sensorType.value;
+      var injection = injectionType.value;
 
       // Calculate frequencies
       var firstOrder = Math.round(900000 / boreMM);
       var secondOrder = firstOrder * 2;
 
+      // DI engines: combustion is more localized and pressure waves are sharper.
+      // The knock signature often appears 5-15% higher than the standard bore-based
+      // calculation. We bias the sweep range slightly higher for DI.
+      var diOffset = injection === 'di' ? Math.round(secondOrder * 0.08) : 0;
+      var targetFreq = secondOrder + diOffset;
+
       // Sweep range depends on sensor type
       var sweepSpread = sensor === 'bosch' ? 3000 : 2000;
-      var sweepA = secondOrder - sweepSpread;
-      var sweepB = secondOrder - Math.round(sweepSpread / 2);
-      var sweepC = secondOrder;
-      var sweepD = secondOrder + Math.round(sweepSpread / 2);
+      var sweepA = targetFreq - sweepSpread;
+      var sweepB = targetFreq - Math.round(sweepSpread / 2);
+      var sweepC = targetFreq;
+      var sweepD = targetFreq + Math.round(sweepSpread / 2);
 
-      // Narrow sweep (±1500 Hz around second order)
-      var narrowA = secondOrder - 1500;
-      var narrowB = secondOrder - 500;
-      var narrowC = secondOrder + 500;
-      var narrowD = secondOrder + 1500;
+      // Narrow sweep (±1500 Hz around target frequency)
+      var narrowA = targetFreq - 1500;
+      var narrowB = targetFreq - 500;
+      var narrowC = targetFreq + 500;
+      var narrowD = targetFreq + 1500;
 
       // Show results
       document.getElementById('results-section').hidden = false;
 
       // Frequency cards
-      document.getElementById('freq-cards').innerHTML =
-        freqCard('First Order', firstOrder, 'Too noisy for production use — reference only') +
-        freqCard('Second Order (Target)', secondOrder, 'Best knock-to-noise ratio — start here') +
-        freqCard('Recommended Range', (secondOrder - 2000) + ' – ' + (secondOrder + 2000) + ' Hz', 'Final frequency typically within ±2000 Hz of second order');
+      var cardsHtml = freqCard('First Order', firstOrder, 'Too noisy for production use — reference only') +
+        freqCard('Second Order', secondOrder, 'Standard bore-based calculation');
+      if (injection === 'di') {
+        cardsHtml += freqCard('DI-Adjusted Target', targetFreq, 'Second order + 8% DI offset (' + diOffset + ' Hz). DI combustion produces sharper pressure waves that often register at slightly higher frequencies.');
+      }
+      cardsHtml += freqCard('Recommended Range', (targetFreq - 2000) + ' – ' + (targetFreq + 2000) + ' Hz', 'Final frequency typically within ±2000 Hz of target');
+      document.getElementById('freq-cards').innerHTML = cardsHtml;
 
       // Sweep table
       document.getElementById('sweep-table').innerHTML =
@@ -178,6 +197,10 @@
       // Notes
       var notes = '';
       notes += '<div class="tip-box"><b>Skip first order entirely.</b> The first order frequency (' + firstOrder + ' Hz) picks up too much mechanical noise on every engine. It is not usable for knock detection — start your sweep at or above the second order.</div>';
+
+      if (injection === 'di') {
+        notes += '<div class="note-box"><b>Direct Injection consideration:</b> DI engines produce a more localized, sharper combustion event compared to port injection. The knock pressure wave signature often appears 5-15% higher than the standard bore-based second order frequency. The sweep has been biased +' + diOffset + ' Hz to account for this. If you find the standard second order (' + secondOrder + ' Hz) gives poor knock/noise separation, try the DI-adjusted range (' + targetFreq + ' Hz ± 1500). DI engines also produce more mechanical noise from the high-pressure fuel pump — ensure the selected frequency isolates knock from pump harmonics.</div>';
+      }
 
       if (sensor === 'oem') {
         notes += '<div class="note-box"><b>OEM resonant sensors</b> have a narrower bandwidth than Bosch flat-response. Your optimal frequency may be slightly below the calculated second order (within 1000-2000 Hz lower). Consider upgrading to a Bosch flat-response sensor for better broadband detection.</div>';
