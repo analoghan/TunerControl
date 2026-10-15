@@ -27,8 +27,17 @@ var state = {
     compare: null,        // { a, b, diff, byName }
     tab: 'changes',
     filter: 'all',
-    search: ''
+    search: '',
+    resourceNames: {}     // 'HARDWARE|signature' → user-entered I/O resource name
 };
+
+function hardwareOf(pkg) {
+    return pkg && pkg.meta ? pkg.meta['Summary.Hardware'] || '' : '';
+}
+
+function resourceLabel(ids, pkg) {
+    return m1cResourceLabel(ids, hardwareOf(pkg), state.resourceNames);
+}
 
 // =========================================================================
 // Helpers
@@ -314,6 +323,12 @@ function paramRow(item, idx) {
     if (item.axes) {
         value = esc(m1cTableSize(item)) + ' <button class="btn btn-small btn-secondary" data-grid="' + idx +
             '" aria-expanded="false">Show</button>';
+    } else if (item.type === 'io_resource') {
+        value = esc(resourceLabel(item.value, state.current));
+        if (m1cResourceAssigned(item.value)) {
+            value += ' <button class="btn btn-small btn-secondary" data-name-res="' + idx + '" aria-label="Name resource for ' +
+                esc(item.name) + '">Name</button>';
+        }
     } else {
         value = esc(m1cFormatValue(item, item.value, item.label));
     }
@@ -438,6 +453,11 @@ function changeHtml(ch, item) {
         '<span class="param-kind">' + esc(ch.change === 'changed' ? (item ? item.kind : '') : ch.change) + '</span></h3>';
     if (ch.change !== 'changed') return html + '</div>';
     var unit = item ? m1cUnit(item) : '';
+    if (item.type === 'io_resource') {
+        var r0 = ch.cells[0];
+        return html + '<div><span class="change-from">' + esc(resourceLabel(r0.from, state.compare.a)) +
+            '</span> &rarr; <span class="change-to">' + esc(resourceLabel(r0.to, state.compare.b)) + '</span></div></div>';
+    }
     if (!item.axes) {
         var c0 = ch.cells[0];
         return html + '<div><span class="change-from">' + esc(m1cFormatCell(item, '', c0.from, c0.fromLabel)) +
@@ -514,7 +534,7 @@ backupInput.addEventListener('change', function () {
     file.text().then(function (text) { return importTuneDb(JSON.parse(text)); })
         .then(function (added) {
             setStatus('Restored ' + added + ' package' + (added === 1 ? '' : 's') + ' from backup.');
-            return refreshHistory();
+            return listResourceNames().then(function (names) { state.resourceNames = names; }).then(refreshHistory);
         }).then(function () {
             if (!state.current && state.packages.length) return viewPackage(state.packages[state.packages.length - 1].id);
         }).catch(function (err) { showError('Could not restore backup: ' + err.message); });
@@ -555,7 +575,27 @@ searchInput.addEventListener('input', function () {
 $('main-content').addEventListener('click', function (e) {
     var btn = e.target.closest('[data-grid]');
     if (btn) toggleGrid(btn);
+    var nameBtn = e.target.closest('[data-name-res]');
+    if (nameBtn) nameResource(state.index[parseInt(nameBtn.getAttribute('data-name-res'), 10)].item);
 });
+
+/** Ask for the M1 Tune name of an I/O resource and remember it for this hardware. */
+function nameResource(item) {
+    var hw = hardwareOf(state.current);
+    var key = hw + '|' + m1cResourceKey(item.value);
+    var current = m1cResourceName(item.value, hw, state.resourceNames);
+    var name = window.prompt('Resource name shown in M1 Tune for ' + item.name +
+        ' (' + item.value.filter(function (v) { return v !== '0x0000'; }).join(', ') + ').\n' +
+        'Applies to every item and tune using this assignment on ' + (hw || 'this hardware') + '. Leave empty to clear.',
+        current ? current.name : '');
+    if (name === null) return;
+    name = name.trim();
+    var saved = state.noDb ? Promise.resolve() : saveResourceName(key, name);
+    saved.then(function () {
+        if (name) state.resourceNames[key] = name; else delete state.resourceNames[key];
+        renderActiveTab();
+    }).catch(function (err) { showError('Could not save the resource name: ' + err.message); });
+}
 
 // =========================================================================
 // Startup
@@ -564,6 +604,9 @@ $('main-content').addEventListener('click', function (e) {
 openTuneDb().catch(function () {
     state.noDb = true;
     setStatus('Browser storage is unavailable here — imported packages will only be kept until the page is closed.');
+}).then(function () {
+    if (state.noDb) return;
+    return listResourceNames().then(function (names) { state.resourceNames = names; });
 }).then(refreshHistory).then(reparseStale).then(function () {
     if (state.packages.length) return viewPackage(state.packages[state.packages.length - 1].id);
 }).catch(function (err) { showError(err.message || String(err)); });

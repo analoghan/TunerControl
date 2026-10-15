@@ -8,11 +8,12 @@
  *   items    : { id, items }  — the full parsed item list for that package
  *   files    : { id, name, data }  — the original file bytes, so packages can be re-parsed
  *              when the parser improves (see parserVersion)
+ *   resourceNames : { key, name }  — user names for I/O resources, key = 'HARDWARE|signature'
  * Data stays in this browser; exportTuneDb/importTuneDb give JSON backups.
  */
 
 var TUNE_DB_NAME = 'tunercontrol-m1';
-var TUNE_DB_VERSION = 1;
+var TUNE_DB_VERSION = 2;
 var tuneDbPromise = null;
 
 function openTuneDb() {
@@ -27,6 +28,7 @@ function openTuneDb() {
             }
             if (!db.objectStoreNames.contains('items')) db.createObjectStore('items', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('files')) db.createObjectStore('files', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('resourceNames')) db.createObjectStore('resourceNames', { keyPath: 'key' });
         };
         req.onsuccess = function () { resolve(req.result); };
         req.onerror = function () { reject(req.error || new Error('Could not open the tune database')); };
@@ -154,12 +156,37 @@ function deleteTunePackage(id) {
     });
 }
 
-/** JSON backup of all parsed packages (original files are not included). */
+/** User-entered I/O resource names as { 'HARDWARE|signature': name }. */
+function listResourceNames() {
+    return tuneDbTransaction(['resourceNames'], 'readonly', function (tx) {
+        return tuneDbRequest(tx.objectStore('resourceNames').getAll());
+    }).then(function (rows) {
+        var map = {};
+        rows.forEach(function (r) { map[r.key] = r.name; });
+        return map;
+    });
+}
+
+/** Save a resource name; an empty name removes it. */
+function saveResourceName(key, name) {
+    return tuneDbTransaction(['resourceNames'], 'readwrite', function (tx) {
+        if (name) tx.objectStore('resourceNames').put({ key: key, name: name });
+        else tx.objectStore('resourceNames').delete(key);
+    });
+}
+
+/** JSON backup of all parsed packages and resource names (original files are not included). */
 function exportTuneDb() {
     return listTunePackages().then(function (list) {
-        return Promise.all(list.map(function (p) { return loadTunePackage(p.id); }));
-    }).then(function (packages) {
-        return { format: 'tunercontrol-m1-backup', version: 1, exportedAt: new Date().toISOString(), packages: packages };
+        return Promise.all([
+            Promise.all(list.map(function (p) { return loadTunePackage(p.id); })),
+            listResourceNames()
+        ]);
+    }).then(function (r) {
+        return {
+            format: 'tunercontrol-m1-backup', version: 1, exportedAt: new Date().toISOString(),
+            packages: r[0], resourceNames: r[1]
+        };
     });
 }
 
@@ -168,7 +195,10 @@ function importTuneDb(backup) {
     if (!backup || backup.format !== 'tunercontrol-m1-backup' || !Array.isArray(backup.packages)) {
         return Promise.reject(new Error('Not a TunerControl M1 backup file'));
     }
-    var added = 0;
+    var added = 0, names = backup.resourceNames || {};
+    var namesSaved = Object.keys(names).reduce(function (chain, key) {
+        return chain.then(function () { return saveResourceName(key, names[key]); });
+    }, Promise.resolve());
     return backup.packages.reduce(function (chain, p) {
         return chain.then(function () {
             return saveTunePackage(p.id, p, p.fileName, null).then(function (r) {
@@ -182,5 +212,5 @@ function importTuneDb(backup) {
                 }
             });
         });
-    }, Promise.resolve()).then(function () { return added; });
+    }, namesSaved).then(function () { return added; });
 }
