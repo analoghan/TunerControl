@@ -72,6 +72,9 @@
   <script src="../ve-table/worker.js"></script>
   <!-- Load injector worker.js for injector analysis tests -->
   <script src="../injector/worker.js"></script>
+  <!-- Shared libraries for M1 package parsing tests -->
+  <script src="../lib/xz-decoder.js"></script>
+  <script src="../lib/m1pkg-parser.js"></script>
 
   <!-- Load fast-check from CDN -->
   <script src="https://cdn.jsdelivr.net/npm/fast-check@3.22.0/lib/bundle.js"></script>
@@ -358,6 +361,7 @@
         'test-injection-timing.js',
         'test-fuel-pressure.js',
         'test-downsample.js',
+        'test-m1pkg-parser.js',
       ];
 
       for (const mod of testModules) {
