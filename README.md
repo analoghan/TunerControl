@@ -38,6 +38,15 @@ Deceleration idle hang detection, settle time analysis, and mass flow correlatio
 ### DI Fuel Pressure Deep Dive
 Rail pressure vs aim analysis, overshoot/undershoot detection, and operating condition correlation for direct injection fuel system diagnostics.
 
+### M1 Config Viewer
+Import MoTeC M1 Tune packages (`.m1pkg`) directly — no export step needed — and track how a tune evolves.
+
+**Features:**
+- Decodes every calibration parameter, table, I/O resource assignment and calibration library selection from the package
+- Values shown in M1 Tune display units (rpm, kPa, dBTDC, ms, %…) with expandable table grids
+- Tune history stored in the browser (IndexedDB), with JSON backup export/restore
+- Compare any two versions: changed values, table cells (with axis breakpoints), I/O assignments, calibration selections and save notes
+
 ### Calculators
 Quick bidirectional unit conversions for tuning:
 - kPa ↔ PSI ↔ Bar (gauge and absolute with 102 kPa atmospheric reference)

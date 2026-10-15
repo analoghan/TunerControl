@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>M1 Config Viewer — TunerControl</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html" aria-label="Back to MoTeC M1 Tuning">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>M1 Config Viewer</h1>
+    <p class="subtitle">Import MoTeC M1 Tune packages (.m1pkg) to browse every parameter, table, I/O assignment and calibration selection, and track what changed between tune versions.</p>
+
+    <!-- File Input -->
+    <section class="form-section" aria-label="Package import">
+      <div class="file-row">
+        <label for="pkg-input">M1 Tune package (.m1pkg):</label>
+        <input type="file" id="pkg-input" accept=".m1pkg" multiple aria-describedby="import-status import-error">
+      </div>
+      <p class="hint">Packages are stored in this browser only. Import each saved version (e.g. V54, V55) to build up the tune history.</p>
+      <div id="import-status" class="import-status" role="status" aria-live="polite" hidden></div>
+      <div id="import-error" class="error-banner" role="alert" hidden></div>
+    </section>
+
+    <!-- Tune history -->
+    <section id="history-section" class="report-block" aria-label="Tune history" hidden>
+      <h2>Tune History</h2>
+      <div class="table-scroll">
+        <table class="event-table data-table" id="history-table">
+          <thead>
+            <tr><th>Tune</th><th>Saved</th><th>Firmware</th><th>Last note</th><th>Imported</th><th><span class="sr-only">Actions</span></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="compare-row">
+        <label for="cmp-from">Compare</label>
+        <select id="cmp-from" aria-label="Compare from"></select>
+        <span aria-hidden="true">&rarr;</span>
+        <select id="cmp-to" aria-label="Compare to"></select>
+        <button id="cmp-btn" class="btn">Compare</button>
+        <span class="spacer"></span>
+        <button id="export-btn" class="btn btn-secondary">Export backup</button>
+        <label class="btn btn-secondary" for="backup-input">Restore backup</label>
+        <input type="file" id="backup-input" accept=".json" hidden>
+      </div>
+    </section>
+
+    <!-- Tune info banner -->
+    <section id="tune-info" class="tune-info" hidden aria-label="Tune information">
+      <div class="tune-info-grid">
+        <div><span class="label">Firmware</span><span id="ti-firmware" class="value">—</span></div>
+        <div><span class="label">Version</span><span id="ti-version" class="value">—</span></div>
+        <div><span class="label">Tune Name</span><span id="ti-tune" class="value">—</span></div>
+        <div><span class="label">Saved</span><span id="ti-modified" class="value">—</span></div>
+        <div><span class="label">ECU Serial</span><span id="ti-serial" class="value">—</span></div>
+        <div><span class="label">Parameters</span><span id="ti-count" class="value">—</span></div>
+      </div>
+    </section>
+
+    <!-- Main content -->
+    <div id="main-content" hidden>
+
+      <!-- Search + filter bar -->
+      <div class="toolbar" role="search">
+        <input type="search" id="search-input" placeholder="Search parameters…" aria-label="Search parameters">
+        <div class="filter-group" role="group" aria-label="Filter by type">
+          <button class="filter-btn active" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="Parameter">Parameters</button>
+          <button class="filter-btn" data-filter="Table">Tables</button>
+          <button class="filter-btn" data-filter="IOResourceParameter">I/O Resources</button>
+        </div>
+      </div>
+
+      <!-- Category tabs -->
+      <div class="tabs" role="tablist" aria-label="Parameter categories">
+        <button class="tab active" role="tab" aria-selected="true"  data-tab="changes">Changes</button>
+        <button class="tab"        role="tab" aria-selected="false" data-tab="calibrations">Calibrations</button>
+        <button class="tab"        role="tab" aria-selected="false" data-tab="firmware">Firmware Features</button>
+        <button class="tab"        role="tab" aria-selected="false" data-tab="driver">Driver Switches</button>
+        <button class="tab"        role="tab" aria-selected="false" data-tab="engine">Engine Setup</button>
+        <button class="tab"        role="tab" aria-selected="false" data-tab="vehicle">Vehicle Setup</button>
+        <button class="tab"        role="tab" aria-selected="false" data-tab="all">All Parameters</button>
+      </div>
+
+      <!-- Panels -->
+      <div id="panel-changes" class="panel" role="tabpanel">
+        <h2>Changes</h2>
+        <p class="panel-desc">Values, table cells, I/O assignments and calibration selections that differ between two imported tunes.</p>
+        <div id="tbl-changes"></div>
+      </div>
+
+      <div id="panel-calibrations" class="panel" role="tabpanel" hidden>
+        <h2>Calibration Selections</h2>
+        <p class="panel-desc">Sensor, injector and fuel calibrations chosen from the M1 Tune library for this tune.</p>
+        <div id="tbl-calibrations"></div>
+      </div>
+
+      <div id="panel-firmware" class="panel" role="tabpanel" hidden>
+        <h2>Firmware Feature Switches</h2>
+        <p class="panel-desc">Feature parameters that configure which optional firmware capabilities are enabled and how they operate.</p>
+        <div id="tbl-firmware"></div>
+      </div>
+
+      <div id="panel-driver" class="panel" role="tabpanel" hidden>
+        <h2>Driver Switches</h2>
+        <p class="panel-desc">Configuration for the driver-accessible switches: type, storage assignment, and input wiring.</p>
+        <div id="tbl-driver"></div>
+      </div>
+
+      <div id="panel-engine" class="panel" role="tabpanel" hidden>
+        <h2>Engine Setup Parameters</h2>
+        <p class="panel-desc">All engine-side setup and configuration parameters.</p>
+        <div id="tbl-engine"></div>
+      </div>
+
+      <div id="panel-vehicle" class="panel" role="tabpanel" hidden>
+        <h2>Vehicle Setup Parameters</h2>
+        <p class="panel-desc">All vehicle-side setup and configuration parameters.</p>
+        <div id="tbl-vehicle"></div>
+      </div>
+
+      <div id="panel-all" class="panel" role="tabpanel" hidden>
+        <h2>All Parameters</h2>
+        <p class="panel-desc">Every calibration value stored in the package.</p>
+        <div id="tbl-all"></div>
+      </div>
+
+    </div>
+
+    <!-- Empty state -->
+    <div id="empty-state" class="empty-state">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14,2 14,8 20,8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/>
+        <line x1="16" y1="17" x2="8" y2="17"/>
+        <polyline points="10,9 9,9 8,9"/>
+      </svg>
+      <p>Import a MoTeC M1 Tune package to get started.</p>
+      <p class="hint">Packages are the .m1pkg files M1 Tune keeps for each saved tune version.<br>
+         Import two or more versions to see what changed between them.</p>
+    </div>
+
+  </div>
+
+  <script src="../lib/xz-decoder.js"></script>
+  <script src="../lib/m1pkg-parser.js"></script>
+  <script src="format.js"></script>
+  <script src="tune-db.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

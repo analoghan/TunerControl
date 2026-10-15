@@ -1,0 +1,569 @@
+/**
+ * m1-config/app.js — M1 Config Viewer
+ * Imports .m1pkg packages (parsed by lib/m1pkg-parser.js), stores them in IndexedDB (tune-db.js),
+ * browses their values and shows what changed between two tune versions.
+ */
+
+function $(id) { return document.getElementById(id); }
+
+var pkgInput = $('pkg-input');
+var importStatus = $('import-status');
+var importError = $('import-error');
+var historySection = $('history-section');
+var historyBody = document.querySelector('#history-table tbody');
+var cmpFrom = $('cmp-from');
+var cmpTo = $('cmp-to');
+var cmpBtn = $('cmp-btn');
+var exportBtn = $('export-btn');
+var backupInput = $('backup-input');
+var searchInput = $('search-input');
+
+var state = {
+    noDb: false,          // IndexedDB unavailable → keep imports in memory for this session only
+    memory: {},           // id → package (with items) when noDb
+    packages: [],         // summaries, oldest first
+    current: null,        // package being viewed (with items)
+    index: [],            // [{ item, cats, lname }] for the current package
+    compare: null,        // { a, b, diff, byName }
+    tab: 'changes',
+    filter: 'all',
+    search: ''
+};
+
+// =========================================================================
+// Helpers
+// =========================================================================
+
+function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function fmtDate(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+function setStatus(msg) {
+    importStatus.textContent = msg || '';
+    importStatus.hidden = !msg;
+}
+
+function showError(msg) {
+    importError.textContent = msg;
+    importError.hidden = false;
+}
+
+function hideError() { importError.hidden = true; }
+
+function lastNote(pkg) {
+    var log = pkg.commentLog || [];
+    for (var i = log.length - 1; i >= 0; i--) if (log[i].note) return log[i].note;
+    return '';
+}
+
+// =========================================================================
+// Storage (IndexedDB, with in-memory fallback)
+// =========================================================================
+
+function storeSave(id, parsed, fileName, buffer) {
+    if (!state.noDb) return saveTunePackage(id, parsed, fileName, buffer);
+    if (state.memory[id]) return Promise.resolve({ record: state.memory[id], duplicate: true });
+    var pkg = tuneDbSummary(id, parsed, fileName, buffer.byteLength);
+    pkg.items = parsed.items;
+    state.memory[id] = pkg;
+    return Promise.resolve({ record: pkg, duplicate: false });
+}
+
+function storeList() {
+    if (!state.noDb) return listTunePackages();
+    return Promise.resolve(sortTunePackages(Object.keys(state.memory).map(function (k) { return state.memory[k]; })));
+}
+
+function storeLoad(id) {
+    if (!state.noDb) return loadTunePackage(id);
+    return state.memory[id] ? Promise.resolve(state.memory[id]) : Promise.reject(new Error('Package not found'));
+}
+
+function storeDelete(id) {
+    if (!state.noDb) return deleteTunePackage(id);
+    delete state.memory[id];
+    return Promise.resolve();
+}
+
+// =========================================================================
+// Parsing — Web Worker, falling back to the main thread (e.g. when opened via file://)
+// =========================================================================
+
+function parseOnMainThread(buffer) {
+    return new Promise(function (resolve) { setTimeout(resolve, 0); }).then(function () {
+        return parseM1Pkg(buffer);
+    });
+}
+
+function parsePackage(buffer) {
+    var worker;
+    try {
+        var urls = ['../lib/xz-decoder.js', '../lib/m1pkg-parser.js', 'worker.js'].map(function (u) {
+            return JSON.stringify(new URL(u, window.location.href).href);
+        });
+        var blob = new Blob(['importScripts(' + urls.join(',') + ');'], { type: 'application/javascript' });
+        worker = new Worker(URL.createObjectURL(blob));
+    } catch (e) {
+        return parseOnMainThread(buffer);
+    }
+    return new Promise(function (resolve, reject) {
+        worker.onmessage = function (e) {
+            worker.terminate();
+            if (e.data.type === 'result') resolve(e.data.result);
+            else reject(new Error(e.data.message));
+        };
+        worker.onerror = function (e) {
+            // Worker scripts could not load — parse here instead.
+            if (e.preventDefault) e.preventDefault();
+            worker.terminate();
+            parseOnMainThread(buffer).then(resolve, reject);
+        };
+        worker.postMessage({ buffer: buffer });
+    });
+}
+
+// =========================================================================
+// Import
+// =========================================================================
+
+function importFiles(files) {
+    hideError();
+    var lastId = null, added = 0, duplicates = 0, failed = [];
+    return files.reduce(function (chain, file, i) {
+        return chain.then(function () {
+            var of = files.length > 1 ? ' (' + (i + 1) + ' of ' + files.length + ')' : '';
+            setStatus('Reading ' + file.name + of + '…');
+            return file.arrayBuffer().then(function (buffer) {
+                return tuneDbFileId(buffer).then(function (id) {
+                    setStatus('Parsing ' + file.name + of + '…');
+                    return parsePackage(buffer).then(function (parsed) {
+                        return storeSave(id, parsed, file.name, buffer);
+                    }).then(function (r) {
+                        lastId = id;
+                        if (r.duplicate) duplicates++; else added++;
+                    });
+                });
+            }).catch(function (err) {
+                failed.push(file.name + ': ' + (err && err.message ? err.message : err));
+            });
+        });
+    }, Promise.resolve()).then(function () {
+        var parts = [];
+        if (added) parts.push('Imported ' + added + ' package' + (added > 1 ? 's' : '') + '.');
+        if (duplicates) parts.push(duplicates + ' already imported.');
+        if (state.noDb && added) parts.push('Browser storage is unavailable, so imports last only for this session.');
+        setStatus(parts.join(' '));
+        if (failed.length) showError('Could not import ' + failed.join('; '));
+        return refreshHistory().then(function () { if (lastId) return viewPackage(lastId); });
+    });
+}
+
+/** Re-parse stored packages that were imported with an older parser version. */
+function reparseStale() {
+    if (state.noDb) return Promise.resolve();
+    var stale = state.packages.filter(function (p) { return (p.parserVersion || 0) < M1PKG_PARSER_VERSION; });
+    if (!stale.length) return Promise.resolve();
+    return stale.reduce(function (chain, p, i) {
+        return chain.then(function () {
+            setStatus('Updating stored packages to the latest parser (' + (i + 1) + ' of ' + stale.length + ')…');
+            return loadTuneFile(p.id).then(function (file) {
+                if (!file || !file.data) return;
+                return parsePackage(file.data).then(function (parsed) { return updateTunePackage(p.id, parsed); });
+            }).catch(function (err) { console.warn('Re-parse failed for ' + p.fileName, err); });
+        });
+    }, Promise.resolve()).then(function () {
+        setStatus('');
+        return refreshHistory();
+    });
+}
+
+// =========================================================================
+// History + compare
+// =========================================================================
+
+function refreshHistory() {
+    return storeList().then(function (list) {
+        state.packages = list;
+        renderHistory();
+        var has = list.length > 0;
+        historySection.hidden = !has;
+        $('empty-state').hidden = has;
+        if (!has) {
+            state.current = null; state.compare = null;
+            $('tune-info').hidden = true;
+            $('main-content').hidden = true;
+        }
+    });
+}
+
+function renderHistory() {
+    var currentId = state.current ? state.current.id : null;
+    historyBody.innerHTML = state.packages.slice().reverse().map(function (p) {
+        return '<tr' + (p.id === currentId ? ' class="current"' : '') + '>' +
+            '<td>' + esc(p.tuneName || p.fileName) + '</td>' +
+            '<td>' + esc(fmtDate(p.modified)) + '</td>' +
+            '<td>' + esc(p.firmware && p.firmware.version) + '</td>' +
+            '<td>' + esc(lastNote(p)) + '</td>' +
+            '<td>' + esc(fmtDate(p.importedAt)) + '</td>' +
+            '<td class="actions">' +
+            '<button class="btn btn-small btn-secondary" data-view="' + esc(p.id) + '">View</button>' +
+            '<button class="btn btn-small btn-danger" data-delete="' + esc(p.id) + '" aria-label="Delete ' +
+            esc(p.tuneName || p.fileName) + '">Delete</button></td></tr>';
+    }).join('');
+
+    var options = state.packages.map(function (p) {
+        return '<option value="' + esc(p.id) + '">' + esc(p.tuneName || p.fileName) + '</option>';
+    }).join('');
+    var from = cmpFrom.value, to = cmpTo.value;
+    cmpFrom.innerHTML = options;
+    cmpTo.innerHTML = options;
+    if (from) cmpFrom.value = from;
+    if (to) cmpTo.value = to;
+    cmpBtn.disabled = state.packages.length < 2;
+    exportBtn.disabled = state.noDb;
+}
+
+function previousPackageId(id) {
+    for (var i = 1; i < state.packages.length; i++) if (state.packages[i].id === id) return state.packages[i - 1].id;
+    return null;
+}
+
+function viewPackage(id) {
+    return storeLoad(id).then(function (pkg) {
+        state.current = pkg;
+        state.index = pkg.items.map(function (item) {
+            return { item: item, cats: m1cCategories(item), lname: item.name.toLowerCase() };
+        });
+        renderInfo();
+        renderHistory();
+        $('main-content').hidden = false;
+        var prev = previousPackageId(id);
+        cmpTo.value = id;
+        if (prev) {
+            cmpFrom.value = prev;
+            return compare(prev, id);
+        }
+        state.compare = null;
+        renderActiveTab();
+    }).catch(function (err) { showError('Could not open package: ' + err.message); });
+}
+
+function compare(fromId, toId) {
+    return Promise.all([storeLoad(fromId), storeLoad(toId)]).then(function (r) {
+        var byName = {};
+        r[0].items.forEach(function (i) { byName[i.name] = i; });
+        r[1].items.forEach(function (i) { byName[i.name] = i; });
+        state.compare = { a: r[0], b: r[1], diff: diffM1Pkg(r[0], r[1]), byName: byName };
+        renderActiveTab();
+    });
+}
+
+function renderInfo() {
+    var p = state.current;
+    $('ti-firmware').textContent = (p.firmware && p.firmware.name) || '—';
+    $('ti-version').textContent = (p.firmware && p.firmware.version) || '—';
+    $('ti-tune').textContent = p.tuneName || p.fileName || '—';
+    $('ti-modified').textContent = fmtDate(p.modified);
+    $('ti-serial').textContent = p.serial !== null && p.serial !== undefined ? p.serial : '—';
+    $('ti-count').textContent = p.items.length.toLocaleString();
+    $('tune-info').hidden = false;
+}
+
+// =========================================================================
+// Rendering — panels
+// =========================================================================
+
+function matchesFilters(item) {
+    if (state.filter !== 'all' && item.kind !== state.filter) return false;
+    return !state.search || item.name.toLowerCase().indexOf(state.search) >= 0;
+}
+
+function renderActiveTab() {
+    if (!state.current) return;
+    if (state.tab === 'changes') renderChanges();
+    else if (state.tab === 'calibrations') renderCalibrations();
+    else renderParams(state.tab);
+}
+
+function renderParams(tab) {
+    var rows = [], shown = 0;
+    for (var i = 0; i < state.index.length; i++) {
+        var e = state.index[i];
+        if (e.cats.indexOf(tab) < 0) continue;
+        if (state.filter !== 'all' && e.item.kind !== state.filter) continue;
+        if (state.search && e.lname.indexOf(state.search) < 0) continue;
+        rows.push(paramRow(e.item, i));
+        shown++;
+    }
+    $('tbl-' + tab).innerHTML = shown
+        ? '<div class="result-count">' + shown.toLocaleString() + ' item' + (shown === 1 ? '' : 's') + '</div>' +
+          '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Name</th><th>Value</th>' +
+          '<th>Unit</th><th>Type</th></tr></thead><tbody>' + rows.join('') + '</tbody></table></div>'
+        : '<p class="muted">No matching parameters.</p>';
+}
+
+function paramRow(item, idx) {
+    var value;
+    if (item.axes) {
+        value = esc(m1cTableSize(item)) + ' <button class="btn btn-small btn-secondary" data-grid="' + idx +
+            '" aria-expanded="false">Show</button>';
+    } else {
+        value = esc(m1cFormatValue(item, item.value, item.label));
+    }
+    return '<tr><td class="param-name">' + esc(item.name) + '</td><td class="num">' + value + '</td>' +
+        '<td>' + esc(m1cUnit(item)) + '</td><td class="param-kind">' + esc(item.kind) + '</td></tr>';
+}
+
+function gridHtml(item) {
+    var g = m1cTableGrid(item), axes = {};
+    item.axes.forEach(function (a) { axes[a.axis] = a; });
+    function axisLabel(a) {
+        if (!a) return '';
+        var u = m1cUnit(a);
+        return esc((a.input || a.axis) + (u ? ' (' + u + ')' : ''));
+    }
+    function num(v, src) { return esc(m1cFormatNumber(v, m1cConvert(0, src).dps)); }
+    var html = '<div class="grid-caption">Values' + (m1cUnit(item) ? ' (' + esc(m1cUnit(item)) + ')' : '') +
+        ' · X: ' + axisLabel(axes.X) + (axes.Y ? ' · Y: ' + axisLabel(axes.Y) : '') + '</div>';
+    g.slices.forEach(function (s) {
+        if (axes.Z) html += '<div class="grid-caption">Z = ' + num(s.zValue, axes.Z) + ' · ' + axisLabel(axes.Z) + '</div>';
+        html += '<div class="grid-wrap"><table class="grid-table"><thead><tr><th>' + (axes.Y ? 'Y \\ X' : 'X') + '</th>' +
+            g.x.map(function (x) { return '<th scope="col">' + num(x, axes.X) + '</th>'; }).join('') + '</tr></thead><tbody>';
+        s.rows.forEach(function (row, iy) {
+            html += '<tr><th scope="row">' + (axes.Y ? num(g.y[iy], axes.Y) : 'Value') + '</th>' +
+                row.map(function (v) { return '<td>' + num(v, item) + '</td>'; }).join('') + '</tr>';
+        });
+        html += '</tbody></table></div>';
+    });
+    return html;
+}
+
+function toggleGrid(btn) {
+    var tr = btn.closest('tr'), next = tr.nextElementSibling;
+    if (next && next.classList.contains('grid-row')) {
+        next.remove();
+        btn.textContent = 'Show';
+        btn.setAttribute('aria-expanded', 'false');
+        return;
+    }
+    var item = state.index[parseInt(btn.getAttribute('data-grid'), 10)].item;
+    var row = document.createElement('tr');
+    row.className = 'grid-row';
+    row.innerHTML = '<td colspan="4">' + gridHtml(item) + '</td>';
+    tr.parentNode.insertBefore(row, tr.nextSibling);
+    btn.textContent = 'Hide';
+    btn.setAttribute('aria-expanded', 'true');
+}
+
+function renderCalibrations() {
+    var sel = state.current.selections || [];
+    $('tbl-calibrations').innerHTML = sel.length
+        ? '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Slot</th><th>Calibration</th>' +
+          '<th>Version</th></tr></thead><tbody>' + sel.map(function (s) {
+              return '<tr><td class="param-name">' + esc(s.slot) + '</td><td>' + esc(s.name) + '</td><td>' +
+                  esc(s.version || '') + '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<p class="muted">This package has no library calibration selections.</p>';
+}
+
+function renderChanges() {
+    var el = $('tbl-changes'), c = state.compare;
+    if (!c) {
+        el.innerHTML = '<p class="muted">' + (state.packages.length < 2
+            ? 'Import another version of this tune to see what changed.'
+            : 'Choose two tunes above and press Compare.') + '</p>';
+        return;
+    }
+    var d = c.diff;
+    var items = d.items.filter(function (i) {
+        var def = c.byName[i.name];
+        return matchesFilters(def || { name: i.name, kind: i.kind });
+    });
+    var cellCount = d.items.reduce(function (n, i) { return n + i.cells.length; }, 0);
+
+    var html = '<p><strong>' + esc(c.a.tuneName || c.a.fileName) + '</strong> &rarr; <strong>' +
+        esc(c.b.tuneName || c.b.fileName) + '</strong></p>';
+    html += '<div class="summary-grid change-summary">' +
+        stat(d.items.length, 'Items changed') + stat(cellCount, 'Values changed') +
+        stat(d.selections.length, 'Calibration changes') +
+        stat(d.firmwareChanged ? 'Yes' : 'No', 'Firmware changed') + '</div>';
+
+    if (d.firmwareChanged) {
+        html += '<div class="rec-item rec-warning">These tunes use different firmware. Items that only exist in one of them are listed as added or removed.</div>';
+    }
+
+    var notes = (c.b.commentLog || []).filter(function (e) { return e.time && (!c.a.modified || e.time > c.a.modified) && (e.title || e.note); });
+    if (notes.length) {
+        html += '<div class="report-block"><h2>Save notes</h2>' + notes.map(function (n) {
+            return '<div class="change-note"><strong>' + esc(n.title || '') + '</strong> · ' + esc(fmtDate(n.time)) +
+                (n.note ? '<br>' + esc(n.note) : '') + '</div>';
+        }).join('') + '</div>';
+    }
+
+    if (d.selections.length) {
+        html += '<div class="report-block"><h2>Calibration selections</h2><div class="table-scroll"><table class="event-table data-table">' +
+            '<thead><tr><th>Slot</th><th>From</th><th>To</th></tr></thead><tbody>' +
+            d.selections.map(function (s) {
+                return '<tr><td class="param-name">' + esc(s.slot) + '</td><td class="change-from">' + esc(s.from || '—') +
+                    '</td><td class="change-to">' + esc(s.to || '—') + '</td></tr>';
+            }).join('') + '</tbody></table></div></div>';
+    }
+
+    if (!d.items.length && !d.selections.length) {
+        html += '<p class="muted">No calibration differences between these tunes.</p>';
+    } else if (!items.length && d.items.length) {
+        html += '<p class="muted">No changed items match the current search/filter.</p>';
+    }
+    html += items.map(function (ch) { return changeHtml(ch, c.byName[ch.name]); }).join('');
+    el.innerHTML = html;
+}
+
+function stat(value, label) {
+    return '<div class="summary-stat"><span class="stat-value">' + esc(value) + '</span><span class="stat-label">' +
+        esc(label) + '</span></div>';
+}
+
+var MAX_CELLS_SHOWN = 40;
+
+function changeHtml(ch, item) {
+    var cls = ch.change === 'added' ? ' change-added' : ch.change === 'removed' ? ' change-removed' : '';
+    var html = '<div class="change-item' + cls + '"><h3><span class="param-name">' + esc(ch.name) + '</span>' +
+        '<span class="param-kind">' + esc(ch.change === 'changed' ? (item ? item.kind : '') : ch.change) + '</span></h3>';
+    if (ch.change !== 'changed') return html + '</div>';
+    var unit = item ? m1cUnit(item) : '';
+    if (!item.axes) {
+        var c0 = ch.cells[0];
+        return html + '<div><span class="change-from">' + esc(m1cFormatCell(item, '', c0.from, c0.fromLabel)) +
+            '</span> &rarr; <span class="change-to">' + esc(m1cFormatCell(item, '', c0.to, c0.toLabel)) + '</span>' +
+            (unit ? ' ' + esc(unit) : '') + '</div></div>';
+    }
+    html += '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Cell</th><th>From</th><th>To</th></tr></thead><tbody>';
+    ch.cells.slice(0, MAX_CELLS_SHOWN).forEach(function (cell) {
+        html += '<tr><td>' + esc(m1cCellLabel(item, cell.key)) + '</td><td class="num change-from">' +
+            esc(m1cFormatCell(item, cell.key, cell.from)) + '</td><td class="num change-to">' +
+            esc(m1cFormatCell(item, cell.key, cell.to)) + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    if (ch.cells.length > MAX_CELLS_SHOWN) html += '<div class="more">… and ' + (ch.cells.length - MAX_CELLS_SHOWN) + ' more cells</div>';
+    if (unit) html += '<div class="more">Values in ' + esc(unit) + '</div>';
+    return html + '</div>';
+}
+
+// =========================================================================
+// Events
+// =========================================================================
+
+pkgInput.addEventListener('change', function () {
+    var files = Array.prototype.slice.call(pkgInput.files);
+    pkgInput.value = '';
+    if (files.length) importFiles(files);
+});
+
+cmpBtn.addEventListener('click', function () {
+    if (!cmpFrom.value || !cmpTo.value) return;
+    hideError();
+    compare(cmpFrom.value, cmpTo.value).then(function () { selectTab('changes'); })
+        .catch(function (err) { showError('Could not compare: ' + err.message); });
+});
+
+historyBody.addEventListener('click', function (e) {
+    var view = e.target.closest('[data-view]'), del = e.target.closest('[data-delete]');
+    if (view) viewPackage(view.getAttribute('data-view'));
+    if (del) {
+        var id = del.getAttribute('data-delete');
+        var p = state.packages.filter(function (x) { return x.id === id; })[0];
+        if (!window.confirm('Delete "' + (p ? p.tuneName || p.fileName : id) + '" from the tune history?')) return;
+        storeDelete(id).then(refreshHistory).then(function () {
+            if (state.current && state.current.id === id) {
+                state.current = null;
+                if (state.packages.length) return viewPackage(state.packages[state.packages.length - 1].id);
+            } else if (state.compare && (state.compare.a.id === id || state.compare.b.id === id)) {
+                state.compare = null;
+                renderActiveTab();
+            }
+        }).catch(function (err) { showError('Could not delete: ' + err.message); });
+    }
+});
+
+exportBtn.addEventListener('click', function () {
+    exportTuneDb().then(function (backup) {
+        var blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'tunercontrol-m1-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }).catch(function (err) { showError('Could not export: ' + err.message); });
+});
+
+backupInput.addEventListener('change', function () {
+    var file = backupInput.files[0];
+    backupInput.value = '';
+    if (!file) return;
+    hideError();
+    if (state.noDb) { showError('Browser storage is unavailable, so backups cannot be restored here.'); return; }
+    file.text().then(function (text) { return importTuneDb(JSON.parse(text)); })
+        .then(function (added) {
+            setStatus('Restored ' + added + ' package' + (added === 1 ? '' : 's') + ' from backup.');
+            return refreshHistory();
+        }).then(function () {
+            if (!state.current && state.packages.length) return viewPackage(state.packages[state.packages.length - 1].id);
+        }).catch(function (err) { showError('Could not restore backup: ' + err.message); });
+});
+
+function selectTab(tab) {
+    state.tab = tab;
+    document.querySelectorAll('.tab').forEach(function (t) {
+        var on = t.getAttribute('data-tab') === tab;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('.panel').forEach(function (p) { p.hidden = p.id !== 'panel-' + tab; });
+    renderActiveTab();
+}
+
+document.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () { selectTab(t.getAttribute('data-tab')); });
+});
+
+document.querySelectorAll('.filter-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+        state.filter = b.getAttribute('data-filter');
+        document.querySelectorAll('.filter-btn').forEach(function (x) { x.classList.toggle('active', x === b); });
+        renderActiveTab();
+    });
+});
+
+var searchTimer = null;
+searchInput.addEventListener('input', function () {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(function () {
+        state.search = searchInput.value.trim().toLowerCase();
+        renderActiveTab();
+    }, 150);
+});
+
+$('main-content').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-grid]');
+    if (btn) toggleGrid(btn);
+});
+
+// =========================================================================
+// Startup
+// =========================================================================
+
+openTuneDb().catch(function () {
+    state.noDb = true;
+    setStatus('Browser storage is unavailable here — imported packages will only be kept until the page is closed.');
+}).then(refreshHistory).then(reparseStale).then(function () {
+    if (state.packages.length) return viewPackage(state.packages[state.packages.length - 1].id);
+}).catch(function (err) { showError(err.message || String(err)); });
