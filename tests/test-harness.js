@@ -245,5 +245,6 @@ describe('Harness — tune comparison', function () {
     assert.ok(htSameFunction(['Fuel.Cylinder 1.Primary Output'], 'Injector 1 Control (-)'));
     assert.ok(!htSameFunction(['Fuel.Cylinder 1.Primary Output'], 'Injector 6 Control (-)'));
     assert.ok(!htSameFunction(['Engine.Oil.Temperature.Sensor'], 'Ambient Temp'));
+    assert.ok(htSameFunction(['Fuel.Composition.Sensor.Digital.Decode'], 'Flex Sensor Signal'));
   });
 });

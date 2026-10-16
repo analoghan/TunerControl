@@ -39,6 +39,16 @@ describe('M1 Config — I/O resource names', function () {
     assert.equal(m1cResourceName(['0x0000', '0x6427', '0x6123', '0x0000', '0x0000'], 'M142').name, 'Low Side Ignition 8');
   });
 
+  it('names universal digital inputs from their first ID', function () {
+    function udig(a, b, c) { return [a, '0x0000', b, '0x0000', c]; }
+    assert.equal(m1cResourceName(udig('0x6401', '0x6464', '0x6441'), 'M142').name, 'UDIG2');
+    assert.equal(m1cResourceName(udig('0x6402', '0x6465', '0x6442'), 'M142').name, 'UDIG3');
+    assert.equal(m1cResourceName(udig('0x6403', '0x6466', '0x6443'), 'M142').name, 'UDIG4');
+    assert.equal(m1cResourceName(udig('0x6406', '0x6469', '0x6446'), 'M142').name, 'UDIG7');
+    assert.equal(m1cResourcePinFor(udig('0x6401', '0x6464', '0x6441'), 'M142'), 'M142 pin D02');
+    assert.equal(m1cResourceName(slot2('0x646e'), 'M142'), null, 'slot-2-only IDs stay unnamed');
+  });
+
   it('names PDM byte/mask outputs and E888 outputs', function () {
     function slot1(id) { return ['0x0000', id, '0x0000', '0x0000', '0x0000']; }
     assert.equal(m1cResourceName(slot1('0x6567'), 'M142').name, 'PDM Byte 0, Mask 01');

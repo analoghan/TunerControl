@@ -38,6 +38,10 @@ var M1C_RESOURCE_RULES = {
         // Analogue temperature inputs follow AVI17. AT1 = 0x6211 confirmed; AT2-6 inferred from the
         // contiguous block of temperature sensors at 0x6212-0x6216.
         { slot: 2, from: 0x6211, to: 0x6216, name: function (id) { return 'AT' + (id - 0x6211 + 1); } },
+        // Universal digital inputs UDIG1-12, recognised by their first ID 0x6400+n-1 (the full set is
+        // [0x6400+n-1, 0, 0x6463+n, 0, 0x6440+n-1]). UDIG2/3/4/7 confirmed (cam, throttle decode, rear
+        // wheel speed, fuel composition); slot-2-only IDs such as 0x646e are left unnamed until confirmed.
+        { slot: 0, from: 0x6400, to: 0x640b, name: function (id) { return 'UDIG' + (id - 0x6400 + 1); } },
         // PDM (CAN power distribution) outputs: 8 IDs per byte, Mask 01 at the top of each block and
         // masks 02-80 counting downward (Byte 0/1/2 Mask 01 = 0x6567/0x656f/0x6577 and
         // Byte 0 Mask 02 = 0x6566 confirmed).

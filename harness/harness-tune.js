@@ -24,7 +24,8 @@ var HT_SYNONYMS = {
     hpfp: ['fuel', 'direct'], lpfp: ['fuel'], cmp: ['camshaft'], cam: ['camshaft'], ckp: ['crankshaft'],
     crank: ['crankshaft'], app: ['pedal'], tps: ['throttle'], dbw: ['throttle'], ect: ['coolant'],
     eot: ['oil'], eop: ['oil'], pan: ['crankcase'], vss: ['wheel'], ac: ['air', 'conditioner'],
-    knk: ['knock'], baro: ['ambient'], o2: ['lambda'], afr: ['lambda'], wss: ['wheel']
+    knk: ['knock'], baro: ['ambient'], o2: ['lambda'], afr: ['lambda'], wss: ['wheel'],
+    flex: ['fuel', 'composition'], ethanol: ['fuel', 'composition']
 };
 /** Harness functions that are not signals the tune assigns (power, grounds, buses, spares). */
 var HT_NOT_SIGNAL = /^(spare|unused|n\/a|empty|battery|sensor (5|0|6)|5v|0v|ground|can |lin|rs232|ethernet|ecu power)/i;
