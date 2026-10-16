@@ -513,3 +513,17 @@ h1 {
     overflow-x: auto;
   }
 }
+
+/* Tune selection, notes and knock event table */
+.file-row select.tune-select, .threshold-row select.tune-select { background: #222; color: #fff; border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font-family: inherit; max-width: 420px; }
+.tune-hint { font-size: 0.8rem; color: #888; }
+.tune-hint.suggested { color: #4caf50; }
+.tune-status { font-size: 0.85rem; color: #b0b0b0; margin: 0 0 12px; }
+.section-note { color: #888; font-size: 0.85rem; margin: 0 0 10px; }
+.knock-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.knock-table th, .knock-table td { padding: 5px 8px; border: 1px solid #333; text-align: center; color: #ccc; }
+.knock-table th { background: #222; color: #fff; }
+.knock-table tr.weak td { color: #ff9800; }
+.knock-table.clickable tbody tr { cursor: pointer; }
+.knock-table.clickable tbody tr:hover td { background: #1f1f1f; }
+#log-panel { margin-top: 12px; }

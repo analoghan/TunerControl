@@ -66,7 +66,9 @@
     <h2 id="inputs">Input Requirements</h2>
     <h3>Required Channels</h3>
     <ul>
-      <li><strong>Fuel Pressure Direct Bank 1</strong> — actual rail pressure (dMPa in MoTeC, displayed as bar)</li>
+      <li><strong>Fuel Pressure Direct Bank 1</strong> — actual rail pressure. M1 logs it in MPa (shown as <code>dMPa</code>: the d marks
+        a differential pressure, it is not a ×10 prefix); the tool converts it and the aim to bar (1 MPa = 10 bar) using the units in the
+        log. If a log has no units, values under 40 are taken as MPa and a warning is shown.</li>
       <li><strong>Fuel Pressure Direct Bank 1 Aim</strong> — ECU target rail pressure</li>
       <li><strong>Engine Speed</strong> — RPM for correlation analysis</li>
     </ul>
@@ -107,6 +109,18 @@
     <div class="tip">
       <strong>Tolerance band:</strong> The tool uses ±2 bar as the acceptable tolerance. A well-functioning HPFP system should keep pressure within this band &gt;95% of the time during steady-state operation. Transient excursions outside this band are normal during rapid aim changes.
     </div>
+    <p>All statistics use only samples with the engine running (400 rpm or more) and a rail pressure aim above zero:
+      with the engine stopped or cranking the pump is not controlling pressure.</p>
+
+    <h3>Tracking by Engine Speed × MAP</h3>
+    <p>Mean error and the share of samples within ±2 bar for each 500 rpm × 20 kPa cell (cells with at least 20 samples). It shows where
+      tracking is poor — for example only at high rpm and boost (capacity) or everywhere at light load (control gains).</p>
+
+    <h3>Pump control</h3>
+    <p>With <strong>Fuel Pressure Direct Bank 1 Control</strong> logged, the tool checks the undershoot samples: if in most of them the
+      pump control was at 90% or more of its highest value in the log, the pump is likely at its limit (capacity); otherwise the
+      undershoot is more likely control response (gains, feed-forward). Overshoot right after the aim falls is expected: the rail only
+      loses pressure as fuel is injected.</p>
 
     <h2 id="transients">Transient Detection</h2>
     <p>The tool automatically detects transient events — moments where the fuel pressure aim changes rapidly (more than 20 bar within 0.5 seconds). For each transient:</p>
@@ -116,6 +130,8 @@
       <li><strong>Max error during transient</strong> — worst overshoot or undershoot during the response</li>
       <li><strong>Settle time</strong> — how long until pressure returns within ±2 bar of the new aim</li>
     </ul>
+    <p>The <strong>Aim Steps</strong> table lists every step; click one to open the <a href="../log-viewer/help.html">Log Viewer</a> at it, with
+      rail pressure and aim, pump control, engine speed, MAP and injector duty.</p>
 
     <div class="example-box">
       <p><strong>Example transient event:</strong></p>
@@ -176,6 +192,9 @@
       <li><strong>"Worst undershoot/overshoot"</strong> — reports the extreme values and at what RPM they occurred.</li>
       <li><strong>"Transient events detected"</strong> — reports count and average settle time.</li>
       <li><strong>"High duty cycle correlation"</strong> — undershoot increases above 70% injector duty, indicating HPFP capacity limit.</li>
+      <li><strong>"Pump at its limit"</strong> — undershoot happens with the pump control near its maximum: capacity, not tuning.</li>
+      <li><strong>"Undershoot is not at the pump's limit"</strong> — the pump had headroom, so look at the control gains and feed-forward.</li>
+      <li><strong>Overshoot after the aim falls</strong> — when most overshoot follows a falling aim it is the rail bleeding down, which is expected.</li>
     </ul>
 
     <h2 id="lt4-hpfp">GM LT4 HPFP System</h2>

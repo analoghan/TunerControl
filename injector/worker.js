@@ -16,7 +16,9 @@ const THRESHOLDS = {
     TARGET_LAMBDA: 1.0,         // Stoichiometric target
     IDLE_RPM_MAX: 1500,         // Max RPM considered idle
     LIGHT_LOAD_MAP_KPA: 60,     // kPa gauge for light load
-    LOW_FUEL_PRESS_BAR: 150,    // Below this = significant pressure drop
+    LOW_FUEL_PRESS_BELOW_AIM_BAR: 10,   // Rail pressure this far below aim = significant pressure drop
+    MPA_TO_BAR: 10,             // M1 logs rail pressure in MPa ("dMPa" = differential MPa)
+    MIN_RUNNING_RPM: 400,       // below this the engine is cranking or stopped
     OPTIMAL_TIMING_START: 240,  // dBTDC - optimal injection window start
     OPTIMAL_TIMING_END: 320,    // dBTDC - optimal injection window end
     COMPRESSION_STROKE: 180,    // dBTDC - compression stroke boundary
@@ -1059,12 +1061,12 @@ function analyzeClosedLoop(data, channels) {
  *
  * @param {number[]} pressures - Array of pressure values in bar
  * @param {number[]} errors - Array of pressure error values (actual - aim) in bar
- * @param {number} below150Count - Count of samples below 150 bar
+ * @param {number|null} belowAimCount - Count of samples more than 10 bar below aim (null without an aim channel)
  * @param {number} leanSpikePressureSum - Sum of pressure values during lean spikes
  * @param {number} leanSpikeCount - Number of lean spike samples with valid pressure
  * @returns {Object} FuelPressureResult object
  */
-function buildFuelPressureResult(pressures, errors, below150Count, leanSpikePressureSum, leanSpikeCount) {
+function buildFuelPressureResult(pressures, errors, belowAimCount, leanSpikePressureSum, leanSpikeCount) {
     if (pressures.length === 0) return null;
 
     var meanBar = computeMean(pressures);
@@ -1103,8 +1105,8 @@ function buildFuelPressureResult(pressures, errors, below150Count, leanSpikePres
         maxBar: maxBar,
         meanBar: meanBar,
         stdBar: stdBar,
-        below150BarCount: below150Count,
-        below150BarPct: (below150Count / pressures.length) * 100,
+        belowAimCount: errors.length ? belowAimCount : null,
+        belowAimPct: errors.length ? (belowAimCount / errors.length) * 100 : null,
         meanErrorBar: meanErrorBar,
         stdErrorBar: stdErrorBar,
         largeErrorCount: largeErrorCount,
@@ -1180,7 +1182,7 @@ function analyzeFuelPressure(data, channels) {
 
     var pressures = [];  // in bar
     var errors = [];     // actual - aim, in bar
-    var below150Count = 0;
+    var belowAimCount = 0;
     var leanSpikePressureSum = 0;
     var leanSpikeCount = 0;
 
@@ -1188,16 +1190,20 @@ function analyzeFuelPressure(data, channels) {
                   : channels.lambda_avg !== -1 ? channels.lambda_avg : -1;
 
     for (var i = 0; i < data.length; i++) {
-        var pressBar = data[i][channels.fuel_press_di] * 100;
+        var pressBar = data[i][channels.fuel_press_di] * THRESHOLDS.MPA_TO_BAR;
         if (isNaN(pressBar)) continue;
+        // Only while the engine runs: stopped or cranking says nothing about the fuel system.
+        if (channels.rpm !== -1 && !(data[i][channels.rpm] >= THRESHOLDS.MIN_RUNNING_RPM)) continue;
 
         pressures.push(pressBar);
-        if (pressBar < THRESHOLDS.LOW_FUEL_PRESS_BAR) below150Count++;
 
         // Pressure error vs aim
         if (channels.fuel_press_di_aim !== -1) {
-            var aimBar = data[i][channels.fuel_press_di_aim] * 100;
-            if (!isNaN(aimBar)) errors.push(pressBar - aimBar);
+            var aimBar = data[i][channels.fuel_press_di_aim] * THRESHOLDS.MPA_TO_BAR;
+            if (!isNaN(aimBar) && aimBar > 0) {
+                errors.push(pressBar - aimBar);
+                if (pressBar - aimBar < -THRESHOLDS.LOW_FUEL_PRESS_BELOW_AIM_BAR) belowAimCount++;
+            }
         }
 
         // Lean spike correlation
@@ -1210,7 +1216,7 @@ function analyzeFuelPressure(data, channels) {
         }
     }
 
-    return buildFuelPressureResult(pressures, errors, below150Count,
+    return buildFuelPressureResult(pressures, errors, belowAimCount,
         leanSpikePressureSum, leanSpikeCount);
 }
 

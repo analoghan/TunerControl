@@ -32,6 +32,117 @@ var warningsList = document.getElementById('warnings-list');
 var selectedFile = null;
 var worker = null;
 var collectedWarnings = [];
+var tuneKnock = null;      // knock settings from the chosen tune (m1pkg-knock.js), or null
+var tunePicked = false;    // the user chose the tune source themselves
+var storedTunes = [];
+var lastRunFile = null;    // the log of the shown results, for the log panel
+var logPanel = null, logPanelReady = null;
+
+// ---------------------------------------------------------------------------
+// Tune (knock threshold table, ignition table axes, knock inputs)
+// ---------------------------------------------------------------------------
+
+var pkgInput = document.getElementById('pkg-input');
+var tuneSelect = document.getElementById('tune-select');
+var tuneHint = document.getElementById('tune-hint');
+var tuneStatus = document.getElementById('tune-status');
+var thresholdMode = document.getElementById('threshold-mode');
+var thresholdInput = document.getElementById('threshold-input');
+
+function fmtThresholdTable(t) {
+    return t.rpm.map(function (r, i) { return Math.round(r) + ' rpm ' + (+t.values[0][i].toFixed(1)) + '%'; }).join(', ');
+}
+
+function setTune(knock, sourceLabel) {
+    tuneKnock = knock;
+    var tuneOpt = thresholdMode.querySelector('option[value="tune"]');
+    tuneOpt.disabled = !(knock && knock.threshold);
+    if (knock && knock.threshold) thresholdMode.value = 'tune';
+    else if (thresholdMode.value === 'tune') thresholdMode.value = 'fixed';
+    syncThresholdInput();
+    if (!knock) { tuneStatus.textContent = 'No tune chosen: knock is judged against the fixed threshold below.'; return; }
+    tuneStatus.textContent = sourceLabel + ': ' + (knock.tuneName || 'tune') + '. ' +
+        (knock.threshold ? 'Knock Threshold ' + fmtThresholdTable(knock.threshold) + '. ' : 'No Knock Threshold table found. ') +
+        (knock.ignitionAxes ? 'Knock grid uses the Ignition Timing Main sites. ' : '') +
+        (knock.inputs ? 'Knock inputs per cylinder read from the tune.' : '') + (knock.notes.length ? ' ' + knock.notes.join(' ') : '');
+}
+
+function syncThresholdInput() { thresholdInput.disabled = thresholdMode.value === 'tune'; }
+thresholdMode.addEventListener('change', syncThresholdInput);
+
+pkgInput.addEventListener('change', function () {
+    var file = pkgInput.files[0];
+    if (!file) return;
+    tunePicked = true;
+    tuneSelect.value = '';
+    tuneHint.textContent = '';
+    file.arrayBuffer().then(function (buf) {
+        setTune(m1pkgKnock(parseM1Pkg(buf)), 'Tune file ' + file.name);
+    }).catch(function (err) {
+        setTune(null);
+        showErrorBanner('Could not read the knock settings from ' + file.name + ': ' + err.message);
+    });
+});
+
+function useStoredTune(id, hint, suggested) {
+    if (!id) { setTune(null); tuneHint.textContent = ''; return Promise.resolve(); }
+    tuneSelect.value = id;
+    tuneHint.textContent = 'Loading…';
+    return tsLoad(id).then(function (pkg) {
+        if (tuneSelect.value !== id) return;
+        pkgInput.value = '';
+        setTune(m1pkgKnock(pkg), 'Stored tune');
+        tuneHint.textContent = hint || '';
+        tuneHint.classList.toggle('suggested', !!suggested);
+    }).catch(function (err) {
+        setTune(null);
+        tuneHint.textContent = '';
+        showErrorBanner('Could not read the knock settings from the stored tune: ' + err.message);
+    });
+}
+
+tuneSelect.addEventListener('change', function () {
+    tunePicked = !!tuneSelect.value;
+    useStoredTune(tuneSelect.value, '', false);
+});
+
+function suggestStoredTune(file) {
+    if (!storedTunes.length || tunePicked || typeof tsLogInfo === 'undefined') return;
+    tsLogInfo(file).then(function (info) {
+        var sug = tsSuggest(storedTunes, info);
+        if (sug.tune) return useStoredTune(sug.tune.id, sug.reason, true);
+        tuneHint.textContent = sug.reason;
+        tuneHint.classList.remove('suggested');
+    });
+}
+
+if (typeof tsInit !== 'undefined') {
+    tsInit().then(tsList).then(function (list) {
+        storedTunes = list;
+        if (!list.length) return;
+        list.forEach(function (t) {
+            var o = document.createElement('option');
+            o.value = t.id;
+            o.textContent = tsLabel(t);
+            tuneSelect.appendChild(o);
+        });
+        document.getElementById('tune-row').hidden = false;
+        if (selectedFile) suggestStoredTune(selectedFile);
+    }).catch(function () { /* no stored tunes: the file input still works */ });
+}
+
+/** Analysis settings for the worker: the threshold (tune table or fixed %), ignition axes and knock inputs. */
+function knockSettings() {
+    var useTune = thresholdMode.value === 'tune' && tuneKnock && tuneKnock.threshold;
+    var fixed = parseFloat(thresholdInput.value);
+    if (isNaN(fixed) || fixed < 0) fixed = 20;
+    return {
+        threshold: useTune ? tuneKnock.threshold : fixed,
+        thresholdLabel: useTune ? 'the tune\'s Knock Threshold (' + fmtThresholdTable(tuneKnock.threshold) + ')' : 'the fixed ' + fixed + '% threshold',
+        ignitionAxes: tuneKnock ? tuneKnock.ignitionAxes : null,
+        inputs: tuneKnock ? tuneKnock.inputs : null
+    };
+}
 
 // ---------------------------------------------------------------------------
 // File Input Handling
@@ -74,6 +185,7 @@ function handleFileSelect(event) {
         selectedFile = file;
         analyzeBtn.disabled = false;
         fileError.hidden = true;
+        suggestStoredTune(file);
     } else {
         selectedFile = null;
         analyzeBtn.disabled = true;
@@ -150,12 +262,15 @@ function handleAnalyzeClick() {
             }
         };
 
+        var settings = knockSettings();
+        lastRunFile = selectedFile;
+        logPanelReady = null;
         if (isLD) {
             // Post ArrayBuffer for .ld binary parsing
-            worker.postMessage({ type: 'analyze_ld', buffer: reader.result });
+            worker.postMessage({ type: 'analyze_ld', buffer: reader.result, settings: settings });
         } else {
             // Post text for CSV parsing
-            worker.postMessage({ type: 'analyze', logText: reader.result });
+            worker.postMessage({ type: 'analyze', logText: reader.result, settings: settings });
         }
     };
 
@@ -315,6 +430,9 @@ function renderReport(analysis) {
     // Render cylinder distribution table
     renderCylinderDistribution(analysis.cylinderDistribution);
 
+    renderSensorHealth(analysis.sensorHealth);
+    renderKnockEvents(analysis.events || [], analysis.totalEvents || 0);
+
     // Render timing recommendations table
     renderTimingRecommendations(analysis.timingRecommendations);
 
@@ -391,7 +509,17 @@ function renderChannelMapping(channelMapping) {
         map: 'Inlet Manifold Pressure',
         tps: 'Throttle Position',
         gear: 'Gear',
-        coolant_temp: 'Coolant Temperature'
+        coolant_temp: 'Coolant Temperature',
+        overrun: 'Engine Overrun State',
+        load_norm: 'Engine Load Normalised',
+        knock_trim_1: 'Knock Trim Cyl 1',
+        knock_trim_2: 'Knock Trim Cyl 2',
+        knock_trim_3: 'Knock Trim Cyl 3',
+        knock_trim_4: 'Knock Trim Cyl 4',
+        knock_trim_5: 'Knock Trim Cyl 5',
+        knock_trim_6: 'Knock Trim Cyl 6',
+        knock_trim_7: 'Knock Trim Cyl 7',
+        knock_trim_8: 'Knock Trim Cyl 8'
     };
 
     var keys = Object.keys(channelLabels);
@@ -485,7 +613,7 @@ function renderDiagnostics(diagnostics) {
  */
 function classifyDiagnostic(message) {
     var lower = message.toLowerCase();
-    if (lower.indexOf('no knock events') !== -1) {
+    if (lower.indexOf('no knock events') === 0) {
         return 'diagnostic-healthy';
     }
     return 'diagnostic-warning';
@@ -585,40 +713,86 @@ function renderTimingRecommendations(recommendations) {
         recommendationsBlock.hidden = false;
     }
 
-    // Create table
     var table = document.createElement('table');
     table.className = 'recommendations-table';
-
-    // Header row
-    var thead = document.createElement('thead');
-    var headerRow = document.createElement('tr');
-    var headers = ['Cylinder', 'Recommended Timing Reduction (\u00B0)'];
-    for (var h = 0; h < headers.length; h++) {
-        var th = document.createElement('th');
-        th.textContent = headers[h];
-        headerRow.appendChild(th);
-    }
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-
-    // Data rows
+    table.innerHTML = '<thead><tr><th>Cylinder</th><th>Knock events</th><th>Worst (× threshold)</th><th>Suggested reduction</th><th>Notes</th></tr></thead>';
     var tbody = document.createElement('tbody');
-    for (var i = 0; i < recommendations.length; i++) {
-        var rec = recommendations[i];
+    recommendations.forEach(function (rec) {
         var tr = document.createElement('tr');
-
-        var tdCyl = document.createElement('td');
-        tdCyl.textContent = 'Cyl ' + rec.cylinderIndex;
-        tr.appendChild(tdCyl);
-
-        var tdReduction = document.createElement('td');
-        tdReduction.textContent = rec.reductionDeg.toFixed(1);
-        tr.appendChild(tdReduction);
-
+        [ 'Cyl ' + rec.cylinderIndex, String(rec.events), rec.maxRatio.toFixed(2) + '×',
+          rec.reductionDeg ? rec.reductionDeg.toFixed(0) + '°' : '—', rec.note ].forEach(function (text) {
+            var td = document.createElement('td');
+            td.textContent = text;
+            tr.appendChild(td);
+        });
         tbody.appendChild(tr);
-    }
+    });
     table.appendChild(tbody);
     content.appendChild(table);
+    var note = document.createElement('p');
+    note.className = 'section-note';
+    note.textContent = 'Reductions apply to the cells where the knock happened (see the grid below): 1° when the worst event was up to ' +
+        '1.5× the threshold, 2° up to 2×, 3° beyond. Change in small steps and re-log.';
+    content.appendChild(note);
+}
+
+// ---------------------------------------------------------------------------
+// Knock sensor check and knock events
+// ---------------------------------------------------------------------------
+
+function renderSensorHealth(health) {
+    var content = document.getElementById('sensor-health-content');
+    clearElement(content);
+    if (!health || !health.perCylinder.length) { renderUnavailable(content, 'No knock level channels in this log.'); return; }
+    var weakCyl = {};
+    health.weak.forEach(function (w) { w.cylinders.forEach(function (c) { weakCyl[c] = true; }); });
+    var showInput = health.perCylinder.some(function (p) { return p.input; });
+    var html = '<table class="knock-table"><thead><tr><th>Cylinder</th>' + (showInput ? '<th>Knock input</th>' : '') +
+        '<th>Typical level</th><th>99th percentile</th><th></th></tr></thead><tbody>';
+    health.perCylinder.forEach(function (p) {
+        html += '<tr' + (weakCyl[p.cylinderIndex] ? ' class="weak"' : '') + '><td>Cyl ' + p.cylinderIndex + '</td>' +
+            (showInput ? '<td>' + (p.input || '—') + '</td>' : '') + '<td>' + p.median.toFixed(2) + '%</td><td>' + p.p99.toFixed(2) + '%</td><td>' +
+            (weakCyl[p.cylinderIndex] ? 'Reads far below the others' : '') + '</td></tr>';
+    });
+    content.innerHTML = html + '</tbody></table>';
+}
+
+function renderKnockEvents(events, total) {
+    var content = document.getElementById('events-content');
+    clearElement(content);
+    document.getElementById('log-panel').hidden = true;
+    if (!events.length) { renderUnavailable(content, 'No knock above the threshold.'); return; }
+    var html = '<table class="knock-table clickable"><thead><tr><th>Time</th><th>Cylinder</th><th>Peak level</th><th>Threshold</th>' +
+        '<th>× threshold</th><th>Duration</th><th>RPM</th><th>MAP</th><th>Timing</th></tr></thead><tbody>';
+    events.forEach(function (e, i) {
+        html += '<tr data-i="' + i + '" title="Show in the log"><td>' + e.timestamp.toFixed(2) + ' s</td><td>' + e.cylinderIndex + '</td><td>' +
+            e.knockLevel.toFixed(1) + '%</td><td>' + e.threshold.toFixed(1) + '%</td><td>' + (e.ratio ? e.ratio.toFixed(2) : '—') + '</td><td>' +
+            Math.round(e.duration * 1000) + ' ms</td><td>' + (e.rpm !== null ? Math.round(e.rpm) : '—') + '</td><td>' +
+            (e.load !== null ? Math.round(e.load) + ' kPa' : '—') + '</td><td>' + (e.ignTiming !== null ? e.ignTiming.toFixed(1) + '°' : '—') + '</td></tr>';
+    });
+    content.innerHTML = html + '</tbody></table>' + (total > events.length ? '<p class="section-note">Showing the first ' + events.length +
+        ' of ' + total + ' events.</p>' : '');
+    content.querySelectorAll('tbody tr').forEach(function (tr) {
+        tr.onclick = function () { showKnockInLog(events, events[+tr.dataset.i]); };
+    });
+}
+
+/** Opens the log panel at a knock event, with every event marked. */
+function showKnockInLog(events, evt) {
+    if (typeof LogPanel === 'undefined' || !lastRunFile) return;
+    var el = document.getElementById('log-panel');
+    el.hidden = false;
+    if (!logPanel) logPanel = new LogPanel(el, { preset: 'knock', storageKey: 'knock', showVe: false, showTf: false });
+    if (!logPanelReady) {
+        logPanelReady = logPanel.open(lastRunFile).then(function () {
+            logPanel.setMarkers(events.map(function (e) {
+                return { t: e.timestamp, t1: e.timestamp + Math.max(e.duration, 0.05), color: '#ff5a6e', fill: 'rgba(255,90,110,0.12)',
+                         label: 'cyl ' + e.cylinderIndex + ' ' + e.knockLevel.toFixed(0) + '%' };
+            }));
+        });
+    }
+    logPanelReady.then(function () { logPanel.zoomTo(evt.timestamp - 2, evt.timestamp + 2); }).catch(function () { logPanelReady = null; });
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ---------------------------------------------------------------------------

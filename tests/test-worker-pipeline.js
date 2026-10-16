@@ -51,7 +51,7 @@ function assert(condition, msg) {
 }
 
 // --- Test 1: CSV analysis with default threshold ---
-console.log('Test 1: CSV analysis pipeline with default threshold (5)');
+console.log('Test 1: CSV analysis pipeline with a 5% threshold');
 messages = [];
 
 const csvText = [
@@ -63,7 +63,7 @@ const csvText = [
     '0.15,3300,115,0,0,3,0,0,0,0,0,22,65'
 ].join('\n');
 
-sandbox.self.onmessage({ data: { type: 'analyze', logText: csvText } });
+sandbox.self.onmessage({ data: { type: 'analyze', logText: csvText, settings: { threshold: 5 } } });
 
 const resultMsg = messages.find(function(m) { return m.type === 'result'; });
 assert(resultMsg !== undefined, 'Result message posted');
@@ -81,16 +81,17 @@ if (resultMsg) {
     assert(analysis.worstConditions !== undefined, 'worstConditions present');
     assert(Array.isArray(analysis.timingRecommendations), 'timingRecommendations is array');
     assert(Array.isArray(analysis.diagnostics), 'diagnostics is array');
-    assert(analysis.threshold === 5, 'threshold is 5 (default)');
+    assert(analysis.threshold === 5, 'threshold is 5 (from the settings)');
 
     // Channel mapping checks
     assert(analysis.channelMapping.knock_cyl_1 === true, 'knock_cyl_1 found');
     assert(analysis.channelMapping.rpm === true, 'rpm found');
     assert(analysis.channelMapping.gear === false, 'gear not found (not in CSV)');
 
-    // Event classification: threshold=5, cyl3 has 10,15,8 (all > 5), row3 has 3 (not > 5)
-    assert(analysis.cylinderDistribution.total === 3, 'total events = 3 (cyl3: 10,15,8 > 5)');
-    assert(analysis.cylinderDistribution.counts[2] === 3, 'cylinder 3 has 3 events');
+    // Event classification: threshold=5, cyl3 is above it for 10,15,8 in a row → one event peaking at 15
+    assert(analysis.cylinderDistribution.total === 1, 'total events = 1 (one stretch of cyl3 above 5)');
+    assert(analysis.cylinderDistribution.counts[2] === 1, 'cylinder 3 has 1 event');
+    assert(analysis.events[0].knockLevel === 15, 'the event records its peak level');
     assert(analysis.cylinderDistribution.counts[0] === 0, 'cylinder 1 has 0 events');
 
     // Heatmap structure
@@ -108,7 +109,7 @@ if (resultMsg) {
 
     // Chart data structure
     assert(Array.isArray(chartData.knockEvents), 'chartData.knockEvents is array');
-    assert(chartData.knockEvents.length === 3, 'chartData has 3 knock events');
+    assert(chartData.knockEvents.length === 1, 'chartData has 1 knock event');
     assert(chartData.cylinderDistribution !== undefined, 'chartData.cylinderDistribution present');
     assert(chartData.heatmapData !== undefined, 'chartData.heatmapData present');
     assert(chartData.retardTimeSeries === null, 'chartData.retardTimeSeries null');
@@ -118,7 +119,8 @@ if (resultMsg) {
     assert(analysis.diagnostics.length > 0, 'diagnostics generated');
 
     // Timing recommendations
-    assert(analysis.timingRecommendations.length === 8, '8 timing recommendations');
+    assert(analysis.timingRecommendations.length === 1, 'advice only for the cylinder that knocked');
+    assert(analysis.timingRecommendations[0].reductionDeg === 0, 'a single event gets no reduction');
 }
 
 // --- Test 2: Reanalyze with new threshold ---
@@ -147,13 +149,9 @@ const zeroResult = messages.find(function(m) { return m.type === 'result'; });
 assert(zeroResult !== undefined, 'Threshold 0 result posted');
 
 if (zeroResult) {
-    // With threshold 0: any knock level > 0 is an event
-    // Row 0: cyl1=2, cyl2=3, cyl3=10, cyl4=1 → 4 events
-    // Row 1: cyl1=1, cyl2=2, cyl3=15 → 3 events
-    // Row 2: cyl3=8 → 1 event
-    // Row 3: cyl3=3 → 1 event
-    // Total: 4 + 3 + 1 + 1 = 9
-    assert(zeroResult.analysis.cylinderDistribution.total === 9, 'threshold 0: 9 events total');
+    // With threshold 0: any knock level > 0; one event per cylinder stretch
+    // cyl1 rows 0–1, cyl2 rows 0–1, cyl3 rows 0–3, cyl4 row 0 → 4 events
+    assert(zeroResult.analysis.cylinderDistribution.total === 4, 'threshold 0: 4 events total');
     assert(zeroResult.analysis.threshold === 0, 'threshold stored as 0');
 }
 

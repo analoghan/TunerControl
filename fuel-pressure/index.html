@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DI Fuel Pressure Deep Dive — TunerControl</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="../log-viewer/log-panel.css">
 </head>
 <body>
   <div class="app-container">
@@ -54,6 +55,21 @@
       <div id="report-summary" class="report-block">
         <h2>Fuel Pressure Summary</h2>
         <div id="summary-content" class="report-content"></div>
+      </div>
+
+      <div id="report-grid" class="report-block" hidden>
+        <h2>Tracking by Engine Speed × MAP</h2>
+        <p class="section-note">Mean error (actual − aim) and the share of samples within ±2 bar in each cell, while the engine runs.
+          Cells with fewer than 20 samples are left out.</p>
+        <div id="grid-content" class="report-content"></div>
+      </div>
+
+      <div id="report-transients" class="report-block" hidden>
+        <h2>Aim Steps</h2>
+        <p class="section-note">Each time the aim changed by 20 bar or more within 0.5 s, and how long the rail took to get within ±2 bar
+          of it. Click one to see it in the log.</p>
+        <div id="transients-content" class="report-content"></div>
+        <div id="log-panel" hidden></div>
       </div>
 
       <div id="report-pw-impact" class="report-block" hidden>
@@ -106,6 +122,8 @@
   <script src="../lib/hammer.min.js"></script>
   <script src="../lib/chart.umd.min.js"></script>
   <script src="../lib/chartjs-plugin-zoom.min.js"></script>
+  <script src="../log-viewer/log-chart.js"></script>
+  <script src="../log-viewer/log-panel.js"></script>
   <script src="charts.js"></script>
   <script src="app.js"></script>
 </body>

@@ -131,6 +131,11 @@ function runCrossDiagnostics(columnNames, data) {
     var pressureSamples = 0;
 
     var lambdaIdx = ch.lambda_b1 !== -1 ? ch.lambda_b1 : (ch.lambda_avg !== -1 ? ch.lambda_avg : -1);
+    // Rail pressure is logged in MPa ("dMPa" = differential MPa); 1 MPa = 10 bar. "Below aim" means more than 2 bar under.
+    var MPA_TO_BAR = 10, PRESS_TOL_BAR = 2;
+    // A typical M1 Knock Threshold is 20–40 % of the knock level scale; the Knock Analyzer uses the tune's own table.
+    var KNOCK_LEVEL = 20;
+    var knockWasOn = false;
 
     for (var i = 0; i < n; i++) {
         var rpm = ch.rpm !== -1 ? data[i][ch.rpm] : NaN;
@@ -148,7 +153,7 @@ function runCrossDiagnostics(columnNames, data) {
             if (isLean) {
                 leanCount++;
                 if (!isNaN(pw) && pw < 0.8) leanWithLowPW++;
-                if (!isNaN(press) && !isNaN(pressAim) && (press - pressAim) < -0.05) leanWithLowPressure++;
+                if (!isNaN(press) && !isNaN(pressAim) && pressAim > 0 && (press - pressAim) * MPA_TO_BAR < -PRESS_TOL_BAR) leanWithLowPressure++;
             }
             if (isRich) richCount++;
         }
@@ -167,27 +172,28 @@ function runCrossDiagnostics(columnNames, data) {
         if (!isNaN(pw) && pw > 0.05 && pw < 0.8) lowPWCount++;
 
         // Fuel pressure
-        if (!isNaN(press) && !isNaN(pressAim)) {
+        if (!isNaN(press) && !isNaN(pressAim) && pressAim > 0 && !(rpm < 400)) {
             pressureSamples++;
-            if ((press - pressAim) < -0.02) pressureBelowAimCount++;
+            if ((press - pressAim) * MPA_TO_BAR < -PRESS_TOL_BAR) pressureBelowAimCount++;
         }
 
-        // Knock detection (any cylinder > 5%)
+        // Knock detection: any cylinder above KNOCK_LEVEL while running; one event per stretch
         var hasKnock = false;
         for (var cyl = 1; cyl <= 8; cyl++) {
             var kIdx = ch['knock_cyl_' + cyl];
             if (kIdx !== -1) {
                 var kLevel = data[i][kIdx];
-                if (!isNaN(kLevel) && kLevel > 5) {
+                if (!isNaN(kLevel) && kLevel > KNOCK_LEVEL && !(rpm < 500)) {
                     hasKnock = true;
                     break;
                 }
             }
         }
-        if (hasKnock) {
+        if (hasKnock && !knockWasOn) {
             knockEvents++;
             if (!isNaN(lambda) && lambda > 1.06) knockWithLean++;
         }
+        knockWasOn = hasKnock;
     }
 
     // --- Build Summary ---
@@ -282,7 +288,7 @@ function runCrossDiagnostics(columnNames, data) {
             findings.push({
                 severity: 'warning',
                 title: 'Fuel Pressure Tracking Issue',
-                body: belowPct.toFixed(0) + '% of samples show fuel pressure below aim. The HPFP is struggling to maintain target pressure.',
+                body: belowPct.toFixed(0) + '% of samples (engine running) show rail pressure more than 2 bar below aim. The HPFP is struggling to maintain target pressure.',
                 action: 'Check Error vs RPM and Error vs Duty Cycle in the DI Fuel Pressure tool to determine if this is a capacity issue (high RPM/duty) or a control issue (all conditions).'
             });
         }
@@ -293,8 +299,8 @@ function runCrossDiagnostics(columnNames, data) {
         findings.push({
             severity: 'warning',
             title: 'Knock Events Detected (Not Lean-Related)',
-            body: knockEvents + ' knock events detected with normal fueling. This is timing-related knock — the ignition advance is too aggressive for the current conditions.',
-            action: 'Use the Knock Analyzer RPM × Load grid to identify which cells need timing reduction. Start with 1-2° and re-log.'
+            body: knockEvents + ' knock events (knock level above 20%) with normal fueling. This is timing-related knock — the ignition advance is too aggressive for the current conditions.',
+            action: 'Confirm in the Knock Analyzer with your tune (it uses the tune\'s own Knock Threshold table), then use its RPM × Load grid to find which cells need timing reduction. Start with 1-2° and re-log.'
         });
     }
 

@@ -579,7 +579,8 @@ function renderFuelPressureReport(result) {
         ['Max Pressure', result.maxBar.toFixed(1) + ' bar'],
         ['Mean Pressure', result.meanBar.toFixed(1) + ' bar'],
         ['Std Dev', result.stdBar.toFixed(1) + ' bar'],
-        ['Below 150 bar', result.below150BarCount.toLocaleString() + ' (' + result.below150BarPct.toFixed(1) + '%)']
+        ['More than 10 bar below aim', result.belowAimCount === null ? '— (no aim channel)' :
+            result.belowAimCount.toLocaleString() + ' (' + result.belowAimPct.toFixed(1) + '%)']
     ];
     content.appendChild(createStatsGrid(pressureStats));
 

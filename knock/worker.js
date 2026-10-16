@@ -417,7 +417,17 @@ const CHANNEL_MAP = {
     map:            ['Inlet Manifold Pressure'],
     tps:            ['Throttle Position'],
     gear:           ['Gear'],
-    coolant_temp:   ['Coolant Temperature']
+    coolant_temp:   ['Coolant Temperature'],
+    overrun:        ['Engine Overrun State'],
+    load_norm:      ['Engine Load Normalised', 'Engine Load Normalized'],
+    knock_trim_1:   ['Ignition Cylinder 1 Knock Trim'],
+    knock_trim_2:   ['Ignition Cylinder 2 Knock Trim'],
+    knock_trim_3:   ['Ignition Cylinder 3 Knock Trim'],
+    knock_trim_4:   ['Ignition Cylinder 4 Knock Trim'],
+    knock_trim_5:   ['Ignition Cylinder 5 Knock Trim'],
+    knock_trim_6:   ['Ignition Cylinder 6 Knock Trim'],
+    knock_trim_7:   ['Ignition Cylinder 7 Knock Trim'],
+    knock_trim_8:   ['Ignition Cylinder 8 Knock Trim']
 };
 
 /**
@@ -476,65 +486,87 @@ function resolveChannels(columnNames) {
 // Knock Analysis Engine
 // ---------------------------------------------------------------------------
 
+/** Default fixed knock threshold (%) when no tune is chosen. M1 detects knock when a cylinder's Knock Level
+ *  exceeds the Knock Threshold table (a ratio by engine speed, typically 20–40 %). */
+var KNOCK_DEFAULT_THRESHOLD = 20;
+/** Below this engine speed the engine is cranking or stopped; knock levels there are not combustion. */
+var KNOCK_MIN_RPM = 500;
+/** A knock event ends when the level stays at or below the threshold for longer than this (s). */
+var KNOCK_EVENT_GAP_S = 0.1;
+
+/** Linear interpolation in sorted breakpoints, clamped at the ends. */
+function knockInterp(xs, ys, x) {
+    if (!xs || !xs.length) return NaN;
+    if (xs.length === 1 || x <= xs[0]) return ys[0];
+    for (var i = 1; i < xs.length; i++) {
+        if (x <= xs[i]) return ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / ((xs[i] - xs[i - 1]) || 1);
+    }
+    return ys[ys.length - 1];
+}
+
 /**
- * Classifies knock events from parsed log data based on a threshold.
+ * Knock threshold (%) at an operating point.
+ * spec: a number (fixed %), or { rpm: [..], load: [..] | null, values: [[%]] } from the tune's Knock Threshold table.
+ */
+function knockThresholdAt(spec, rpm, load) {
+    if (typeof spec === 'number') return spec;
+    if (!spec || !spec.values || !spec.values.length) return KNOCK_DEFAULT_THRESHOLD;
+    var byRpm = spec.values.map(function (row) { return knockInterp(spec.rpm, row, isNaN(rpm) ? 0 : rpm); });
+    if (!spec.load || spec.load.length < 2 || isNaN(load)) return byRpm[0];
+    return knockInterp(spec.load, byRpm, load);
+}
+
+/**
+ * Finds knock events: for each cylinder, a stretch where its Knock Level is above the threshold (gaps up to
+ * KNOCK_EVENT_GAP_S joined). One event per stretch, so a log stored at a higher rate than the knock channel
+ * (or a long knock) does not multiply the count. Samples below KNOCK_MIN_RPM or during overrun are ignored.
  *
- * For each data row, checks each cylinder's knock level channel. If the knock
- * level is strictly greater than the threshold, a KnockEvent is created with
- * all associated operating condition data from that row.
- *
- * @param {number[][]} data - Array of row arrays (numeric values)
- * @param {Object<string, number>} channels - The resolved channel index map from resolveChannels
- * @param {number} threshold - Knock threshold percentage (0–100); events are knockLevel > threshold
- * @returns {Array<Object>} Array of KnockEvent objects
+ * @param {number[][]} data - rows (column 0 = time)
+ * @param {Object} channels - resolved channel indices
+ * @param {number|Object} threshold - fixed % or a threshold table (see knockThresholdAt)
+ * @returns {Array<Object>} events { timestamp, duration, cylinderIndex, knockLevel (peak), threshold, ratio, rpm, load,
+ *   ignTiming, ignTimingComp, knockTrim, tps, gear } — conditions at the peak sample
  */
 function classifyKnockEvents(data, channels, threshold) {
     var events = [];
+    var col = function (key) { return channels[key] !== undefined ? channels[key] : -1; };
+    var rpmIdx = col('rpm'), mapIdx = col('map'), loadNormIdx = col('load_norm'), overrunIdx = col('overrun');
+    var opt = function (row, idx) { return idx !== -1 ? row[idx] : null; };
 
-    // Pre-resolve optional channel indices (-1 means unavailable → null)
-    var rpmIdx = channels.rpm;
-    var mapIdx = channels.map;
-    var ignTimingIdx = channels.ign_timing;
-    var ignTimingCompIdx = channels.ign_timing_comp;
-    var tpsIdx = channels.tps;
-    var gearIdx = channels.gear;
-
-    // Collect resolved knock cylinder indices (only those != -1)
-    var knockChannels = [];
     for (var n = 1; n <= 8; n++) {
-        var key = 'knock_cyl_' + n;
-        var idx = channels[key];
-        if (idx !== -1) {
-            knockChannels.push({ cylinderIndex: n, colIdx: idx });
-        }
-    }
-
-    // Iterate all data rows
-    for (var r = 0; r < data.length; r++) {
-        var row = data[r];
-        var timestamp = row[0]; // Time is always column 0
-
-        // Check each resolved knock cylinder channel
-        for (var k = 0; k < knockChannels.length; k++) {
-            var knockLevel = row[knockChannels[k].colIdx];
-
-            // Classify as knock event if strictly greater than threshold
-            if (knockLevel > threshold) {
-                events.push({
-                    timestamp: timestamp,
-                    cylinderIndex: knockChannels[k].cylinderIndex,
-                    knockLevel: knockLevel,
-                    rpm: rpmIdx !== -1 ? row[rpmIdx] : null,
-                    load: mapIdx !== -1 ? row[mapIdx] : null,
-                    ignTiming: ignTimingIdx !== -1 ? row[ignTimingIdx] : null,
-                    ignTimingComp: ignTimingCompIdx !== -1 ? row[ignTimingCompIdx] : null,
-                    tps: tpsIdx !== -1 ? row[tpsIdx] : null,
-                    gear: gearIdx !== -1 ? row[gearIdx] : null
-                });
+        var kIdx = col('knock_cyl_' + n);
+        if (kIdx === -1) continue;
+        var trimIdx = col('knock_trim_' + n), open = null, lastAbove = -Infinity;
+        for (var r = 0; r <= data.length; r++) {
+            var row = data[r], t = row ? row[0] : Infinity, above = false, thr = NaN, level = NaN;
+            if (row) {
+                var rpm = rpmIdx !== -1 ? row[rpmIdx] : NaN;
+                var running = rpmIdx === -1 || rpm >= KNOCK_MIN_RPM;
+                var overrun = overrunIdx !== -1 && row[overrunIdx] > 0;
+                level = row[kIdx];
+                thr = knockThresholdAt(threshold, rpm, loadNormIdx !== -1 ? row[loadNormIdx] : NaN);
+                above = running && !overrun && level > thr;
+            }
+            if (open && (!row || (!above && t - lastAbove > KNOCK_EVENT_GAP_S))) {
+                open.duration = Math.round((lastAbove - open.timestamp) * 1000) / 1000;
+                events.push(open);
+                open = null;
+            }
+            if (!above) continue;
+            lastAbove = t;
+            if (!open || level > open.knockLevel) {
+                var peak = {
+                    timestamp: open ? open.timestamp : t, cylinderIndex: n, knockLevel: level, threshold: thr,
+                    ratio: thr > 0 ? level / thr : null,
+                    rpm: opt(row, rpmIdx), load: opt(row, mapIdx), loadNorm: opt(row, loadNormIdx),
+                    ignTiming: opt(row, col('ign_timing')), ignTimingComp: opt(row, col('ign_timing_comp')),
+                    knockTrim: opt(row, trimIdx), tps: opt(row, col('tps')), gear: opt(row, col('gear'))
+                };
+                open = peak;
             }
         }
     }
-
+    events.sort(function (a, b) { return a.timestamp - b.timestamp || a.cylinderIndex - b.cylinderIndex; });
     return events;
 }
 
@@ -598,32 +630,70 @@ function computeCylinderDistribution(events) {
 // ---------------------------------------------------------------------------
 
 /**
- * Assigns an RPM value to a bin index.
- * Bins are 500 RPM wide, covering 0–7500 RPM (15 bins total).
- * Values below 0 clamp to bin 0; values at or above 7500 clamp to bin 14.
- *
- * @param {number} rpm - Engine speed in RPM
- * @returns {number} Bin index in range [0, 14]
+ * Bins for the knock grids. By default 500 rpm × 10 kPa (MAP) cells; with a tune, the sites of Ignition Timing
+ * Main (engine speed × Engine Load Normalised when that is logged), so each cell matches a table cell.
+ * Each bin covers the range nearest to its site.
  */
-function assignRpmBin(rpm) {
-    if (rpm < 0) return 0;
-    var bin = Math.floor(rpm / 500);
-    return bin > 14 ? 14 : bin;
+var KNOCK_BINS = null;
+
+function knockFixedEdges(step, count) {
+    var e = [];
+    for (var i = 0; i <= count; i++) e.push(i * step);
+    return e;
+}
+
+function knockSiteEdges(sites) {
+    var e = [sites[0] - (sites.length > 1 ? (sites[1] - sites[0]) / 2 : 1)];
+    for (var i = 1; i < sites.length; i++) e.push((sites[i - 1] + sites[i]) / 2);
+    e.push(sites[sites.length - 1] + (sites.length > 1 ? (sites[sites.length - 1] - sites[sites.length - 2]) / 2 : 1));
+    return e;
 }
 
 /**
- * Assigns a load (inlet manifold pressure) value to a bin index.
- * Bins are 10 kPa wide, covering 0–250 kPa (25 bins total).
- * Values below 0 clamp to bin 0; values at or above 250 clamp to bin 24.
- *
- * @param {number} kpa - Inlet manifold pressure in kPa
- * @returns {number} Bin index in range [0, 24]
+ * Sets the bins: axes = { rpm: [sites], load: [sites] | null } from the tune (load sites are used only when
+ * useLoadNorm, i.e. Engine Load Normalised is logged), or null for the default bins.
  */
-function assignLoadBin(kpa) {
-    if (kpa < 0) return 0;
-    var bin = Math.floor(kpa / 10);
-    return bin > 24 ? 24 : bin;
+function configureKnockBins(axes, useLoadNorm) {
+    var fmtRpm = function (v) { return String(Math.round(v)); };
+    if (axes && axes.rpm && axes.rpm.length) {
+        var loadSites = useLoadNorm && axes.load && axes.load.length ? axes.load : null;
+        KNOCK_BINS = {
+            source: 'tune',
+            rpmEdges: knockSiteEdges(axes.rpm), rpmLabels: axes.rpm.map(fmtRpm),
+            loadEdges: loadSites ? knockSiteEdges(loadSites) : knockFixedEdges(10, 25),
+            loadLabels: loadSites ? loadSites.map(function (v) { return v.toFixed(2); }) : null,
+            loadKind: loadSites ? 'loadNorm' : 'map'
+        };
+    } else {
+        KNOCK_BINS = { source: 'default', rpmEdges: knockFixedEdges(500, 15), rpmLabels: null, loadEdges: knockFixedEdges(10, 25),
+                       loadLabels: null, loadKind: 'map' };
+    }
+    if (!KNOCK_BINS.rpmLabels) {
+        KNOCK_BINS.rpmLabels = KNOCK_BINS.rpmEdges.slice(0, -1).map(function (e, i) { return e + '–' + KNOCK_BINS.rpmEdges[i + 1]; });
+    }
+    if (!KNOCK_BINS.loadLabels) {
+        KNOCK_BINS.loadLabels = KNOCK_BINS.loadEdges.slice(0, -1).map(function (e, i) { return e + '–' + KNOCK_BINS.loadEdges[i + 1]; });
+    }
+    return KNOCK_BINS;
 }
+
+function knockBins() { return KNOCK_BINS || configureKnockBins(null); }
+
+function knockEdgeBin(edges, v) {
+    var last = edges.length - 2;
+    if (!(v >= edges[1])) return 0;
+    for (var i = 1; i <= last; i++) if (v < edges[i + 1]) return i;
+    return last;
+}
+
+/** RPM bin index (500 rpm bins over 0–7500 by default; clamped at the ends). */
+function assignRpmBin(rpm) { return knockEdgeBin(knockBins().rpmEdges, rpm); }
+
+/** Load bin index (10 kPa bins over 0–250 by default; clamped at the ends). */
+function assignLoadBin(kpa) { return knockEdgeBin(knockBins().loadEdges, kpa); }
+
+/** The load value an event or sample is binned by: Engine Load Normalised with a tune that uses it, else MAP. */
+function knockLoadOf(evt) { return knockBins().loadKind === 'loadNorm' ? evt.loadNorm : evt.load; }
 
 // ---------------------------------------------------------------------------
 // Heatmap Binning
@@ -640,22 +710,13 @@ function assignLoadBin(kpa) {
  *   counts: 15x25 matrix where counts[rpmBinIdx][loadBinIdx] = event count
  */
 function computeHeatmapBins(events) {
-    // Build bin boundary arrays
-    var rpmBins = [];
-    for (var r = 0; r <= 15; r++) {
-        rpmBins.push(r * 500);
-    }
+    var bins = knockBins(), rpmBins = bins.rpmEdges.slice(), loadBins = bins.loadEdges.slice();
 
-    var loadBins = [];
-    for (var l = 0; l <= 25; l++) {
-        loadBins.push(l * 10);
-    }
-
-    // Initialize 15x25 counts matrix to zero
+    // Initialize the counts matrix [rpm bin][load bin] to zero
     var counts = [];
-    for (var i = 0; i < 15; i++) {
+    for (var i = 0; i < rpmBins.length - 1; i++) {
         var row = [];
-        for (var j = 0; j < 25; j++) {
+        for (var j = 0; j < loadBins.length - 1; j++) {
             row.push(0);
         }
         counts.push(row);
@@ -664,18 +725,19 @@ function computeHeatmapBins(events) {
     // Tally events into bins
     for (var e = 0; e < events.length; e++) {
         var evt = events[e];
-        if (evt.rpm === null || evt.rpm === undefined ||
-            evt.load === null || evt.load === undefined) {
+        var evLoad = knockLoadOf(evt);
+        if (evt.rpm === null || evt.rpm === undefined || evLoad === null || evLoad === undefined || isNaN(evLoad)) {
             continue;
         }
         var rpmIdx = assignRpmBin(evt.rpm);
-        var loadIdx = assignLoadBin(evt.load);
+        var loadIdx = assignLoadBin(evLoad);
         counts[rpmIdx][loadIdx]++;
     }
 
     return {
         rpmBins: rpmBins,
         loadBins: loadBins,
+        loadKind: bins.loadKind,
         counts: counts
     };
 }
@@ -699,14 +761,13 @@ function computeHeatmapBins(events) {
  *   Each grid is a 2D array [loadIdx][rpmIdx] of { events, rate, avgLevel, maxLevel }
  */
 function computeKnockRpmLoadGrid(events, data, channels) {
+    var bins = knockBins();
     var rpmIdx = channels.rpm;
-    var mapIdx = channels.map;
-    if (rpmIdx === -1 || mapIdx === -1) return null;
+    var mapIdx = bins.loadKind === 'loadNorm' ? channels.load_norm : channels.map;
+    if (rpmIdx === -1 || mapIdx === -1 || mapIdx === undefined) return null;
 
-    var NUM_RPM_BINS = 15;
-    var NUM_LOAD_BINS = 25;
-    var RPM_WIDTH = 500;
-    var LOAD_WIDTH = 10;
+    var NUM_RPM_BINS = bins.rpmEdges.length - 1;
+    var NUM_LOAD_BINS = bins.loadEdges.length - 1;
 
     // Estimate sample period
     var samplePeriod = 0.01;
@@ -726,7 +787,7 @@ function computeKnockRpmLoadGrid(events, data, channels) {
     for (var i = 0; i < data.length; i++) {
         var rpm = data[i][rpmIdx];
         var load = data[i][mapIdx];
-        if (isNaN(rpm) || isNaN(load)) continue;
+        if (isNaN(rpm) || isNaN(load) || rpm < KNOCK_MIN_RPM) continue;
         var rBin = assignRpmBin(rpm);
         var lBin = assignLoadBin(load);
         dwellSamples[lBin][rBin]++;
@@ -765,9 +826,10 @@ function computeKnockRpmLoadGrid(events, data, channels) {
     // Tally events
     for (var e = 0; e < events.length; e++) {
         var evt = events[e];
-        if (evt.rpm === null || evt.load === null) continue;
+        var evLoad = knockLoadOf(evt);
+        if (evt.rpm === null || evLoad === null || evLoad === undefined || isNaN(evLoad)) continue;
         var rBin = assignRpmBin(evt.rpm);
-        var lBin = assignLoadBin(evt.load);
+        var lBin = assignLoadBin(evLoad);
         var hasTiming = evt.ignTiming !== null && !isNaN(evt.ignTiming);
 
         // All cylinders
@@ -816,19 +878,11 @@ function computeKnockRpmLoadGrid(events, data, channels) {
         cylinders[c] = finalizeGrid(grids[c]);
     }
 
-    // Build labels
-    var rpmLabels = [];
-    for (var r = 0; r < NUM_RPM_BINS; r++) {
-        rpmLabels.push((r * RPM_WIDTH) + '–' + ((r + 1) * RPM_WIDTH));
-    }
-    var loadLabels = [];
-    for (var l = 0; l < NUM_LOAD_BINS; l++) {
-        loadLabels.push((l * LOAD_WIDTH) + '–' + ((l + 1) * LOAD_WIDTH));
-    }
-
     return {
-        rpmLabels: rpmLabels,
-        loadLabels: loadLabels,
+        rpmLabels: bins.rpmLabels.slice(),
+        loadLabels: bins.loadLabels.slice(),
+        loadKind: bins.loadKind,
+        binSource: bins.source,
         dwellGrid: dwellGrid,
         cylinders: cylinders
     };
@@ -875,10 +929,12 @@ function computeKnockByLoadNormalized(events, data, channels) {
         dwellSamples[i] = 0;
     }
 
+    var rpmCol = channels.rpm;
     for (var r = 0; r < data.length; r++) {
         var load = data[r][mapIdx];
         if (load === null || load === undefined || isNaN(load)) continue;
-        var bin = assignLoadBin(load);
+        if (rpmCol !== -1 && !(data[r][rpmCol] >= KNOCK_MIN_RPM)) continue;
+        var bin = Math.min(NUM_BINS - 1, Math.max(0, Math.floor(load / BIN_WIDTH)));
         dwellSamples[bin]++;
     }
 
@@ -895,7 +951,7 @@ function computeKnockByLoadNormalized(events, data, channels) {
     for (var e = 0; e < events.length; e++) {
         var evt = events[e];
         if (evt.load === null || evt.load === undefined) continue;
-        var bin = assignLoadBin(evt.load);
+        var bin = Math.min(NUM_BINS - 1, Math.max(0, Math.floor(evt.load / BIN_WIDTH)));
         eventCounts[bin]++;
         levelSums[bin] += evt.knockLevel;
         if (evt.knockLevel > maxLevels[bin]) {
@@ -941,10 +997,11 @@ function computeKnockByLoadNormalized(events, data, channels) {
  */
 function computeTimingCorrelation(events) {
     // Initialize per-RPM-bin accumulators (15 bins)
-    var rpmBinSums = new Array(15);
-    var rpmBinMaxes = new Array(15);
-    var rpmBinCounts = new Array(15);
-    for (var i = 0; i < 15; i++) {
+    var NRPM = knockBins().rpmEdges.length - 1;
+    var rpmBinSums = new Array(NRPM);
+    var rpmBinMaxes = new Array(NRPM);
+    var rpmBinCounts = new Array(NRPM);
+    for (var i = 0; i < NRPM; i++) {
         rpmBinSums[i] = 0;
         rpmBinMaxes[i] = -Infinity;
         rpmBinCounts[i] = 0;
@@ -991,8 +1048,8 @@ function computeTimingCorrelation(events) {
     }
 
     // Build result arrays
-    var perRpmBin = new Array(15);
-    for (var r = 0; r < 15; r++) {
+    var perRpmBin = new Array(NRPM);
+    for (var r = 0; r < NRPM; r++) {
         if (rpmBinCounts[r] === 0) {
             perRpmBin[r] = { mean: 0, max: 0, count: 0 };
         } else {
@@ -1025,75 +1082,130 @@ function computeTimingCorrelation(events) {
 // ---------------------------------------------------------------------------
 
 /**
- * Computes timing retard statistics from the ignition timing compensation channel.
+ * Timing retard statistics.
  *
- * Analyzes the full data set for non-zero timing compensation samples, finds the
- * maximum retard value, computes the mean retard during knock events, and builds
- * time series arrays for chart rendering.
+ * Knock retard is per cylinder in "Ignition Cylinder N Knock Trim" (degrees retarded, positive = retard). When
+ * those are logged, they give the knock retard: per cylinder the largest trim and how long it was active, and
+ * the time series is the largest trim across cylinders. "Ignition Timing Compensation" is the sum of every
+ * timing compensation (temperatures, etc.), not just knock, so it is reported separately.
  *
- * @param {number[][]} data - Array of row arrays (numeric values)
- * @param {Object<string, number>} channels - The resolved channel index map from resolveChannels
- * @param {Array<Object>} events - Array of KnockEvent objects
- * @returns {Object|null} RetardStats object, or null if timing compensation channel unavailable
+ * @returns {Object|null} { source: 'knockTrim'|'timingComp', perCylinder?: [{ cylinderIndex, maxTrim, activeTime }],
+ *   maxRetard, meanDuringKnock, nonZeroCount, compensation: { min, max } | null, timeSeries: { time, values, label } }
+ *   or null when neither channel is logged
  */
 function computeTimingRetardStats(data, channels, events) {
-    // Return null if timing compensation channel is unavailable
-    if (channels.ign_timing_comp === -1) {
-        return null;
+    var trimIdx = [];
+    for (var n = 1; n <= 8; n++) {
+        var idx = channels['knock_trim_' + n];
+        if (idx !== undefined && idx !== -1) trimIdx.push({ cyl: n, idx: idx });
     }
+    var compIdx = channels.ign_timing_comp !== undefined ? channels.ign_timing_comp : -1;
+    if (!trimIdx.length && compIdx === -1) return null;
 
-    var compIdx = channels.ign_timing_comp;
-
-    // Compute non-zero count and max retard across ALL data rows
-    var nonZeroCount = 0;
-    var maxRetard = -Infinity;
-    var timeArr = [];
-    var valuesArr = [];
-
+    var dt = data.length > 1 ? data[1][0] - data[0][0] : 0.01;
+    var time = [], values = [], compMin = Infinity, compMax = -Infinity;
+    var perCyl = trimIdx.map(function (t) { return { cylinderIndex: t.cyl, maxTrim: 0, activeTime: 0 }; });
+    var nonZero = 0, maxRetard = 0;
     for (var r = 0; r < data.length; r++) {
         var row = data[r];
-        var compVal = row[compIdx];
-        var timeVal = row[0]; // Time is always column 0
-
-        // Build time series for chart rendering
-        timeArr.push(timeVal);
-        valuesArr.push(compVal);
-
-        // Count non-zero samples
-        if (compVal !== 0) {
-            nonZeroCount++;
+        if (compIdx !== -1 && !isNaN(row[compIdx])) {
+            if (row[compIdx] < compMin) compMin = row[compIdx];
+            if (row[compIdx] > compMax) compMax = row[compIdx];
         }
-
-        // Track maximum
-        if (compVal > maxRetard) {
-            maxRetard = compVal;
+        var v;
+        if (trimIdx.length) {
+            v = 0;
+            for (var k = 0; k < trimIdx.length; k++) {
+                var tr = Math.abs(row[trimIdx[k].idx]);
+                if (isNaN(tr)) continue;
+                if (tr > perCyl[k].maxTrim) perCyl[k].maxTrim = tr;
+                if (tr > 0) perCyl[k].activeTime += dt;
+                if (tr > v) v = tr;
+            }
+        } else {
+            v = row[compIdx];
         }
+        time.push(row[0]);
+        values.push(v);
+        if (v !== 0 && !isNaN(v)) nonZero++;
+        if (trimIdx.length && v > maxRetard) maxRetard = v;
     }
 
-    // Handle edge case: if data is empty, set maxRetard to 0
-    if (data.length === 0) {
-        maxRetard = 0;
-    }
-
-    // Compute mean timing retard during knock events
-    // Use events[i].ignTimingComp, skip nulls
-    var sum = 0;
-    var count = 0;
-    for (var i = 0; i < events.length; i++) {
-        var comp = events[i].ignTimingComp;
-        if (comp !== null && comp !== undefined) {
-            sum += comp;
-            count++;
-        }
-    }
-    var meanDuringKnock = count > 0 ? sum / count : 0;
+    var sum = 0, count = 0;
+    events.forEach(function (e) {
+        var v = trimIdx.length ? e.knockTrim : e.ignTimingComp;
+        if (v !== null && v !== undefined && !isNaN(v)) { sum += trimIdx.length ? Math.abs(v) : v; count++; }
+    });
 
     return {
-        nonZeroCount: nonZeroCount,
-        maxRetard: maxRetard,
-        meanDuringKnock: meanDuringKnock,
-        timeSeries: { time: timeArr, values: valuesArr }
+        source: trimIdx.length ? 'knockTrim' : 'timingComp',
+        perCylinder: trimIdx.length ? perCyl.map(function (p) {
+            return { cylinderIndex: p.cylinderIndex, maxTrim: Math.round(p.maxTrim * 10) / 10, activeTime: Math.round(p.activeTime * 10) / 10 };
+        }) : null,
+        maxRetard: trimIdx.length ? maxRetard : (compMin < Infinity ? compMin : 0),
+        meanDuringKnock: count ? sum / count : 0,
+        nonZeroCount: nonZero,
+        compensation: compMin < Infinity ? { min: compMin, max: compMax } : null,
+        timeSeries: { time: time, values: values,
+                      label: trimIdx.length ? 'Knock retard (largest cylinder trim)' : 'Ignition Timing Compensation (all compensations)' }
     };
+}
+
+// ---------------------------------------------------------------------------
+// Knock Sensor Health
+// ---------------------------------------------------------------------------
+
+/** A cylinder (or knock input) whose typical level is below this fraction of the others' is flagged. */
+var KNOCK_WEAK_RATIO = 0.25;
+
+/**
+ * Background knock level per cylinder while the engine runs. A healthy sensor always hears some engine noise,
+ * so a cylinder (or all cylinders on one knock input) reading far below the others suggests a sensor, wiring,
+ * gain or input fault — knock there may go undetected.
+ *
+ * @param {Array<string|null>} inputs - knock input per cylinder (index 0 = cylinder 1), from the tune, or null
+ * @returns {{ perCylinder: [{ cylinderIndex, median, p99, input }], weak: [{ label, cylinders, median, othersMedian }] }}
+ */
+function computeKnockSensorHealth(data, channels, inputs) {
+    var rpmIdx = channels.rpm, per = [];
+    for (var n = 1; n <= 8; n++) {
+        var idx = channels['knock_cyl_' + n];
+        if (idx === -1 || idx === undefined) continue;
+        var vals = [];
+        for (var r = 0; r < data.length; r++) {
+            if (rpmIdx !== -1 && !(data[r][rpmIdx] >= KNOCK_MIN_RPM)) continue;
+            var v = data[r][idx];
+            if (!isNaN(v)) vals.push(v);
+        }
+        if (!vals.length) continue;
+        vals.sort(function (a, b) { return a - b; });
+        per.push({ cylinderIndex: n, median: vals[vals.length >> 1], p99: vals[Math.floor(vals.length * 0.99)],
+                   input: inputs ? inputs[n - 1] || null : null });
+    }
+    var weak = [];
+    function med(list) { var s = list.slice().sort(function (a, b) { return a - b; }); return s.length ? s[s.length >> 1] : 0; }
+    if (per.length >= 2) {
+        var groups = {};
+        per.forEach(function (p) { var g = p.input || ('Cylinder ' + p.cylinderIndex); (groups[g] = groups[g] || []).push(p); });
+        Object.keys(groups).forEach(function (g) {
+            var mine = groups[g], others = per.filter(function (p) { return mine.indexOf(p) < 0; });
+            if (!others.length) return;
+            var m = med(mine.map(function (p) { return p.median; })), o = med(others.map(function (p) { return p.median; }));
+            if (o > 0 && m < o * KNOCK_WEAK_RATIO) {
+                weak.push({ label: g, cylinders: mine.map(function (p) { return p.cylinderIndex; }), median: m, othersMedian: o });
+            }
+        });
+        // Without knock inputs from the tune, report the weak cylinders together, against the cylinders that are not weak.
+        if (!inputs && weak.length > 1) {
+            var cyls = [], weakSet = {};
+            weak.forEach(function (w) { cyls = cyls.concat(w.cylinders); weakSet[w.cylinders[0]] = true; });
+            var rest = per.filter(function (p) { return !weakSet[p.cylinderIndex]; });
+            var wm = med(per.filter(function (p) { return weakSet[p.cylinderIndex]; }).map(function (p) { return p.median; }));
+            var om = med(rest.map(function (p) { return p.median; }));
+            weak = rest.length ? [{ label: 'Cylinders ' + cyls.join(', '), cylinders: cyls, median: wm, othersMedian: om }] : [];
+        }
+    }
+    return { perCylinder: per, weak: weak };
 }
 
 // ---------------------------------------------------------------------------
@@ -1113,8 +1225,9 @@ function computeTimingRetardStats(data, channels, events) {
  */
 function identifyWorstConditions(events) {
     // --- Worst RPM Bin ---
-    var rpmBinCounts = new Array(15);
-    for (var i = 0; i < 15; i++) rpmBinCounts[i] = 0;
+    var bins = knockBins(), NRPM = bins.rpmEdges.length - 1, NLOAD = bins.loadEdges.length - 1;
+    var rpmBinCounts = new Array(NRPM);
+    for (var i = 0; i < NRPM; i++) rpmBinCounts[i] = 0;
     var hasRpmData = false;
 
     for (var e = 0; e < events.length; e++) {
@@ -1130,31 +1243,30 @@ function identifyWorstConditions(events) {
     if (hasRpmData) {
         var maxRpmCount = 0;
         var maxRpmIdx = 0;
-        for (var r = 0; r < 15; r++) {
+        for (var r = 0; r < NRPM; r++) {
             if (rpmBinCounts[r] > maxRpmCount) {
                 maxRpmCount = rpmBinCounts[r];
                 maxRpmIdx = r;
             }
         }
-        var rpmLow = maxRpmIdx * 500;
-        var rpmHigh = rpmLow + 500;
         worstRpmBin = {
             binIndex: maxRpmIdx,
-            rpmRange: rpmLow + '-' + rpmHigh + ' RPM',
+            rpmRange: (bins.source === 'tune' ? 'around ' + bins.rpmLabels[maxRpmIdx] : bins.rpmLabels[maxRpmIdx].replace('–', '-')) + ' RPM',
             count: maxRpmCount
         };
     }
 
     // --- Worst Load Bin ---
-    var loadBinCounts = new Array(25);
-    for (var i = 0; i < 25; i++) loadBinCounts[i] = 0;
+    var loadBinCounts = new Array(NLOAD);
+    for (var i = 0; i < NLOAD; i++) loadBinCounts[i] = 0;
     var hasLoadData = false;
 
     for (var e = 0; e < events.length; e++) {
         var evt = events[e];
-        if (evt.load !== null && evt.load !== undefined && !isNaN(evt.load)) {
+        var evLoad = knockLoadOf(evt);
+        if (evLoad !== null && evLoad !== undefined && !isNaN(evLoad)) {
             hasLoadData = true;
-            var loadBin = assignLoadBin(evt.load);
+            var loadBin = assignLoadBin(evLoad);
             loadBinCounts[loadBin]++;
         }
     }
@@ -1163,17 +1275,16 @@ function identifyWorstConditions(events) {
     if (hasLoadData) {
         var maxLoadCount = 0;
         var maxLoadIdx = 0;
-        for (var l = 0; l < 25; l++) {
+        for (var l = 0; l < NLOAD; l++) {
             if (loadBinCounts[l] > maxLoadCount) {
                 maxLoadCount = loadBinCounts[l];
                 maxLoadIdx = l;
             }
         }
-        var loadLow = maxLoadIdx * 10;
-        var loadHigh = loadLow + 10;
         worstLoadBin = {
             binIndex: maxLoadIdx,
-            loadRange: loadLow + '-' + loadHigh + ' kPa',
+            loadRange: bins.loadKind === 'loadNorm' ? 'load (normalised) around ' + bins.loadLabels[maxLoadIdx]
+                : bins.loadLabels[maxLoadIdx].replace('–', '-') + ' kPa',
             count: maxLoadCount
         };
     }
@@ -1225,56 +1336,38 @@ function identifyWorstConditions(events) {
 // ---------------------------------------------------------------------------
 
 /**
- * Computes per-cylinder timing reduction recommendations based on knock event
- * distribution. Cylinders with more knock events receive proportionally larger
- * timing reductions, scaled relative to the cylinder with the fewest events.
+ * Timing advice from the knock events (which are already above the ECU's threshold).
  *
- * Formula: reductionDeg = (count - minCount) / (maxCount - minCount) * 5
- * The cylinder with the fewest events gets 0 degrees.
- * All reductions are capped at 5 degrees maximum.
- * Results are rounded to 1 decimal place.
+ * Per cylinder with knock: a suggested reduction in the cells where it knocked, by how far the worst event went
+ * over the threshold — 1° up to 1.5× the threshold, 2° up to 2×, 3° beyond. A cylinder with a single event gets
+ * no reduction (re-log to confirm). When most cylinders knock, the advice is to reduce Ignition Timing Main in
+ * those cells instead of trimming cylinders.
  *
- * @param {Object} distribution - CylinderDistribution object with counts[8] and total
- * @returns {Array<{cylinderIndex: number, reductionDeg: number}>} Array of 8 TimingRecommendation objects, or empty array if total is zero
+ * @param {Array<Object>} events - knock events (with ratio = peak level / threshold)
+ * @returns {Array<{ cylinderIndex, events, maxRatio, reductionDeg, note }>} only cylinders with events; [] for none
  */
-function computeTimingRecommendations(distribution) {
-    // Return empty array if total events is zero
-    if (distribution.total === 0) {
-        return [];
-    }
-
-    var counts = distribution.counts;
-
-    // Find minCount and maxCount from distribution.counts
-    var minCount = counts[0];
-    var maxCount = counts[0];
-    for (var i = 1; i < 8; i++) {
-        if (counts[i] < minCount) minCount = counts[i];
-        if (counts[i] > maxCount) maxCount = counts[i];
-    }
-
-    var recommendations = [];
-    for (var c = 0; c < 8; c++) {
-        var reductionDeg;
-        if (maxCount === minCount) {
-            // All cylinders have equal counts — all get 0 degrees
-            reductionDeg = 0;
+function computeTimingRecommendations(events) {
+    if (!events || !events.length) return [];
+    var byCyl = {};
+    events.forEach(function (e) {
+        var c = byCyl[e.cylinderIndex] = byCyl[e.cylinderIndex] || { cylinderIndex: e.cylinderIndex, events: 0, maxRatio: 0 };
+        c.events++;
+        if (e.ratio !== null && e.ratio !== undefined && e.ratio > c.maxRatio) c.maxRatio = e.ratio;
+    });
+    var list = Object.keys(byCyl).map(function (k) { return byCyl[k]; }).sort(function (a, b) { return a.cylinderIndex - b.cylinderIndex; });
+    var widespread = list.length >= 5;
+    list.forEach(function (c) {
+        c.maxRatio = Math.round(c.maxRatio * 100) / 100;
+        if (c.events < 2) {
+            c.reductionDeg = 0;
+            c.note = 'Single event — re-log to confirm before changing timing.';
         } else {
-            // Proportional scaling: (count - minCount) / (maxCount - minCount) * 5
-            reductionDeg = (counts[c] - minCount) / (maxCount - minCount) * 5;
-            // Cap at 5 degrees maximum
-            reductionDeg = Math.min(reductionDeg, 5);
+            c.reductionDeg = c.maxRatio <= 1.5 ? 1 : c.maxRatio <= 2 ? 2 : 3;
+            c.note = widespread ? 'Most cylinders knock: reduce Ignition Timing Main in these cells rather than trimming cylinders.'
+                : 'Cylinder trim in the cells where it knocked.';
         }
-        // Round to 1 decimal place
-        reductionDeg = Math.round(reductionDeg * 10) / 10;
-
-        recommendations.push({
-            cylinderIndex: c + 1,
-            reductionDeg: reductionDeg
-        });
-    }
-
-    return recommendations;
+    });
+    return list;
 }
 
 // ---------------------------------------------------------------------------
@@ -1282,60 +1375,67 @@ function computeTimingRecommendations(distribution) {
 // ---------------------------------------------------------------------------
 
 /**
- * Generates diagnostic summary messages based on knock analysis results.
+ * Diagnostic summary messages.
  *
- * If no knock events were detected (distribution.total === 0), returns a single
- * message indicating no events at the current threshold. Otherwise, generates
- * messages identifying the worst cylinder, RPM band, and load range.
- *
- * @param {Object} distribution - CylinderDistribution object with counts, percentages, total, ranking
- * @param {Object} worstConditions - WorstConditions object with worstRpmBin, worstLoadBin, worstGear
- * @param {Object|null} retardStats - RetardStats object or null if timing comp unavailable
- * @returns {string[]} Array of diagnostic message strings
+ * @param {Object} distribution - per-cylinder event counts
+ * @param {Object} worstConditions
+ * @param {Object|null} retardStats - from computeTimingRetardStats
+ * @param {Object} [extra] - { health: from computeKnockSensorHealth, thresholdLabel: string, events: [] }
+ * @returns {string[]}
  */
-function generateDiagnostics(distribution, worstConditions, retardStats) {
-    // No knock events case
-    if (distribution.total === 0) {
-        return ['No knock events detected at the current threshold.'];
-    }
-
+function generateDiagnostics(distribution, worstConditions, retardStats, extra) {
+    extra = extra || {};
     var messages = [];
 
-    // Message 1: Cylinder with highest knock percentage
+    (extra.health && extra.health.weak || []).forEach(function (w) {
+        var times = w.median > 0 ? Math.round(w.othersMedian / w.median) : null;
+        messages.push('KNOCK SENSOR CHECK: ' + w.label + ' (cylinder' + (w.cylinders.length > 1 ? 's ' : ' ') + w.cylinders.join(', ') +
+            ') reads a typical knock level of ' + w.median.toFixed(2) + '%, ' + (times ? 'about ' + times + '× lower than' : 'far below') +
+            ' the other cylinders (' + w.othersMedian.toFixed(2) + '%). A working sensor always hears some engine noise, so check that ' +
+            'sensor, its wiring and connector, its mounting torque, and the knock gain for these cylinders — knock there may go undetected.');
+    });
+
+    if (distribution.total === 0) {
+        messages.push('No knock events: no cylinder\'s knock level went above ' + (extra.thresholdLabel || 'the threshold') + '.');
+        return messages;
+    }
+
     var worstCyl = distribution.ranking[0];
     var worstPct = distribution.percentages[worstCyl - 1];
     messages.push('Cylinder ' + worstCyl + ' has the highest knock activity at ' + worstPct + '% of total events.');
 
-    // Message 2: Worst RPM band (skip if null)
     if (worstConditions.worstRpmBin !== null) {
-        messages.push('Most knock events occur in the ' + worstConditions.worstRpmBin.rpmRange + ' RPM band (' + worstConditions.worstRpmBin.count + ' events).');
+        messages.push('Most knock events occur in the ' + worstConditions.worstRpmBin.rpmRange + ' band (' + worstConditions.worstRpmBin.count + ' events).');
     }
-
-    // Message 3: Worst load range (skip if null)
     if (worstConditions.worstLoadBin !== null) {
-        messages.push('Most knock events occur in the ' + worstConditions.worstLoadBin.loadRange + ' load range (' + worstConditions.worstLoadBin.count + ' events).');
+        messages.push('Most knock events occur in the ' + worstConditions.worstLoadBin.loadRange + ' range (' + worstConditions.worstLoadBin.count + ' events).');
     }
 
-    // Message 4: Cylinder trim advisor
-    // If one cylinder has significantly more knock than others, recommend a per-cylinder trim
+    // One cylinder with far more knock than the rest.
     var avgCount = distribution.total / distribution.counts.length;
     for (var c = 0; c < distribution.counts.length; c++) {
         var cylCount = distribution.counts[c];
         if (cylCount > avgCount * 2 && cylCount > 5) {
             var cylNum = c + 1;
-            var pct = distribution.percentages[c];
             var rpmZone = worstConditions.worstRpmBin ? worstConditions.worstRpmBin.rpmRange : 'all RPM';
             var loadZone = worstConditions.worstLoadBin ? worstConditions.worstLoadBin.loadRange : 'all loads';
-
-            messages.push('CYLINDER TRIM RECOMMENDATION: Cylinder ' + cylNum + ' accounts for ' + pct + '% of knock events (' + cylCount + ' total). Consider adding -2° to -3° cylinder trim for Cyl ' + cylNum + ' in the ' + rpmZone + ' RPM / ' + loadZone + ' zone. After applying the trim, re-log and verify: if knock disappears, it was real knock and the trim is correct. If knock persists at the same level, it is likely sensor noise — reduce the knock sensor gain for Cyl ' + cylNum + ' instead.');
+            messages.push('CYLINDER TRIM RECOMMENDATION: Cylinder ' + cylNum + ' accounts for ' + distribution.percentages[c] + '% of knock events (' +
+                cylCount + ' total). Consider a cylinder trim of -1° to -2° for Cyl ' + cylNum + ' in the ' + rpmZone + ' / ' + loadZone +
+                ' zone. After applying the trim, re-log and verify: if knock disappears, it was real knock and the trim is correct. ' +
+                'If it persists at the same level, it is more likely noise on that cylinder — check its knock gain and the knock window.');
         }
     }
 
-    // Message 5: Noise vs real knock guidance
-    if (distribution.total > 20 && retardStats && retardStats.avgRetard < 0.5) {
-        messages.push('NOTE: High event count but very low average retard (' + retardStats.avgRetard.toFixed(1) + '°) suggests the knock threshold may be set too low, causing false triggers. Consider raising the knock threshold by 10-20% before adding cylinder trims.');
+    // Many events but the ECU barely retarded: the threshold may be too sensitive for this engine's noise.
+    if (retardStats && retardStats.source === 'knockTrim' && distribution.total > 20 && retardStats.meanDuringKnock < 0.5) {
+        messages.push('NOTE: ' + distribution.total + ' knock events but an average knock retard of only ' + retardStats.meanDuringKnock.toFixed(1) +
+            '° during them. Check whether the events coincide with noise sources (gear changes, valvetrain at high rpm) before ' +
+            'reducing timing; the knock threshold may be too sensitive in that range.');
     }
-
+    if (retardStats && retardStats.source === 'timingComp') {
+        messages.push('Knock retard per cylinder is not in this log: log "Ignition Cylinder 1–8 Knock Trim" to see how much the ECU ' +
+            'retarded. "Ignition Timing Compensation" (shown in the chart) includes every compensation, not just knock.');
+    }
     return messages;
 }
 
@@ -1469,6 +1569,7 @@ function computeMedian(values) {
  */
 let cachedColumnNames = null;
 let cachedData = null;
+let cachedSettings = null;   // { threshold: % | table, thresholdLabel, ignitionAxes, inputs } from the page
 
 /**
  * Handles incoming messages from the main thread.
@@ -1482,11 +1583,13 @@ self.onmessage = function(e) {
 
     try {
         if (msg.type === 'analyze') {
+            cachedSettings = msg.settings || null;
             handleAnalyzeCsv(msg.logText);
         } else if (msg.type === 'analyze_ld') {
+            cachedSettings = msg.settings || null;
             handleAnalyzeLd(msg.buffer);
         } else if (msg.type === 'reanalyze') {
-            handleReanalyze(msg.threshold);
+            handleReanalyze(msg.settings || msg.threshold);
         }
     } catch (err) {
         self.postMessage({ type: 'error', message: err.message || 'Unexpected error during analysis' });
@@ -1548,8 +1651,7 @@ function handleAnalyzeCsv(logText) {
     cachedColumnNames = columnNames;
     cachedData = data;
 
-    // Run analysis pipeline with default threshold
-    runAnalysisPipeline(5);
+    runAnalysisPipeline(cachedSettings);
 }
 
 /**
@@ -1584,8 +1686,7 @@ function handleAnalyzeLd(buffer) {
     cachedColumnNames = result.columnNames;
     cachedData = result.data;
 
-    // Run analysis pipeline with default threshold
-    runAnalysisPipeline(5);
+    runAnalysisPipeline(cachedSettings);
 }
 
 /**
@@ -1599,7 +1700,7 @@ function handleReanalyze(threshold) {
         return;
     }
 
-    // Run analysis pipeline with the provided threshold (skip parsing, use cached data)
+    // Run analysis pipeline with the provided settings (skip parsing, use cached data)
     runAnalysisPipeline(threshold);
 }
 
@@ -1608,9 +1709,13 @@ function handleReanalyze(threshold) {
  * Calls resolveChannels → classifyKnockEvents → all analysis functions in sequence.
  * Posts progress updates, channel warnings, and the final result message.
  *
- * @param {number} threshold - Knock threshold percentage (0–100)
+ * @param {number|Object} settings - fixed threshold %, or { threshold: % | table, thresholdLabel, ignitionAxes, inputs }
  */
-function runAnalysisPipeline(threshold) {
+function runAnalysisPipeline(settings) {
+    if (settings === null || settings === undefined) settings = {};
+    if (typeof settings === 'number') settings = { threshold: settings };
+    var threshold = settings.threshold !== undefined && settings.threshold !== null ? settings.threshold : KNOCK_DEFAULT_THRESHOLD;
+    var thresholdLabel = settings.thresholdLabel || (typeof threshold === 'number' ? 'the ' + threshold + '% threshold' : 'the Knock Threshold table');
     self.postMessage({ type: 'progress', phase: 'Resolving channels', percent: 0 });
 
     // Step 1: Resolve channels
@@ -1625,8 +1730,15 @@ function runAnalysisPipeline(threshold) {
 
     self.postMessage({ type: 'progress', phase: 'Classifying knock events', percent: 10 });
 
+    configureKnockBins(settings.ignitionAxes || null, resolved.load_norm !== -1);
+    if (settings.ignitionAxes && resolved.load_norm === -1) {
+        self.postMessage({ type: 'warning', message: 'Engine Load Normalised is not logged, so the knock grid uses the tune\'s engine speed sites ' +
+            'with 10 kPa MAP rows instead of the Ignition Timing Main load sites. Log "Engine Load Normalised" to match the table.' });
+    }
+
     // Step 2: Classify knock events
     var events = classifyKnockEvents(cachedData, resolved, threshold);
+    var health = computeKnockSensorHealth(cachedData, resolved, settings.inputs || null);
 
     self.postMessage({ type: 'progress', phase: 'Computing cylinder distribution', percent: 25 });
 
@@ -1656,7 +1768,7 @@ function runAnalysisPipeline(threshold) {
     self.postMessage({ type: 'progress', phase: 'Computing timing recommendations', percent: 75 });
 
     // Step 8: Compute timing recommendations
-    var recommendations = computeTimingRecommendations(distribution);
+    var recommendations = computeTimingRecommendations(events);
 
     self.postMessage({ type: 'progress', phase: 'Computing knock vs load normalized', percent: 80 });
 
@@ -1669,7 +1781,7 @@ function runAnalysisPipeline(threshold) {
     self.postMessage({ type: 'progress', phase: 'Generating diagnostics', percent: 85 });
 
     // Step 9: Generate diagnostics
-    var diagnostics = generateDiagnostics(distribution, worstConditions, retardStats);
+    var diagnostics = generateDiagnostics(distribution, worstConditions, retardStats, { health: health, thresholdLabel: thresholdLabel });
 
     self.postMessage({ type: 'progress', phase: 'Preparing results', percent: 95 });
 
@@ -1699,7 +1811,7 @@ function runAnalysisPipeline(threshold) {
             }
             // Trim to match downsampled values length
             downsampledTime = downsampledTime.slice(0, downsampledValues.length);
-            retardTimeSeries = { time: downsampledTime, values: downsampledValues };
+            retardTimeSeries = { time: downsampledTime, values: downsampledValues, label: ts.label };
         } else {
             retardTimeSeries = ts;
         }
@@ -1720,7 +1832,12 @@ function runAnalysisPipeline(threshold) {
             knockByLoad: knockByLoad,
             knockRpmLoadGrid: knockRpmLoadGrid,
             diagnostics: diagnostics,
-            threshold: threshold
+            sensorHealth: health,
+            events: events.slice(0, 2000),
+            totalEvents: events.length,
+            threshold: threshold,
+            thresholdLabel: thresholdLabel,
+            binSource: knockBins().source
         },
         chartData: {
             knockEvents: events,
@@ -1730,4 +1847,12 @@ function runAnalysisPipeline(threshold) {
             timingCorrelation: timingCorrelation
         }
     });
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { classifyKnockEvents: classifyKnockEvents, knockThresholdAt: knockThresholdAt, configureKnockBins: configureKnockBins,
+        assignRpmBin: assignRpmBin, assignLoadBin: assignLoadBin, computeTimingRecommendations: computeTimingRecommendations,
+        computeTimingRetardStats: computeTimingRetardStats, computeKnockSensorHealth: computeKnockSensorHealth,
+        generateDiagnostics: generateDiagnostics, resolveChannels: resolveChannels, computeCylinderDistribution: computeCylinderDistribution,
+        identifyWorstConditions: identifyWorstConditions, computeKnockRpmLoadGrid: computeKnockRpmLoadGrid, computeHeatmapBins: computeHeatmapBins };
 }

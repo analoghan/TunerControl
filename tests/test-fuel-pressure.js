@@ -29,18 +29,18 @@ describe('analyzeFuelPressure', function () {
 
     it('returns null when fuel_press_di channel is not available', function () {
         var channels = makeChannels({ fuel_press_di: -1 });
-        var data = [[2000, 1.0, 1.5]];
+        var data = [[2000, 10, 15]];
         var result = analyzeFuelPressure(data, channels);
         assert.equal(result, null);
     });
 
-    it('converts dMPa to bar by multiplying by 100', function () {
+    it('converts MPa (logged as dMPa, a differential pressure) to bar by multiplying by 10', function () {
         // Columns: [rpm, fuel_press_di]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1 });
         var data = [
-            [2000, 1.5],   // 1.5 dMPa = 150 bar
-            [2000, 2.0],   // 2.0 dMPa = 200 bar
-            [2000, 1.0],   // 1.0 dMPa = 100 bar
+            [2000, 15],   // 15 MPa = 150 bar
+            [2000, 20],   // 20 MPa = 200 bar
+            [2000, 10],   // 10 MPa = 100 bar
         ];
         var result = analyzeFuelPressure(data, channels);
         assert.equal(result.minBar, 100);
@@ -52,10 +52,10 @@ describe('analyzeFuelPressure', function () {
         // Columns: [rpm, fuel_press_di]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1 });
         var data = [
-            [2000, 1.5],   // 150 bar
-            [2000, 1.5],   // 150 bar
-            [2000, 2.0],   // 200 bar
-            [2000, 1.0],   // 100 bar
+            [2000, 15],   // 150 bar
+            [2000, 15],   // 150 bar
+            [2000, 20],   // 200 bar
+            [2000, 10],   // 100 bar
         ];
         var result = analyzeFuelPressure(data, channels);
         assert.equal(result.minBar, 100);
@@ -64,27 +64,29 @@ describe('analyzeFuelPressure', function () {
         assert.ok(result.stdBar > 0);
     });
 
-    it('counts samples below 150 bar', function () {
-        // Columns: [rpm, fuel_press_di]
-        var channels = makeChannels({ rpm: 0, fuel_press_di: 1 });
+    it('counts samples more than 10 bar below aim, only while the engine runs', function () {
+        // Columns: [rpm, fuel_press_di, fuel_press_di_aim]
+        var channels = makeChannels({ rpm: 0, fuel_press_di: 1, fuel_press_di_aim: 2 });
         var data = [
-            [2000, 1.5],   // 150 bar — NOT below 150
-            [2000, 1.49],  // 149 bar — below 150
-            [2000, 2.0],   // 200 bar — NOT below 150
-            [2000, 1.0],   // 100 bar — below 150
+            [2000, 14, 15],   // 10 bar below — not more than 10
+            [2000, 13.9, 15], // 11 bar below
+            [2000, 2, 2],     // on aim at idle (20 bar)
+            [2000, 8, 10],    // 20 bar below
+            [0, 0, 15],       // engine stopped — ignored
         ];
         var result = analyzeFuelPressure(data, channels);
-        assert.equal(result.below150BarCount, 2);
-        assert.closeTo(result.below150BarPct, 50.0, 0.01);
+        assert.equal(result.belowAimCount, 2);
+        assert.closeTo(result.belowAimPct, 50.0, 0.01);
+        assert.equal(result.minBar, 20, 'the stopped sample is not counted');
     });
 
     it('computes pressure error vs aim when aim channel available', function () {
         // Columns: [rpm, fuel_press_di, fuel_press_di_aim]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1, fuel_press_di_aim: 2 });
         var data = [
-            [2000, 1.5, 1.5],   // error = 0 bar
-            [2000, 1.6, 1.5],   // error = 10 bar
-            [2000, 1.4, 1.5],   // error = -10 bar
+            [2000, 15, 15],   // error = 0 bar
+            [2000, 16, 15],   // error = 10 bar
+            [2000, 14, 15],   // error = -10 bar
         ];
         var result = analyzeFuelPressure(data, channels);
         assert.closeTo(result.meanErrorBar, 0, 0.01);
@@ -96,8 +98,8 @@ describe('analyzeFuelPressure', function () {
         // Columns: [rpm, fuel_press_di]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1, fuel_press_di_aim: -1 });
         var data = [
-            [2000, 1.5],
-            [2000, 2.0],
+            [2000, 15],
+            [2000, 20],
         ];
         var result = analyzeFuelPressure(data, channels);
         assert.equal(result.meanErrorBar, null);
@@ -109,10 +111,10 @@ describe('analyzeFuelPressure', function () {
         // Columns: [rpm, fuel_press_di, fuel_press_di_aim]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1, fuel_press_di_aim: 2 });
         var data = [
-            [2000, 1.5, 1.5],    // error = 0 bar — not large
-            [2000, 1.75, 1.5],   // error = 25 bar — large
-            [2000, 1.2, 1.5],    // error = -30 bar — large
-            [2000, 1.52, 1.5],   // error = 2 bar — not large
+            [2000, 15, 15],    // error = 0 bar — not large
+            [2000, 17.5, 15],   // error = 25 bar — large
+            [2000, 12, 15],    // error = -30 bar — large
+            [2000, 15.2, 15],   // error = 2 bar — not large
         ];
         var result = analyzeFuelPressure(data, channels);
         assert.equal(result.largeErrorCount, 2);
@@ -124,7 +126,7 @@ describe('analyzeFuelPressure', function () {
         // Create 1001 samples with large error
         var data = [];
         for (var i = 0; i < 1001; i++) {
-            data.push([2000, 1.75, 1.5]);  // error = 25 bar
+            data.push([2000, 17.5, 15]);  // error = 25 bar
         }
         var result = analyzeFuelPressure(data, channels);
         assert.equal(result.largeErrorCount, 1001);
@@ -140,7 +142,7 @@ describe('analyzeFuelPressure', function () {
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1, fuel_press_di_aim: 2 });
         var data = [];
         for (var i = 0; i < 1000; i++) {
-            data.push([2000, 1.75, 1.5]);  // error = 25 bar
+            data.push([2000, 17.5, 15]);  // error = 25 bar
         }
         var result = analyzeFuelPressure(data, channels);
         assert.equal(result.largeErrorCount, 1000);
@@ -154,10 +156,10 @@ describe('analyzeFuelPressure', function () {
         // Columns: [rpm, fuel_press_di, lambda_b1]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1, lambda_b1: 2 });
         var data = [
-            [2000, 1.5, 1.10],   // lean spike, 150 bar
-            [2000, 2.0, 1.00],   // not lean, 200 bar
-            [2000, 1.0, 1.10],   // lean spike, 100 bar
-            [2000, 2.0, 1.00],   // not lean, 200 bar
+            [2000, 15, 1.10],   // lean spike, 150 bar
+            [2000, 20, 1.00],   // not lean, 200 bar
+            [2000, 10, 1.10],   // lean spike, 100 bar
+            [2000, 20, 1.00],   // not lean, 200 bar
         ];
         var result = analyzeFuelPressure(data, channels);
         // Lean spike mean = (150 + 100) / 2 = 125 bar
@@ -170,10 +172,10 @@ describe('analyzeFuelPressure', function () {
         // Columns: [rpm, fuel_press_di, lambda_b1]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1, lambda_b1: 2 });
         var data = [
-            [2000, 1.2, 1.10],   // lean spike, 120 bar
-            [2000, 2.0, 1.00],   // not lean, 200 bar
-            [2000, 1.3, 1.10],   // lean spike, 130 bar
-            [2000, 2.0, 1.00],   // not lean, 200 bar
+            [2000, 12, 1.10],   // lean spike, 120 bar
+            [2000, 20, 1.00],   // not lean, 200 bar
+            [2000, 13, 1.10],   // lean spike, 130 bar
+            [2000, 20, 1.00],   // not lean, 200 bar
         ];
         var result = analyzeFuelPressure(data, channels);
         // Lean spike mean = (120 + 130) / 2 = 125 bar
@@ -189,10 +191,10 @@ describe('analyzeFuelPressure', function () {
         // Columns: [rpm, fuel_press_di, lambda_b1]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1, lambda_b1: 2 });
         var data = [
-            [2000, 1.5, 1.10],   // lean spike, 150 bar
-            [2000, 1.6, 1.00],   // not lean, 160 bar
-            [2000, 1.5, 1.10],   // lean spike, 150 bar
-            [2000, 1.6, 1.00],   // not lean, 160 bar
+            [2000, 15, 1.10],   // lean spike, 150 bar
+            [2000, 16, 1.00],   // not lean, 160 bar
+            [2000, 15, 1.10],   // lean spike, 150 bar
+            [2000, 16, 1.00],   // not lean, 160 bar
         ];
         var result = analyzeFuelPressure(data, channels);
         // Lean spike mean = 150, overall mean = 155, drop = 5 bar <= 10
@@ -206,8 +208,8 @@ describe('analyzeFuelPressure', function () {
         // Columns: [rpm, fuel_press_di]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1, lambda_b1: -1, lambda_avg: -1 });
         var data = [
-            [2000, 1.5],
-            [2000, 2.0],
+            [2000, 15],
+            [2000, 20],
         ];
         var result = analyzeFuelPressure(data, channels);
         assert.equal(result.leanSpikeFPMeanBar, null);
@@ -217,8 +219,8 @@ describe('analyzeFuelPressure', function () {
         // Columns: [rpm, fuel_press_di, lambda_b1]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1, lambda_b1: 2 });
         var data = [
-            [2000, 1.5, 1.00],   // not lean
-            [2000, 2.0, 0.95],   // not lean
+            [2000, 15, 1.00],   // not lean
+            [2000, 20, 0.95],   // not lean
         ];
         var result = analyzeFuelPressure(data, channels);
         assert.equal(result.leanSpikeFPMeanBar, null);
@@ -228,18 +230,18 @@ describe('analyzeFuelPressure', function () {
         // Columns: [rpm, fuel_press_di]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1 });
         var data = [
-            [2000, 1.5],       // 150 bar
-            [2000, NaN],       // skip
-            [2000, 2.0],       // 200 bar
+            [2000, 15],       // 150 bar
+            [2000, NaN],      // skip
+            [2000, 20],       // 200 bar
         ];
         var result = analyzeFuelPressure(data, channels);
         assert.closeTo(result.meanBar, 175, 0.01);
-        assert.equal(result.below150BarCount, 0);
+        assert.equal(result.belowAimCount, null, 'no aim channel');
     });
 
     it('sets channelUsed to fuel_press_di', function () {
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1 });
-        var data = [[2000, 1.5]];
+        var data = [[2000, 15]];
         var result = analyzeFuelPressure(data, channels);
         assert.equal(result.channelUsed, 'fuel_press_di');
     });
@@ -248,8 +250,8 @@ describe('analyzeFuelPressure', function () {
         // Columns: [rpm, fuel_press_di, lambda_b1, lambda_avg]
         var channels = makeChannels({ rpm: 0, fuel_press_di: 1, lambda_b1: 2, lambda_avg: 3 });
         var data = [
-            [2000, 1.5, 1.10, 1.00],   // lean by b1, not by avg
-            [2000, 2.0, 1.00, 1.10],   // not lean by b1, lean by avg
+            [2000, 15, 1.10, 1.00],   // lean by b1, not by avg (150 bar)
+            [2000, 20, 1.00, 1.10],   // not lean by b1, lean by avg
         ];
         var result = analyzeFuelPressure(data, channels);
         // Only first sample is lean (using lambda_b1)

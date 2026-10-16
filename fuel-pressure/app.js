@@ -116,8 +116,12 @@ function handleAnalyzeClick() {
         };
 
         if (isLD) {
+            lastRunFile = selectedFile;
+            logPanelReady = null;
             worker.postMessage({ type: 'analyze_ld', buffer: reader.result });
         } else {
+            lastRunFile = selectedFile;
+            logPanelReady = null;
             worker.postMessage({ type: 'analyze', logText: reader.result });
         }
     };
@@ -226,6 +230,8 @@ function renderReport(analysis) {
     renderChannelMapping(analysis.channelMapping);
     renderWarnings(analysis.channelWarnings);
     renderSummary(analysis);
+    renderErrorGrid(analysis.errorGrid);
+    renderAimSteps(analysis.transientEvents);
     renderPressurePwImpact(analysis.pressurePwImpact);
     renderDiagnostics(analysis);
 }
@@ -313,9 +319,73 @@ function renderSummary(analysis) {
         analysis.maxUndershoot < -5 ? 'stat-warning' : '');
     addStat(grid, analysis.pctWithinTolerance.toFixed(1) + '%', 'Within \u00B12 bar',
         analysis.pctWithinTolerance > 95 ? 'stat-healthy' : (analysis.pctWithinTolerance < 80 ? 'stat-warning' : ''));
-    addStat(grid, analysis.transientEvents.length.toString(), 'Transient Events', '');
+    addStat(grid, analysis.transientEvents.length.toString(), 'Aim Steps', '');
+    if (analysis.pump) {
+        addStat(grid, analysis.pump.maxControl + '%', 'Highest Pump Control', '');
+        addStat(grid, analysis.pump.pctUndershootAtLimit + '%', 'Undershoot With Pump Near Max',
+            analysis.pump.likelyLimited ? 'stat-warning' : '');
+    }
 
     content.appendChild(grid);
+}
+
+var lastRunFile = null;                      // the log of the shown results, for the log panel
+var logPanel = null, logPanelReady = null;
+
+function fpEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+function renderErrorGrid(grid) {
+    var block = document.getElementById('report-grid'), content = document.getElementById('grid-content');
+    block.hidden = !grid;
+    if (!grid) return;
+    var html = '<table class="fp-table"><thead><tr><th>MAP \\ RPM</th>' + grid.rpmLabels.map(function (l) { return '<th>' + l + '</th>'; }).join('') +
+        '</tr></thead><tbody>';
+    for (var m = grid.mapLabels.length - 1; m >= 0; m--) {
+        html += '<tr><th>' + grid.mapLabels[m] + ' kPa</th>';
+        grid.cells[m].forEach(function (c) {
+            if (!c) { html += '<td class="empty"></td>'; return; }
+            var cls = c.pctWithin >= 95 ? 'good' : c.pctWithin < 80 ? 'bad' : 'warn';
+            html += '<td class="' + cls + '" title="' + c.samples + ' samples, worst undershoot ' + c.worstUnder + ' bar">' +
+                (c.meanError > 0 ? '+' : '') + c.meanError.toFixed(1) + '<br><small>' + c.pctWithin + '%</small></td>';
+        });
+        html += '</tr>';
+    }
+    content.innerHTML = html + '</tbody></table>';
+}
+
+function renderAimSteps(events) {
+    var block = document.getElementById('report-transients'), content = document.getElementById('transients-content');
+    block.hidden = !events || !events.length;
+    document.getElementById('log-panel').hidden = true;
+    if (!events || !events.length) return;
+    var html = '<table class="fp-table clickable"><thead><tr><th>Time</th><th>Aim</th><th>Change</th><th>Worst error</th><th>Settled</th></tr></thead><tbody>';
+    events.forEach(function (e, i) {
+        html += '<tr data-i="' + i + '" title="Show in the log"><td>' + e.startTime.toFixed(2) + ' s</td><td>' + Math.round(e.aimFrom) + ' → ' +
+            Math.round(e.aimTo) + ' bar</td><td>' + (e.direction === 'up' ? '+' : '−') + Math.round(e.aimChange) + ' bar</td><td>' +
+            (e.maxError > 0 ? '+' : '') + e.maxError.toFixed(1) + ' bar</td><td>' + (e.settled ? Math.round(e.settleTime * 1000) + ' ms' : 'not within 5 s') +
+            '</td></tr>';
+    });
+    content.innerHTML = html + '</tbody></table>';
+    content.querySelectorAll('tbody tr').forEach(function (tr) {
+        tr.onclick = function () { showStepInLog(events, events[+tr.dataset.i]); };
+    });
+}
+
+function showStepInLog(events, evt) {
+    if (typeof LogPanel === 'undefined' || !lastRunFile) return;
+    var el = document.getElementById('log-panel');
+    el.hidden = false;
+    if (!logPanel) logPanel = new LogPanel(el, { preset: 'fuel-pressure', storageKey: 'fuel-pressure', showVe: false, showTf: false });
+    if (!logPanelReady) {
+        logPanelReady = logPanel.open(lastRunFile).then(function () {
+            logPanel.setMarkers(events.map(function (e) {
+                return { t: e.startTime, t1: e.endTime, color: e.direction === 'up' ? '#4dd0e1' : '#ffb74d', fill: 'rgba(255,255,255,0.05)',
+                         label: 'aim ' + (e.direction === 'up' ? '+' : '−') + Math.round(e.aimChange) + ' bar' };
+            }));
+        });
+    }
+    logPanelReady.then(function () { logPanel.zoomTo(evt.startTime - 1.5, evt.endTime + 2); }).catch(function () { logPanelReady = null; });
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function addStat(container, value, label, extraClass) {

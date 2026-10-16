@@ -30,6 +30,13 @@ var LV_PRESETS = {
         ['Throttle Position']],
     transient: [['Exhaust Lambda Bank 1', 'Exhaust Lambda Bank 2', 'Exhaust Lambda', 'Fuel Mixture Aim'], ['Inlet Manifold Pressure'],
         ['Throttle Position'], ['Engine Overrun State'], ['Fuel Output Cut Count']],
+    knock: [['Ignition Cylinder 1 Knock Level', 'Ignition Cylinder 2 Knock Level', 'Ignition Cylinder 3 Knock Level', 'Ignition Cylinder 4 Knock Level',
+        'Ignition Cylinder 5 Knock Level', 'Ignition Cylinder 6 Knock Level', 'Ignition Cylinder 7 Knock Level', 'Ignition Cylinder 8 Knock Level'],
+        ['Ignition Cylinder 1 Knock Trim', 'Ignition Cylinder 2 Knock Trim', 'Ignition Cylinder 3 Knock Trim', 'Ignition Cylinder 4 Knock Trim',
+        'Ignition Cylinder 5 Knock Trim', 'Ignition Cylinder 6 Knock Trim', 'Ignition Cylinder 7 Knock Trim', 'Ignition Cylinder 8 Knock Trim'],
+        ['Ignition Timing'], ['Engine Speed'], ['Inlet Manifold Pressure'], ['Throttle Position']],
+    'fuel-pressure': [['Fuel Pressure Direct Bank 1', 'Fuel Pressure Direct Bank 1 Aim'], ['Fuel Pressure Direct Bank 1 Control', 'Fuel Pressure Direct Bank 1 Cont'],
+        ['Engine Speed'], ['Inlet Manifold Pressure'], ['Fuel Injector Primary Duty Cycle']],
 };
 
 function lvEsc(s) {
@@ -60,7 +67,8 @@ LogPanel.prototype._build = function () {
     this.root.innerHTML =
         '<div class="lv-toolbar">' +
         '  <select class="lv-preset" aria-label="Channel layout"><option value="fuelling">Fuelling layout</option>' +
-        '    <option value="transient">Transient layout</option><option value="saved">My layout</option></select>' +
+        '    <option value="transient">Transient layout</option><option value="knock">Knock layout</option>' +
+        '    <option value="fuel-pressure">Fuel pressure layout</option><option value="saved">My layout</option></select>' +
         '  <input type="text" class="lv-add" list="" placeholder="Add a channel…" aria-label="Add a channel">' +
         '  <select class="lv-to" aria-label="Add to pane"></select>' +
         '  <button type="button" class="lv-btn lv-add-btn">Add</button>' +
@@ -376,6 +384,12 @@ LogPanel.prototype._eventTable = function () {
         };
     });
 };
+
+/** Event markers from the page (when it does not use the VE / transient analysis): [{ t, t1, label, color, fill }]. */
+LogPanel.prototype.setMarkers = function (list) { this.chart.setMarkers(list || []); };
+
+/** Shows the time span [t0, t1] (seconds). */
+LogPanel.prototype.zoomTo = function (t0, t1) { this.chart.setRange(t0, t1); };
 
 /** Zooms to the transient event starting at `time` (seconds) and selects it. */
 LogPanel.prototype.showEvent = function (time) {

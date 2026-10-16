@@ -454,3 +454,17 @@ h1 {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* Tracking grid and aim-step table */
+.section-note { color: #888; font-size: 0.85rem; margin: 0 0 10px; }
+.fp-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.fp-table th, .fp-table td { padding: 4px 6px; border: 1px solid #333; text-align: center; color: #ccc; }
+.fp-table th { background: #222; color: #fff; white-space: nowrap; }
+.fp-table td small { color: #999; }
+.fp-table td.good { background: rgba(76,175,80,0.15); }
+.fp-table td.warn { background: rgba(255,152,0,0.15); }
+.fp-table td.bad { background: rgba(244,67,54,0.2); }
+.fp-table.clickable tbody tr { cursor: pointer; }
+.fp-table.clickable tbody tr:hover td { background: #1f1f1f; }
+#grid-content { overflow-x: auto; }
+#log-panel { margin-top: 12px; }

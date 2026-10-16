@@ -163,6 +163,7 @@ function parseLdFile(buffer, progressCallback) {
     }
 
     var columnNames = ['Time'];
+    var units = ['s'];
     var channelData = [];
 
     var timeArr = new Float64Array(baseSamples);
@@ -176,6 +177,7 @@ function parseLdFile(buffer, progressCallback) {
         var chan = channels[ci];
         var normalizedName = normalizeLdChannelNameWithUnit(chan.name, chan.shortName);
         columnNames.push(normalizedName);
+        units.push(chan.unit || chan.shortName || '');   // M1 logs keep the unit in the short-name field
 
         var rawData = readChannelData(buffer, chan);
         var transformed = new Float64Array(rawData.length);
@@ -211,7 +213,7 @@ function parseLdFile(buffer, progressCallback) {
         data[r] = row;
     }
 
-    return { columnNames: columnNames, data: data, maxFreq: maxFreq };
+    return { columnNames: columnNames, units: units, data: data, maxFreq: maxFreq };
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +281,7 @@ var CHANNEL_MAP = {
     fuel_press_aim:     ['Fuel Pressure Direct Bank 1 Aim', 'Fuel Pressure Direct Aim'],
     fuel_press_control: ['Fuel Pressure Direct Bank 1 Control', 'Fuel Pressure Direct Control', 'Fuel Pressure Direct Bank 1 Cont'],
     rpm:                ['Engine Speed'],
+    map:                ['Inlet Manifold Pressure'],
     inj_duty:           ['Fuel Injector Primary Duty Cycle'],
     fuel_flow:          ['Fuel Flow'],
     fuel_volume:        ['Fuel Volume'],
@@ -286,7 +289,7 @@ var CHANNEL_MAP = {
 };
 
 var REQUIRED_CHANNELS = ['fuel_press', 'fuel_press_aim', 'rpm'];
-var OPTIONAL_WARN_CHANNELS = ['fuel_press_control', 'inj_duty', 'fuel_flow', 'fuel_volume', 'throttle_pedal'];
+var OPTIONAL_WARN_CHANNELS = ['fuel_press_control', 'inj_duty', 'map'];
 
 function resolveChannels(columnNames) {
     var nameToIdx = {};
@@ -336,6 +339,28 @@ var TOLERANCE_BAR = 2;          // ±2 bar tolerance band
 var TRANSIENT_THRESHOLD = 20;   // bar change to trigger transient detection
 var TRANSIENT_WINDOW = 0.5;     // seconds window for aim change detection
 var MAX_CHART_POINTS = 5000;
+var MIN_RUNNING_RPM = 400;      // below this the engine is cranking or stopped
+var PUMP_LIMIT_FRACTION = 0.9;  // pump control at ≥ 90 % of its highest value in the log counts as "at its limit"
+
+/**
+ * Factor that converts a pressure channel to bar, from its unit. M1 logs rail pressure in MPa ("MPa", or "dMPa" —
+ * the d marks a differential pressure, not a ×10 prefix). Without a recognised unit the size of the values decides:
+ * a rail aim under 40 is MPa, over 1000 is kPa.
+ * @returns {{ factor: number, unit: string, guessed: boolean }}
+ */
+function pressureToBar(unit, sampleValues) {
+    var u = String(unit || '').trim().replace(/^d(?=[a-zA-Z])/, '').toLowerCase();
+    if (u === 'mpa') return { factor: 10, unit: 'MPa', guessed: false };
+    if (u === 'kpa' || u === 'kpa g' || u === 'kpa a') return { factor: 0.01, unit: 'kPa', guessed: false };
+    if (u === 'bar') return { factor: 1, unit: 'bar', guessed: false };
+    if (u === 'psi' || u === 'psig') return { factor: 0.0689476, unit: 'psi', guessed: false };
+    if (u === 'pa') return { factor: 1e-5, unit: 'Pa', guessed: false };
+    var vals = (sampleValues || []).filter(function (v) { return v > 0 && isFinite(v); }).sort(function (a, b) { return a - b; });
+    var p95 = vals.length ? vals[Math.floor(vals.length * 0.95)] : 0;
+    if (p95 > 0 && p95 < 40) return { factor: 10, unit: 'MPa', guessed: true };
+    if (p95 > 1000) return { factor: 0.01, unit: 'kPa', guessed: true };
+    return { factor: 1, unit: 'bar', guessed: true };
+}
 
 // ---------------------------------------------------------------------------
 // Downsampling
@@ -401,9 +426,11 @@ function computeErrorStats(errorArr, pressArr, aimArr, rpmArr, data, channels, s
     var overshootCount = 0;
     var undershootCount = 0;
 
+    var valid = 0;
     for (var i = 0; i < n; i++) {
         var e = errorArr[i];
         if (isNaN(e)) continue;
+        valid++;
         sumError += e;
         sumAbsError += Math.abs(e);
 
@@ -425,8 +452,15 @@ function computeErrorStats(errorArr, pressArr, aimArr, rpmArr, data, channels, s
         }
     }
 
-    var meanError = sumError / n;
-    var meanAbsError = sumAbsError / n;
+    if (valid === 0) {
+        return {
+            meanError: 0, meanAbsError: 0, maxOvershoot: 0, maxUndershoot: 0,
+            stdDevError: 0, pctWithinTolerance: 0, pctOvershoot: 0, pctUndershoot: 0,
+            worstOvershootRpm: 0, worstUndershootRpm: 0, validSamples: 0
+        };
+    }
+    var meanError = sumError / valid;
+    var meanAbsError = sumAbsError / valid;
 
     // Standard deviation
     var sumSqDiff = 0;
@@ -435,9 +469,11 @@ function computeErrorStats(errorArr, pressArr, aimArr, rpmArr, data, channels, s
         var diff = errorArr[i] - meanError;
         sumSqDiff += diff * diff;
     }
-    var stdDevError = Math.sqrt(sumSqDiff / n);
+    var stdDevError = Math.sqrt(sumSqDiff / valid);
+    n = valid;
 
     return {
+        validSamples: valid,
         meanError: meanError,
         meanAbsError: meanAbsError,
         maxOvershoot: maxOvershoot,
@@ -455,81 +491,40 @@ function computeErrorStats(errorArr, pressArr, aimArr, rpmArr, data, channels, s
 // Transient Event Detection
 // ---------------------------------------------------------------------------
 
-function detectTransientEvents(data, channels, sampleRate) {
-    var pressIdx = channels.fuel_press;
-    var aimIdx = channels.fuel_press_aim;
-    var rpmIdx = channels.rpm;
-    var n = data.length;
-    var events = [];
-
-    var windowSamples = Math.round(TRANSIENT_WINDOW * sampleRate);
-    if (windowSamples < 1) windowSamples = 1;
-
+/**
+ * Aim steps: the aim changes by TRANSIENT_THRESHOLD bar or more within TRANSIENT_WINDOW; then follows the
+ * pressure until it is within TOLERANCE_BAR of the new aim (or 5 s pass). Arrays are in bar; samples where the
+ * engine is not running (NaN error) are skipped.
+ */
+function detectTransientEvents(timeArr, pressArr, aimArr, errorArr, sampleRate) {
+    var n = timeArr.length, events = [];
+    var windowSamples = Math.max(1, Math.round(TRANSIENT_WINDOW * sampleRate));
     var i = 0;
     while (i < n - windowSamples) {
-        var aimStart = data[i][aimIdx];
-        var aimEnd = data[i + windowSamples][aimIdx];
+        var aimStart = aimArr[i], aimEnd = aimArr[i + windowSamples];
+        if (isNaN(errorArr[i]) || isNaN(errorArr[i + windowSamples]) || Math.abs(aimEnd - aimStart) < TRANSIENT_THRESHOLD) { i++; continue; }
 
-        if (isNaN(aimStart) || isNaN(aimEnd)) {
-            i++;
-            continue;
-        }
-
-        var aimChange = aimEnd - aimStart;
-        if (Math.abs(aimChange) < TRANSIENT_THRESHOLD) {
-            i++;
-            continue;
-        }
-
-        // Found a transient — track until settled
-        var direction = aimChange > 0 ? 'up' : 'down';
-        var startTime = data[i][0];
-        var newAim = aimEnd;
-        var maxError = 0;
-        var settled = false;
-        var settleTime = 0;
+        var aimChange = aimEnd - aimStart, startTime = timeArr[i], maxError = 0, settled = false, settleTime = 0;
         var endIdx = i + windowSamples;
-
-        // Search forward for settle (within ±2 bar of new aim)
         for (var j = i + windowSamples; j < n; j++) {
-            var press = data[j][pressIdx];
-            var aim = data[j][aimIdx];
-            if (isNaN(press) || isNaN(aim)) continue;
-
-            var err = press - aim;
-            if (Math.abs(err) > Math.abs(maxError)) {
-                maxError = err;
-            }
-
-            if (Math.abs(press - newAim) <= TOLERANCE_BAR) {
+            if (isNaN(errorArr[j])) continue;
+            if (Math.abs(errorArr[j]) > Math.abs(maxError)) maxError = errorArr[j];
+            if (Math.abs(pressArr[j] - aimArr[j]) <= TOLERANCE_BAR) {
                 settled = true;
-                settleTime = data[j][0] - data[i + windowSamples][0];
+                settleTime = timeArr[j] - timeArr[i + windowSamples];
                 endIdx = j;
                 break;
             }
-
-            // Timeout: if more than 5 seconds, give up
-            if (data[j][0] - startTime > 5.0) {
-                settleTime = data[j][0] - data[i + windowSamples][0];
+            if (timeArr[j] - startTime > 5.0) {
+                settleTime = timeArr[j] - timeArr[i + windowSamples];
                 endIdx = j;
                 break;
             }
         }
-
-        events.push({
-            startTime: startTime,
-            endTime: data[endIdx][0],
-            aimChange: Math.abs(aimChange),
-            maxError: maxError,
-            settleTime: settleTime,
-            direction: direction
-        });
-
-        // Skip past this event
+        events.push({ startTime: startTime, endTime: timeArr[endIdx], aimChange: Math.abs(aimChange), aimFrom: aimStart, aimTo: aimEnd,
+                      maxError: maxError, settleTime: Math.max(0, settleTime), settled: settled, direction: aimChange > 0 ? 'up' : 'down' });
         i = endIdx + 1;
-        continue;
     }
-
     return events;
 }
 
@@ -537,17 +532,15 @@ function detectTransientEvents(data, channels, sampleRate) {
 // Build Transient Overlay Chart Data
 // ---------------------------------------------------------------------------
 
-function buildTransientOverlayData(data, channels, sampleRate, transientEvents) {
-    var pressIdx = channels.fuel_press;
-    var aimIdx = channels.fuel_press_aim;
+function buildTransientOverlayData(timeArr, errorArr, sampleRate, transientEvents) {
     var overlayTraces = [];
 
     for (var e = 0; e < transientEvents.length; e++) {
         var evt = transientEvents[e];
         // Find the sample index where the aim change completes (t=0 for overlay)
         var t0Idx = -1;
-        for (var i = 0; i < data.length; i++) {
-            if (data[i][0] >= evt.startTime + TRANSIENT_WINDOW) {
+        for (var i = 0; i < timeArr.length; i++) {
+            if (timeArr[i] >= evt.startTime + TRANSIENT_WINDOW) {
                 t0Idx = i;
                 break;
             }
@@ -558,18 +551,16 @@ function buildTransientOverlayData(data, channels, sampleRate, transientEvents) 
         var preSamples = Math.round(1.0 * sampleRate);
         var postSamples = Math.round(3.0 * sampleRate);
         var startIdx = Math.max(0, t0Idx - preSamples);
-        var endIdx = Math.min(data.length - 1, t0Idx + postSamples);
+        var endIdx = Math.min(timeArr.length - 1, t0Idx + postSamples);
 
         var trace = { time: [], error: [], direction: evt.direction };
-        var t0Time = data[t0Idx][0];
+        var t0Time = timeArr[t0Idx];
 
         var step = Math.max(1, Math.floor((endIdx - startIdx) / 200));
         for (var i = startIdx; i <= endIdx; i += step) {
-            var press = data[i][pressIdx];
-            var aim = data[i][aimIdx];
-            if (isNaN(press) || isNaN(aim)) continue;
-            trace.time.push(data[i][0] - t0Time);
-            trace.error.push(press - aim);
+            if (isNaN(errorArr[i])) continue;
+            trace.time.push(timeArr[i] - t0Time);
+            trace.error.push(errorArr[i]);
         }
         overlayTraces.push(trace);
     }
@@ -701,161 +692,203 @@ function generateDiagnostics(stats, transientEvents, errorArr, rpmArr, dutyArr) 
 // Main Analysis Pipeline
 // ---------------------------------------------------------------------------
 
-function runAnalysis(columnNames, data, sampleRate) {
+/**
+ * Rail pressure tracking by engine speed (500 rpm) × MAP (20 kPa): mean error, share within tolerance, samples.
+ * Only cells with at least 20 running samples are reported.
+ */
+function buildErrorGrid(errorArr, rpmArr, mapArr) {
+    if (!mapArr) return null;
+    var cells = {};
+    for (var i = 0; i < errorArr.length; i++) {
+        var e = errorArr[i];
+        if (isNaN(e) || isNaN(rpmArr[i]) || isNaN(mapArr[i])) continue;
+        var key = Math.floor(rpmArr[i] / 500) + ',' + Math.floor(mapArr[i] / 20);
+        var c = cells[key] || (cells[key] = { n: 0, sum: 0, within: 0, min: 0 });
+        c.n++; c.sum += e;
+        if (Math.abs(e) <= TOLERANCE_BAR) c.within++;
+        if (e < c.min) c.min = e;
+    }
+    var rpmBins = {}, mapBins = {}, out = {};
+    Object.keys(cells).forEach(function (k) {
+        var c = cells[k];
+        if (c.n < 20) return;
+        var r = +k.split(',')[0], m = +k.split(',')[1];
+        rpmBins[r] = 1; mapBins[m] = 1;
+        out[k] = { samples: c.n, meanError: Math.round(c.sum / c.n * 100) / 100, pctWithin: Math.round(c.within / c.n * 1000) / 10,
+                   worstUnder: Math.round(c.min * 10) / 10 };
+    });
+    var rpms = Object.keys(rpmBins).map(Number).sort(function (x, y) { return x - y; });
+    var maps = Object.keys(mapBins).map(Number).sort(function (x, y) { return x - y; });
+    if (!rpms.length) return null;
+    return {
+        rpmLabels: rpms.map(function (r) { return (r * 500) + '–' + ((r + 1) * 500); }),
+        mapLabels: maps.map(function (m) { return (m * 20) + '–' + ((m + 1) * 20); }),
+        cells: maps.map(function (m) { return rpms.map(function (r) { return out[r + ',' + m] || null; }); })
+    };
+}
+
+/**
+ * Is the pump at its limit when pressure falls short? Uses the pump control output (% of its range): the highest
+ * value in the log is taken as the limit, and samples at ≥ PUMP_LIMIT_FRACTION of it count as "at the limit".
+ */
+function analyzePumpLimit(controlArr, errorArr) {
+    if (!controlArr) return null;
+    var max = -Infinity, running = 0;
+    for (var i = 0; i < controlArr.length; i++) {
+        if (isNaN(errorArr[i]) || isNaN(controlArr[i])) continue;
+        running++;
+        if (controlArr[i] > max) max = controlArr[i];
+    }
+    if (!running || !(max > 0)) return null;
+    var limit = max * PUMP_LIMIT_FRACTION, atLimit = 0, under = 0, underAtLimit = 0;
+    for (i = 0; i < controlArr.length; i++) {
+        if (isNaN(errorArr[i]) || isNaN(controlArr[i])) continue;
+        var high = controlArr[i] >= limit;
+        if (high) atLimit++;
+        if (errorArr[i] < -TOLERANCE_BAR) { under++; if (high) underAtLimit++; }
+    }
+    return { maxControl: Math.round(max * 10) / 10, pctAtLimit: Math.round(atLimit / running * 1000) / 10,
+             undershootSamples: under, pctUndershootAtLimit: under ? Math.round(underAtLimit / under * 1000) / 10 : 0,
+             likelyLimited: under >= Math.max(20, running * 0.01) && underAtLimit / under >= 0.5 };
+}
+
+function runAnalysis(columnNames, data, sampleRate, units) {
     // Step 1: Resolve channels
     self.postMessage({ type: 'progress', phase: 'Resolving channels...', percent: 10 });
     var resolution = resolveChannels(columnNames);
     var channels = resolution.resolved;
     var warnings = resolution.warnings;
 
-    // Check required channels
-    var missingRequired = false;
-    for (var r = 0; r < REQUIRED_CHANNELS.length; r++) {
-        if (channels[REQUIRED_CHANNELS[r]] === -1) {
-            missingRequired = true;
-        }
-    }
+    var missingRequired = REQUIRED_CHANNELS.some(function (k) { return channels[k] === -1; });
     if (missingRequired) {
         self.postMessage({
             type: 'error',
-            message: 'Required channels missing (fuel_press, fuel_press_aim, rpm). Cannot perform fuel pressure analysis.'
+            message: 'Required channels missing (Fuel Pressure Direct Bank 1, its Aim, and Engine Speed). Cannot perform fuel pressure analysis.'
         });
         return;
     }
+    for (var w = 0; w < warnings.length; w++) self.postMessage({ type: 'warning', message: warnings[w] });
 
-    // Post warnings for missing optional channels
-    for (var w = 0; w < warnings.length; w++) {
-        self.postMessage({ type: 'warning', message: warnings[w] });
-    }
-
-    // Step 2: Extract arrays
+    // Step 2: Extract arrays, converting rail pressure and aim to bar
     self.postMessage({ type: 'progress', phase: 'Extracting channel data...', percent: 20 });
     var n = data.length;
-    var pressIdx = channels.fuel_press;
-    var aimIdx = channels.fuel_press_aim;
-    var rpmIdx = channels.rpm;
-    var controlIdx = channels.fuel_press_control;
-    var dutyIdx = channels.inj_duty;
-    var flowIdx = channels.fuel_flow;
-
-    var timeArr = new Array(n);
-    var pressArr = new Array(n);
-    var aimArr = new Array(n);
-    var errorArr = new Array(n);
-    var rpmArr = new Array(n);
-    var controlArr = controlIdx !== -1 ? new Array(n) : null;
-    var dutyArr = dutyIdx !== -1 ? new Array(n) : null;
-    var flowArr = flowIdx !== -1 ? new Array(n) : null;
-
-    for (var i = 0; i < n; i++) {
-        timeArr[i] = data[i][0];
-        pressArr[i] = data[i][pressIdx];
-        aimArr[i] = data[i][aimIdx];
-        rpmArr[i] = data[i][rpmIdx];
-        errorArr[i] = pressArr[i] - aimArr[i];
-        if (controlArr) controlArr[i] = data[i][controlIdx];
-        if (dutyArr) dutyArr[i] = data[i][dutyIdx];
-        if (flowArr) flowArr[i] = data[i][flowIdx];
+    var col = function (idx) { var a = new Array(n); for (var i = 0; i < n; i++) a[i] = data[i][idx]; return a; };
+    var pressIdx = channels.fuel_press, aimIdx = channels.fuel_press_aim, rpmIdx = channels.rpm;
+    var rawAim = col(aimIdx), rawPress = col(pressIdx);
+    var aimUnit = pressureToBar(units && units[aimIdx], rawAim);
+    var pressUnit = pressureToBar(units && units[pressIdx], rawPress);
+    if (aimUnit.guessed || pressUnit.guessed) {
+        self.postMessage({ type: 'warning', message: 'Rail pressure units are not in the log; treated as ' + pressUnit.unit +
+            ' from the size of the values. Check the pressures shown look right.' });
     }
 
-    // Step 3: Compute error statistics
+    var timeArr = col(0), rpmArr = col(rpmIdx);
+    var pressArr = rawPress.map(function (v) { return v * pressUnit.factor; });
+    var aimArr = rawAim.map(function (v) { return v * aimUnit.factor; });
+    var controlArr = channels.fuel_press_control !== -1 ? col(channels.fuel_press_control) : null;
+    var dutyArr = channels.inj_duty !== -1 ? col(channels.inj_duty) : null;
+    var flowArr = channels.fuel_flow !== -1 ? col(channels.fuel_flow) : null;
+    var mapArr = channels.map !== -1 ? col(channels.map) : null;
+
+    // Error only while the engine runs and the system has an aim (engine off / cranking says nothing about control).
+    var errorArr = new Array(n), running = 0;
+    for (var i = 0; i < n; i++) {
+        var ok = rpmArr[i] >= MIN_RUNNING_RPM && aimArr[i] > 0 && !isNaN(pressArr[i]);
+        errorArr[i] = ok ? pressArr[i] - aimArr[i] : NaN;
+        if (ok) running++;
+    }
+
+    // Step 3: Error statistics
     self.postMessage({ type: 'progress', phase: 'Computing error statistics...', percent: 40 });
     var stats = computeErrorStats(errorArr, pressArr, aimArr, rpmArr, data, channels, sampleRate);
 
-    // Step 4: Detect transient events
+    // Step 4: Transient events
     self.postMessage({ type: 'progress', phase: 'Detecting transient events...', percent: 55 });
-    var transientEvents = detectTransientEvents(data, channels, sampleRate);
+    var transientEvents = detectTransientEvents(timeArr, pressArr, aimArr, errorArr, sampleRate);
 
-    // Step 5: Build scatter data
+    // Step 5: Scatter data
     self.postMessage({ type: 'progress', phase: 'Building correlation data...', percent: 65 });
-    var errorVsRpm = [];
-    var errorVsDuty = dutyArr ? [] : null;
-    var errorVsFlow = flowArr ? [] : null;
-
-    for (var i = 0; i < n; i++) {
+    var errorVsRpm = [], errorVsDuty = dutyArr ? [] : null, errorVsFlow = flowArr ? [] : null;
+    for (i = 0; i < n; i++) {
         if (isNaN(errorArr[i]) || isNaN(rpmArr[i])) continue;
         errorVsRpm.push({ x: rpmArr[i], y: errorArr[i] });
-        if (errorVsDuty && !isNaN(dutyArr[i])) {
-            errorVsDuty.push({ x: dutyArr[i], y: errorArr[i] });
-        }
-        if (errorVsFlow && !isNaN(flowArr[i])) {
-            errorVsFlow.push({ x: flowArr[i], y: errorArr[i] });
-        }
+        if (errorVsDuty && !isNaN(dutyArr[i])) errorVsDuty.push({ x: dutyArr[i], y: errorArr[i] });
+        if (errorVsFlow && !isNaN(flowArr[i])) errorVsFlow.push({ x: flowArr[i], y: errorArr[i] });
     }
-
-    // Downsample scatter data
     errorVsRpm = downsampleScatter(errorVsRpm, MAX_CHART_POINTS);
     if (errorVsDuty) errorVsDuty = downsampleScatter(errorVsDuty, MAX_CHART_POINTS);
     if (errorVsFlow) errorVsFlow = downsampleScatter(errorVsFlow, MAX_CHART_POINTS);
 
-    // Step 6: Build histogram
+    // Step 6: Histogram, grid, pump
     self.postMessage({ type: 'progress', phase: 'Building error histogram...', percent: 75 });
     var errorHistogram = buildErrorHistogram(errorArr);
+    var errorGrid = buildErrorGrid(errorArr, rpmArr, mapArr);
+    var pump = analyzePumpLimit(controlArr, errorArr);
 
-    // Step 7: Generate diagnostics
+    // Step 7: Diagnostics
     self.postMessage({ type: 'progress', phase: 'Generating diagnostics...', percent: 85 });
     var diagnostics = generateDiagnostics(stats, transientEvents, errorArr, rpmArr, dutyArr);
+    if (pump && pump.likelyLimited) {
+        diagnostics.push('Pump at its limit: in ' + pump.pctUndershootAtLimit + '% of the samples more than ' + TOLERANCE_BAR +
+            ' bar below aim, the pump control was at 90% or more of its highest value in this log (' + pump.maxControl +
+            '%). The pump cannot keep up there; check its capacity and the low-pressure supply before raising the aim.');
+    } else if (pump && stats.pctUndershoot > 1) {
+        diagnostics.push('Undershoot is not at the pump\'s limit (control was below 90% of its maximum in most undershoot samples), so ' +
+            'it is more likely control response than capacity: look at the pump control gains and feed-forward.');
+    }
+    // Overshoot right after the aim falls is expected: a DI rail only loses pressure as fuel is injected (or through a
+    // relief valve), so on a lift-off it stays high until injection brings it down.
+    var over = 0, overAfterDrop = 0, lookback = Math.max(1, Math.round(sampleRate));
+    for (i = 0; i < n; i++) {
+        if (!(errorArr[i] > TOLERANCE_BAR)) continue;
+        over++;
+        var prevAim = -Infinity;
+        for (var k = Math.max(0, i - lookback); k < i; k++) if (aimArr[k] > prevAim) prevAim = aimArr[k];
+        if (prevAim - aimArr[i] >= 5) overAfterDrop++;
+    }
+    if (over > 20 && overAfterDrop / over >= 0.5) {
+        diagnostics.push(Math.round(overAfterDrop / over * 100) + '% of the overshoot comes within a second of the aim falling (e.g. ' +
+            'lifting off). That is expected: the rail only loses pressure as fuel is injected, so it lags a falling aim. ' +
+            'Overshoot while the aim is steady or rising is the part to tune.');
+    }
+    if (running < n * 0.95) {
+        diagnostics.push('Statistics use the ' + running.toLocaleString() + ' samples with the engine running and a rail pressure aim (' +
+            Math.round(running / n * 100) + '% of the log).');
+    }
 
-    // Step 8: Build chart data (downsampled time series)
+    // Step 8: Chart data (downsampled time series)
     self.postMessage({ type: 'progress', phase: 'Building chart data...', percent: 90 });
     var dsArrays = downsampleParallel([timeArr, pressArr, aimArr, errorArr], MAX_CHART_POINTS);
     var dsControl = controlArr ? downsampleArray(controlArr, MAX_CHART_POINTS) : null;
+    var transientOverlay = buildTransientOverlayData(timeArr, errorArr, sampleRate, transientEvents);
 
-    // Build transient overlay traces
-    var transientOverlay = buildTransientOverlayData(data, channels, sampleRate, transientEvents);
-
-    // Build channel mapping for UI
     var channelMapping = {};
-    var keys = Object.keys(CHANNEL_MAP);
-    for (var k = 0; k < keys.length; k++) {
-        channelMapping[keys[k]] = channels[keys[k]] !== -1;
-    }
+    Object.keys(CHANNEL_MAP).forEach(function (k) { channelMapping[k] = channels[k] !== -1; });
 
-    // Step 8b: Compute pressure vs PW impact analysis
-    // Using Bernoulli's principle: flow ∝ √pressure, so PW ∝ 1/√pressure
-    // If pressure drops from aim to actual, PW would need to increase by factor √(aim/actual)
+    // Step 8b: injector pulse width impact of low pressure. Flow ∝ √pressure, so to deliver the same fuel at a lower
+    // pressure the pulse width must grow by √(aim/actual). Counted where pressure is more than 5 bar below aim.
     var pressurePwImpact = null;
     if (dutyArr) {
-        // Find operating points where pressure is significantly below aim
         var impactPoints = [];
-        for (var i = 0; i < n; i++) {
-            if (isNaN(pressArr[i]) || isNaN(aimArr[i]) || pressArr[i] <= 0 || aimArr[i] <= 0) continue;
-            var error = pressArr[i] - aimArr[i];
-            if (error < -0.05) { // pressure below aim by >5 bar (in dMPa, so 0.05)
-                // PW multiplier needed: √(aim/actual)
-                var pwMultiplier = Math.sqrt(aimArr[i] / pressArr[i]);
-                impactPoints.push({
-                    rpm: rpmArr[i],
-                    pressBar: Math.round(pressArr[i] * 1000) / 10,
-                    aimBar: Math.round(aimArr[i] * 1000) / 10,
-                    pwIncreasePct: Math.round((pwMultiplier - 1) * 1000) / 10
-                });
-            }
+        for (i = 0; i < n; i++) {
+            if (isNaN(errorArr[i]) || pressArr[i] <= 0 || errorArr[i] >= -5) continue;
+            var pwMultiplier = Math.sqrt(aimArr[i] / pressArr[i]);
+            impactPoints.push({ rpm: rpmArr[i], pressBar: Math.round(pressArr[i] * 10) / 10, aimBar: Math.round(aimArr[i] * 10) / 10,
+                                pwIncreasePct: Math.round((pwMultiplier - 1) * 1000) / 10 });
         }
-
         if (impactPoints.length > 100) {
-            // Summarize by RPM bins
             var rpmBins = {};
-            for (var i = 0; i < impactPoints.length; i++) {
-                var bin = Math.round(impactPoints[i].rpm / 500) * 500;
-                if (!rpmBins[bin]) rpmBins[bin] = { count: 0, pwIncSum: 0, maxPwInc: 0 };
-                rpmBins[bin].count++;
-                rpmBins[bin].pwIncSum += impactPoints[i].pwIncreasePct;
-                if (impactPoints[i].pwIncreasePct > rpmBins[bin].maxPwInc) {
-                    rpmBins[bin].maxPwInc = impactPoints[i].pwIncreasePct;
-                }
-            }
-            var summary = [];
-            var binKeys = Object.keys(rpmBins).sort(function(a,b) { return a - b; });
-            for (var b = 0; b < binKeys.length; b++) {
-                var bin = rpmBins[binKeys[b]];
-                summary.push({
-                    rpm: parseInt(binKeys[b]),
-                    samples: bin.count,
-                    avgPwIncrease: Math.round(bin.pwIncSum / bin.count * 10) / 10,
-                    maxPwIncrease: Math.round(bin.maxPwInc * 10) / 10
-                });
-            }
+            impactPoints.forEach(function (pt) {
+                var bin = Math.round(pt.rpm / 500) * 500;
+                var b = rpmBins[bin] || (rpmBins[bin] = { count: 0, pwIncSum: 0, maxPwInc: 0 });
+                b.count++; b.pwIncSum += pt.pwIncreasePct;
+                if (pt.pwIncreasePct > b.maxPwInc) b.maxPwInc = pt.pwIncreasePct;
+            });
+            var summary = Object.keys(rpmBins).sort(function (x, y) { return x - y; }).map(function (k) {
+                var b = rpmBins[k];
+                return { rpm: parseInt(k, 10), samples: b.count, avgPwIncrease: Math.round(b.pwIncSum / b.count * 10) / 10,
+                         maxPwIncrease: Math.round(b.maxPwInc * 10) / 10 };
+            });
             pressurePwImpact = { totalUndershootSamples: impactPoints.length, byRpm: summary };
         }
     }
@@ -868,6 +901,8 @@ function runAnalysis(columnNames, data, sampleRate) {
             channelMapping: channelMapping,
             channelWarnings: resolution.warnings,
             totalSamples: n,
+            runningSamples: running,
+            pressureUnit: pressUnit.unit,
             meanError: stats.meanError,
             meanAbsError: stats.meanAbsError,
             maxOvershoot: stats.maxOvershoot,
@@ -876,10 +911,14 @@ function runAnalysis(columnNames, data, sampleRate) {
             pctWithinTolerance: stats.pctWithinTolerance,
             pctOvershoot: stats.pctOvershoot,
             pctUndershoot: stats.pctUndershoot,
+            worstOvershootRpm: stats.worstOvershootRpm,
+            worstUndershootRpm: stats.worstUndershootRpm,
             transientEvents: transientEvents,
             errorByRpm: downsampleScatter(errorVsRpm, 500),
             errorByDuty: errorVsDuty ? downsampleScatter(errorVsDuty, 500) : null,
             errorByFlow: errorVsFlow ? downsampleScatter(errorVsFlow, 500) : null,
+            errorGrid: errorGrid,
+            pump: pump,
             pressurePwImpact: pressurePwImpact,
             diagnostics: diagnostics
         },
@@ -902,7 +941,7 @@ function runAnalysis(columnNames, data, sampleRate) {
 // Message Handler
 // ---------------------------------------------------------------------------
 
-self.onmessage = function(event) {
+if (typeof self !== 'undefined') self.onmessage = function(event) {
     var msg = event.data;
     if (!msg) return;
 
@@ -918,6 +957,7 @@ self.onmessage = function(event) {
                 return s.trim().replace(/^"|"$/g, '');
             });
 
+            var unitsRow = (lines[headerRowIdx + 1] || '').split(',').map(function (s) { return s.trim().replace(/^"|"$/g, ''); });
             var dataStart = findDataStart(lines, headerRowIdx);
             var numCols = columnNames.length;
 
@@ -938,7 +978,7 @@ self.onmessage = function(event) {
                 if (dt > 0) sampleRate = 1.0 / dt;
             }
 
-            runAnalysis(columnNames, data, sampleRate);
+            runAnalysis(columnNames, data, sampleRate, unitsRow);
 
         } else if (msg.type === 'analyze_ld') {
             // Binary .ld input
@@ -950,9 +990,15 @@ self.onmessage = function(event) {
             });
 
             var sampleRate = result.maxFreq || 1;
-            runAnalysis(result.columnNames, result.data, sampleRate);
+            runAnalysis(result.columnNames, result.data, sampleRate, result.units);
         }
     } catch (err) {
         self.postMessage({ type: 'error', message: err.message || 'Unknown error during analysis.' });
     }
 };
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { pressureToBar: pressureToBar, computeErrorStats: computeErrorStats, detectTransientEvents: detectTransientEvents,
+        buildErrorGrid: buildErrorGrid, analyzePumpLimit: analyzePumpLimit, generateDiagnostics: generateDiagnostics, runAnalysis: runAnalysis,
+        resolveChannels: resolveChannels, parseLdFile: parseLdFile };
+}

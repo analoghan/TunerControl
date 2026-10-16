@@ -652,7 +652,7 @@ function renderTimingRetardTimeSeries(canvas, retardData) {
         type: 'line',
         data: {
             datasets: [{
-                label: 'Timing Compensation',
+                label: retardData.label || 'Timing Compensation',
                 data: dataPoints,
                 borderColor: KNOCK_COLORS.retardLine,
                 backgroundColor: 'rgba(255,107,122,0.1)',

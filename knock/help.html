@@ -151,7 +151,8 @@
     <h2 id="quick-start">Quick Start</h2>
     <ol>
       <li>Load a MoTeC log file (.csv export or raw .ld) that contains knock level channels.</li>
-      <li>Set the knock threshold (default 5%) — events above this level are classified as knock.</li>
+      <li>Choose the tune that was in the ECU — a stored tune from the M1 Config Viewer (suggested automatically from the log's date
+        and ECU) or a <code>.m1pkg</code> file. Knock is then judged against the tune's own Knock Threshold table.</li>
       <li>Click <strong>Analyze</strong>.</li>
       <li>Review the per-cylinder distribution, RPM × Load grid, and timing recommendations.</li>
       <li>Use the RPM × Load grid (filtered by cylinder) to identify exactly where to pull timing in M1 Tune.</li>
@@ -169,7 +170,12 @@
       <li><strong>Engine Speed</strong> — RPM for binning and correlation</li>
       <li><strong>Inlet Manifold Pressure</strong> — MAP (kPa) for load binning</li>
       <li><strong>Ignition Timing</strong> — actual timing at the moment of knock</li>
-      <li><strong>Ignition Timing Compensation</strong> — ECU's knock retard amount</li>
+      <li><strong>Ignition Cylinder N Knock Trim</strong> (1–8) — the knock retard the ECU applied to each cylinder. Log these to see
+        how the knock control responded.</li>
+      <li><strong>Ignition Timing Compensation</strong> — the sum of every timing compensation (temperatures and others, not only knock);
+        shown when the knock trims are not logged</li>
+      <li><strong>Engine Overrun State</strong> — knock levels during overrun are ignored</li>
+      <li><strong>Engine Load Normalised</strong> — with a tune, lets the knock grid use the same load sites as Ignition Timing Main</li>
       <li><strong>Throttle Position</strong> — TPS for operating condition context</li>
       <li><strong>Gear</strong> — gear position for condition identification</li>
       <li><strong>Coolant Temperature</strong> — for thermal correlation</li>
@@ -181,15 +187,23 @@
 
     <!-- Knock Threshold -->
     <h2 id="threshold">Knock Threshold</h2>
-    <p>The threshold determines what constitutes a "knock event." Any sample where a cylinder's knock level exceeds this value (strictly greater than) is classified as knock.</p>
-    <ul>
-      <li><strong>Lower threshold (1–3%)</strong> — catches more events including borderline/light knock. Good for conservative tuning.</li>
-      <li><strong>Default (5%)</strong> — reasonable starting point for most engines.</li>
-      <li><strong>Higher threshold (8–15%)</strong> — only flags significant knock events. Use when you want to focus on heavy detonation only.</li>
-    </ul>
-    <div class="warning">
-      <strong>Note:</strong> The "correct" threshold depends on your knock sensor sensitivity, mounting location, and engine. Start at 5% and adjust based on whether the tool is flagging events that correlate with audible knock or timing retard from the ECU.
-    </div>
+    <p>The M1 detects knock when a cylinder's <strong>Knock Level</strong> goes above its <strong>Knock Threshold</strong> table, which
+      usually rises with engine speed (for example 20% at 2000 rpm to 40% at 8000 rpm) because mechanical noise rises too. With a tune
+      chosen, the tool uses exactly that table, interpolated at the logged engine speed (and load, if the table has load sites), so it
+      counts what the ECU counts as knock.</p>
+    <p>Without a tune, choose <strong>Fixed</strong> and enter a threshold (default 20%). A level well below the ECU's threshold is
+      normal engine noise, not knock.</p>
+    <h3>Knock events</h3>
+    <p>An event is one stretch where a cylinder stays above the threshold (gaps up to 0.1 s are joined), so a long knock or a log
+      stored faster than the knock channel counts once. Each event records its peak level, how far that was over the threshold (×
+      threshold), its duration and the conditions at the peak. Samples below 500 rpm (cranking) or in overrun are ignored. Click an
+      event to see it in the log.</p>
+
+    <h2 id="sensor-check">Knock Sensor Check</h2>
+    <p>Every running engine makes some noise, so each cylinder's knock level always shows a background reading. The check compares the
+      typical (median) level of each cylinder — grouped by knock input when a tune is chosen — with the others. A group reading under a
+      quarter of the rest is flagged: the sensor, its wiring or connector, its mounting, the input, or the knock gain may be at fault,
+      and real knock on those cylinders may go undetected. Fix this before relying on knock control.</p>
 
     <!-- Report Sections -->
     <h2 id="reports">Report Sections</h2>
@@ -201,7 +215,10 @@
     <p>Table showing event count and percentage per cylinder. Identifies which cylinders are most knock-prone — useful for diagnosing injector issues, hot spots, or sensor problems.</p>
 
     <h3>Timing Adjustment Recommendations</h3>
-    <p>Suggested timing reduction per cylinder based on knock frequency and severity. These are starting-point recommendations — always validate on the dyno.</p>
+    <p>Only for cylinders that knocked. The suggested reduction depends on how far the worst event went over the threshold: 1° up to
+      1.5×, 2° up to 2×, 3° beyond, applied in the cells where it knocked. A cylinder with a single event gets no reduction (re-log to
+      confirm). When five or more cylinders knock, reduce Ignition Timing Main in those cells instead of trimming cylinders. These are
+      starting points — always validate on the dyno.</p>
 
     <h3>Knock vs Engine Load (Normalized)</h3>
     <p>Shows knock rate (events/minute) per load bin, normalized by time spent at each load. Eliminates the bias of simply spending more time at certain loads. Sorted by rate so the most problematic load ranges appear first.</p>
@@ -210,8 +227,10 @@
     <h2 id="rpm-load-grid">RPM × Load Grid (per Cylinder)</h2>
     <p>The most actionable output for tuning. This 2D table mirrors the layout of your MoTeC spark/ignition timing table:</p>
     <ul>
-      <li><strong>Rows</strong> = Load (MAP in kPa), high to low (boost at top, vacuum at bottom)</li>
-      <li><strong>Columns</strong> = RPM (500 RPM bins)</li>
+      <li><strong>Rows</strong> = Load: Engine Load Normalised at the Ignition Timing Main sites when a tune is chosen and that channel
+        is logged; otherwise MAP in 10 kPa rows. High to low (boost at top).</li>
+      <li><strong>Columns</strong> = RPM: the Ignition Timing Main engine speed sites when a tune is chosen (each column covers the speeds
+        nearest that site), otherwise 500 RPM bins</li>
       <li><strong>Cell values</strong> = knock events per minute, normalized by dwell time</li>
     </ul>
 
@@ -425,8 +444,8 @@
     <!-- Tuning Workflow -->
     <h2 id="tuning-workflow">Knock Tuning Workflow</h2>
     <ol>
-      <li><strong>Baseline log:</strong> Run the engine through its full operating range with conservative timing. Log all knock channels at 1000 Hz minimum sample rate.</li>
-      <li><strong>Analyze:</strong> Load the log into this tool. Set threshold to 5% initially.</li>
+      <li><strong>Baseline log:</strong> Run the engine through its full operating range with conservative timing. Log the knock level channels at 100 Hz if you can (each cylinder fires about 50 times a second at 6000 rpm), plus the knock trims.</li>
+      <li><strong>Analyze:</strong> Load the log into this tool with the tune that was in the ECU, and check the knock sensor check first.</li>
       <li><strong>Identify problem areas:</strong> Use the RPM × Load grid filtered by cylinder to find where knock is occurring.</li>
       <li><strong>Pull timing:</strong> In M1 Tune, reduce ignition timing by 1–2° in the identified cells for the affected cylinder(s).</li>
       <li><strong>Re-log and verify:</strong> Drive the same conditions again. Re-analyze. The knock rate should decrease.</li>
