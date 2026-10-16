@@ -118,10 +118,12 @@ function handleAnalyzeClick() {
 
         if (isLD) {
             lastRunFile = selectedFile;
+            lastRunInfo = { file: selectedFile, rail: tuneRail, tuneId: tuneRail ? tuneId : null };
             logPanelReady = null;
             worker.postMessage({ type: 'analyze_ld', buffer: reader.result, rail: tuneRail });
         } else {
             lastRunFile = selectedFile;
+            lastRunInfo = { file: selectedFile, rail: tuneRail, tuneId: tuneRail ? tuneId : null };
             logPanelReady = null;
             worker.postMessage({ type: 'analyze', logText: reader.result, rail: tuneRail });
         }
@@ -232,6 +234,15 @@ function renderReport(analysis) {
     renderWarnings(analysis.channelWarnings);
     renderSummary(analysis);
     renderRailControl(analysis.railControl, analysis.tuneName);
+    if (typeof rsSaveControl === 'function' && lastRunInfo) {
+        var run = lastRunInfo;
+        rsSaveControl(document.getElementById('history-save'), function () {
+            return rsLogFacts(run.file).then(function (facts) {
+                return Object.assign({ tool: 'fuel-pressure', tuneId: run.tuneId, tuneName: run.rail ? run.rail.tuneName : null, settings: null },
+                    facts, rbFuelPressure(analysis, run.rail));
+            });
+        });
+    }
     renderErrorGrid(analysis.errorGrid);
     renderAimSteps(analysis.transientEvents);
     renderPressurePwImpact(analysis.pressurePwImpact);
@@ -335,7 +346,8 @@ function renderSummary(analysis) {
 // Tune (rail pressure aim table and control gains)
 // ---------------------------------------------------------------------------
 
-var tuneRail = null, tunePicked = false, storedTunes = [];
+var tuneRail = null, tunePicked = false, storedTunes = [], tuneId = null;
+var lastRunInfo = null;   // { file, rail, tuneId } of the shown results, for the tuning history
 var pkgInput = document.getElementById('pkg-input');
 var tuneSelect = document.getElementById('tune-select');
 var tuneHint = document.getElementById('tune-hint');
@@ -355,7 +367,7 @@ pkgInput.addEventListener('change', function () {
     tunePicked = true;
     tuneSelect.value = '';
     tuneHint.textContent = '';
-    file.arrayBuffer().then(function (buf) { setTune(m1pkgRail(parseM1Pkg(buf)), 'Tune file ' + file.name); })
+    file.arrayBuffer().then(function (buf) { tuneId = null; setTune(m1pkgRail(parseM1Pkg(buf)), 'Tune file ' + file.name); })
         .catch(function (err) { setTune(null); showErrorBanner('Could not read the rail pressure settings from ' + file.name + ': ' + err.message); });
 });
 
@@ -366,6 +378,7 @@ function useStoredTune(id, hint, suggested) {
     return tsLoad(id).then(function (pkg) {
         if (tuneSelect.value !== id) return;
         pkgInput.value = '';
+        tuneId = id;
         setTune(m1pkgRail(pkg), 'Stored tune');
         tuneHint.textContent = hint || '';
         tuneHint.classList.toggle('suggested', !!suggested);

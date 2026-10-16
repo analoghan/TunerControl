@@ -1,8 +1,8 @@
 # TunerControl Server
 
-Optional backend that serves the TunerControl web app and stores the M1 Config Viewer's tune history and the
-Harness Builder's harnesses (every saved revision, plus connector images) in a SQLite database, so every browser sees the same data
-and it can be queried with SQL.
+Optional backend that serves the TunerControl web app and stores the M1 Config Viewer's tune history, the
+Harness Builder's harnesses (every saved revision, plus connector images) and the tuning history (saved VE, transient, knock and
+fuel pressure analysis runs) in a SQLite database, so every browser sees the same data and it can be queried with SQL.
 
 - No npm dependencies — Node's built-in HTTP server and `node:sqlite`.
 - Uploaded `.m1pkg` files are parsed on the server (`lib/m1pkg-parser.js`) and the original file is kept, so
@@ -148,7 +148,7 @@ The database is one file. A consistent copy while the server runs:
 sqlite3 /var/lib/tunercontrol/tunercontrol.db ".backup '/backups/tunercontrol-$(date +%F).db'"
 ```
 
-`GET /api/backup` also returns a JSON backup (parsed data and pin names, without the original files).
+`GET /api/backup` also returns a JSON backup (parsed data, pin names and tuning history runs, without the original files).
 
 ## Querying the data
 
@@ -169,4 +169,15 @@ WHERE a.tune_name LIKE '%V54' AND b.tune_name LIKE '%V55'
 ```
 
 The same history is available over HTTP: `GET /api/history?item=Fuel.Timing.Primary.Main&cell=V[4,3]`.
+
+Saved analysis runs are in `runs` (one row per run; `summary_json` holds the key results, `data_json` the settings and detail):
+
+```sql
+-- Rail pressure tracking and knock events, run by run
+SELECT tool, log_time, tune_name, json_extract(summary_json, '$.pctWithin') AS within_pct,
+       json_extract(summary_json, '$.events') AS knock_events
+FROM runs WHERE tool IN ('fuel-pressure', 'knock') ORDER BY log_time;
+```
+
+Over HTTP: `GET /api/runs?tool=ve&full=1`, `POST /api/runs`, `PUT /api/runs/<id>` (note), `DELETE /api/runs/<id>`.
 See the header of `server.js` for the full API.

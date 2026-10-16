@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tuning History — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content p, .help-content li, .help-content td { color: #ccc; font-size: 0.9rem; }
+    .help-content table { border-collapse: collapse; margin: 10px 0; width: 100%; }
+    .help-content th, .help-content td { border: 1px solid #333; padding: 6px 10px; text-align: left; vertical-align: top; }
+    .help-content th { background: #222; color: #fff; font-size: 0.85rem; }
+    .help-content a { color: #ff5a6e; }
+    .help-content .top-nav a { color: #E31837; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Tuning History</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Tuning History — Help</h1>
+    <p>The tuning history keeps the results of your analysis runs so you can follow a calibration over time: change the tune, log,
+      analyze, save — and see whether the numbers improved.</p>
+
+    <h2>Saving a run</h2>
+    <p>After an analysis on <a href="../ve-table/index.html">VE Table Tuning</a>, the <a href="../transient-fuel/index.html">Transient Fuel
+      Analyzer</a>, the <a href="../knock/index.html">Knock Analyzer</a> or the <a href="../fuel-pressure/index.html">DI Fuel Pressure</a> tool,
+      add an optional note (for example "after VE V56") and click <strong>Save to tuning history</strong>. Runs are only saved when you ask,
+      so experiments with different settings don't clutter the history; saving again adds another run.</p>
+    <p>Each run keeps the log's name, start time and ECU serial (from the log), the tune the tool used, the settings, and the key results.
+      The log itself is not stored.</p>
+    <p>With the pages served by a TunerControl server, runs are stored in its database and every browser sees them (and the server backup
+      includes them). Otherwise they are kept in this browser only.</p>
+
+    <h2>The history page</h2>
+    <p>Choose a tool. The table lists its runs, newest first, with the main results; <strong>Details</strong> shows the stored advice and
+      figures, <strong>Note</strong> edits the note and <strong>Delete</strong> removes the run. The charts below put the runs in log order:</p>
+    <table>
+      <tr><th>Tool</th><th>Charts</th></tr>
+      <tr><td>VE Table Tuning</td><td>Mean correction still needed and the number of cells needing more than 2%. The latest run's grid: click a
+        cell to see its correction in every run (matched by its MAP and rpm breakpoints).</td></tr>
+      <tr><td>Transient Fuel</td><td>Average lean spike and rich overshoot on tip-ins, and how many tip-ins go rich first.</td></tr>
+      <tr><td>Knock</td><td>The typical knock level of each cylinder (the sensor check) and the number of knock events. After fixing a knock
+        sensor, its cylinders should rise to the level of the others.</td></tr>
+      <tr><td>DI Fuel Pressure</td><td>Share of time within ±2 bar of aim, and — for runs analyzed with a tune — how often pressure overshoots or
+        lags a rising aim.</td></tr>
+    </table>
+    <div class="tip"><strong>Tip:</strong> Compare like with like. A run from a drive with several boost pulls and one from a cruise will differ
+      even with the same tune; the note is a good place to say what the drive was.</div>
+  </div>
+</body>
+</html>

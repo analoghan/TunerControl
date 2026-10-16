@@ -6,6 +6,7 @@
   <title>Knock Analyzer — TunerControl</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="../log-viewer/log-panel.css">
+  <link rel="stylesheet" href="../history/run-save.css" />
 </head>
 <body>
   <div class="app-container">
@@ -75,6 +76,7 @@
       <div id="report-diagnostics" class="report-block">
         <h2>Diagnostic Summary</h2>
         <div id="diagnostics-content" class="report-content"></div>
+        <div id="history-save"></div>
       </div>
 
       <div id="report-cylinder-distribution" class="report-block">
@@ -149,6 +151,8 @@
   <script src="../m1-config/tune-api.js"></script>
   <script src="../m1-config/tune-source.js"></script>
   <script src="m1pkg-knock.js"></script>
+  <script src="../history/run-store.js"></script>
+  <script src="../history/run-builders.js"></script>
   <script src="../log-viewer/log-chart.js"></script>
   <script src="../log-viewer/log-panel.js"></script>
   <script src="charts.js"></script>

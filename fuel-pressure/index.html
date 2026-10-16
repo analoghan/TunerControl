@@ -6,6 +6,7 @@
   <title>DI Fuel Pressure Deep Dive — TunerControl</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="../log-viewer/log-panel.css">
+  <link rel="stylesheet" href="../history/run-save.css">
 </head>
 <body>
   <div class="app-container">
@@ -64,6 +65,7 @@
 
       <div id="report-summary" class="report-block">
         <h2>Fuel Pressure Summary</h2>
+        <div id="history-save"></div>
         <div id="summary-content" class="report-content"></div>
       </div>
 
@@ -143,6 +145,8 @@
   <script src="../m1-config/tune-api.js"></script>
   <script src="../m1-config/tune-source.js"></script>
   <script src="m1pkg-rail.js"></script>
+  <script src="../history/run-store.js"></script>
+  <script src="../history/run-builders.js"></script>
   <script src="../log-viewer/log-chart.js"></script>
   <script src="../log-viewer/log-panel.js"></script>
   <script src="charts.js"></script>

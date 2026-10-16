@@ -43,7 +43,8 @@ let vePicked = false;    // the user chose the VE source themselves (don't repla
 let storedTunes = [];    // tunes stored by the M1 Config Viewer, newest first
 let lastResult = null; // stores the last processing result for table toggling
 let worker  = null;   // current Web Worker instance
-let lastRun = null;   // { file, settings } of the last processed log, for the log panel
+let lastRun = null;   // { file, settings, tune } of the last processed log, for the log panel and the tuning history
+let veTuneInfo = null; // { id, name } of the tune the VE table came from (id only for a stored tune), or { name: csv file name }
 let logPanel = null, logPanelReady = null;   // log panel (../log-viewer/log-panel.js) and its load promise for lastRun
 
 // ---------------------------------------------------------------------------
@@ -124,6 +125,7 @@ veInput.addEventListener('change', async () => {
             if (veInput.files[0] !== file) return; // a different file was picked meanwhile
             veFile = file;
             veM1pkgCsv = table.csv;
+            veTuneInfo = { id: null, name: table.tuneName || file.name };
             veFilename.textContent = `${file.name} — ${table.tuneName || 'tune'}, ` +
                 `${M1VE_TABLE_NAME} (${table.rpmSites} × ${table.mapSites})`;
             clearError();
@@ -136,6 +138,7 @@ veInput.addEventListener('change', async () => {
     } else if (file) {
         veFile = file;
         veFilename.textContent = file.name;
+        veTuneInfo = { id: null, name: file.name };
         clearError();
     } else {
         veFile = null;
@@ -245,6 +248,7 @@ async function useStoredTune(id, hint, suggested) {
         veFile = null;
         veInput.value = '';
         veFilename.textContent = `Stored tune: ${table.tuneName || 'tune'}, ${M1VE_TABLE_NAME} (${table.rpmSites} × ${table.mapSites})`;
+        veTuneInfo = { id, name: table.tuneName || null };
         veTuneHint.textContent = hint || '';
         veTuneHint.classList.toggle('suggested', !!suggested);
         clearError();
@@ -424,7 +428,7 @@ processBtn.addEventListener('click', async () => {
     const steadyWindowMs = Number.isNaN(steadyWindowRaw) ? 300 : steadyWindowRaw;
     const lambdaDelayMs = parseFloat(document.getElementById('lambda-delay').value) || 0;
     const payload = { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing, minMapForCorrection, decelFilterEnabled, steadyWindowMs, lambdaDelayMs };
-    lastRun = { file: logFile, settings: Object.assign({}, payload, { veText: undefined }) };
+    lastRun = { file: logFile, settings: Object.assign({}, payload, { veText: undefined }), tune: veTuneInfo };
     logPanelReady = null;
     if (isLd) {
         worker.postMessage(Object.assign({ type: 'process_ld', logBuffer: logData }, payload));
@@ -648,6 +652,12 @@ function renderResults(msg) {
     renderCorrectionTable(correctionGrid, tableContainer, tableLabel);
 
     document.getElementById('log-check').hidden = typeof LogPanel === 'undefined' || !lastRun;
+    if (typeof rsSaveControl === 'function' && lastRun) {
+        const run = lastRun;
+        rsSaveControl(document.getElementById('history-save'), () => rsLogFacts(run.file).then((facts) =>
+            Object.assign({ tool: 've', tuneId: run.tune && run.tune.id, tuneName: run.tune && run.tune.name, settings: run.settings },
+                facts, rbVe(msg))));
+    }
 
     // Show 3D surface section and initialize
     const surfaceSection = document.getElementById('surface-section');

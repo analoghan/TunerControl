@@ -6,6 +6,7 @@
   <title>VE Table Tuning Tool</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="../log-viewer/log-panel.css" />
+  <link rel="stylesheet" href="../history/run-save.css" />
 </head>
 <body>
   <div class="app-container">
@@ -142,6 +143,8 @@
         No valid samples were processed. No cells exceeded the hit threshold.
       </div>
 
+      <div id="history-save"></div>
+
       <div id="download-btns" class="download-buttons" hidden>
         <button id="download-diff-btn">Download VE_Difference.csv</button>
         <button id="download-new-btn">Download VE_New_Values.csv</button>
@@ -189,6 +192,8 @@
   <script src="../m1-config/tune-api.js"></script>
   <script src="../m1-config/tune-source.js"></script>
   <script src="m1pkg-ve.js"></script>
+  <script src="../history/run-store.js"></script>
+  <script src="../history/run-builders.js"></script>
   <script src="../log-viewer/log-chart.js"></script>
   <script src="../log-viewer/log-panel.js"></script>
   <script src="app.js"></script>

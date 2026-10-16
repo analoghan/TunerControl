@@ -17,6 +17,7 @@ logInput.addEventListener('change', function() {
 });
 
 var ffFromPkg = null;   // fuel film table read from a selected .m1pkg (null for CSV or no file)
+var ffTuneInfo = null;  // { id, name } of the tune the fuel film table came from (id only for a stored tune)
 
 ffTableInput.addEventListener('change', function() {
     var file = ffTableInput.files[0];
@@ -36,6 +37,7 @@ ffTableInput.addEventListener('change', function() {
         try {
             var film = m1pkgFuelFilm(parseM1Pkg(reader.result));
             ffFromPkg = film.table;
+            ffTuneInfo = { id: null, name: film.tuneName || file.name };
             applyTuneSettings(film);
             label.textContent = file.name + ' — ' + (film.tuneName || 'tune') + ', Fuel Film Primary Main (' +
                 film.table.breakpoints.length + ' sites); scale, offset and time constants filled from the tune' +
@@ -80,6 +82,7 @@ function useStoredTune(id, hint, suggested) {
         if (ffTuneSelect.value !== id) return;
         var film = m1pkgFuelFilm(pkg);
         ffFromPkg = film.table;
+        ffTuneInfo = { id: id, name: film.tuneName || null };
         ffFromStore = true;
         ffTableInput.value = '';
         applyTuneSettings(film);
@@ -199,7 +202,7 @@ var lastRun = null;                          // { file, settings } of the last a
 var logPanel = null, logPanelReady = null;   // log panel (../log-viewer/log-panel.js) and its load promise for lastRun
 
 function runAnalysis(logFile, files, settings) {
-    lastRun = { file: logFile, settings: settings };
+    lastRun = { file: logFile, settings: settings, tune: ffFromPkg ? ffTuneInfo : null };
     logPanelReady = null;
     try {
         var result;
@@ -232,6 +235,16 @@ function renderResults(result) {
     renderTipInTable(result.tipIns);
     renderTipOutTable(result.tipOuts);
     document.getElementById('log-check').hidden = typeof LogPanel === 'undefined';
+    if (typeof rsSaveControl === 'function' && lastRun) {
+        var run = lastRun;
+        rsSaveControl(document.getElementById('history-save'), function () {
+            return rsLogFacts(run.file).then(function (facts) {
+                var settings = Object.assign({}, run.settings);
+                return Object.assign({ tool: 'transient', tuneId: run.tune && run.tune.id, tuneName: run.tune && run.tune.name, settings: settings },
+                    facts, rbTransient(result));
+            });
+        });
+    }
     renderRecommendations(result.recommendations);
     if (result.ffCorrected) {
         renderCorrectedTable(result.ffTable, result.ffCorrected);

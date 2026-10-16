@@ -14,6 +14,8 @@
  *   harness_revisions every saved version of a harness (full model as JSON), newest = harnesses.revision
  *   harness_images connector/splice pictures, id = SHA-256 of the bytes (shared by all revisions)
  *   harness_systems harnesses joined by mating connectors: { harnesses: [ids], manual: [links], rejected: [links] }
+ *   runs           saved analysis runs (tuning history): tool ('ve' | 'transient' | 'knock' | 'fuel-pressure'), the log, the tune
+ *                  that was in the ECU, and the run's settings, summary and detail (JSON); id is a random UUID
  * View
  *   cell_values    cells joined with tune and item names — the easiest table for ad-hoc SQL
  */
@@ -25,7 +27,7 @@ var path = require('path');
 var DatabaseSync = require('node:sqlite').DatabaseSync;
 var parser = require('../lib/m1pkg-parser.js');
 
-var SCHEMA_VERSION = 4;
+var SCHEMA_VERSION = 5;
 var SCHEMA = [
     'CREATE TABLE IF NOT EXISTS packages (' +
     '  pk INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, file_name TEXT, file_size INTEGER, imported_at TEXT NOT NULL,' +
@@ -55,6 +57,10 @@ var SCHEMA = [
     '  saved TEXT NOT NULL, note TEXT, data_json TEXT NOT NULL, PRIMARY KEY (harness_id, revision))',
     'CREATE TABLE IF NOT EXISTS harness_images (id TEXT PRIMARY KEY, mime TEXT NOT NULL, data BLOB NOT NULL, created TEXT NOT NULL)',
     'CREATE TABLE IF NOT EXISTS harness_systems (id TEXT PRIMARY KEY, name TEXT NOT NULL, updated TEXT NOT NULL, data_json TEXT NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS runs (' +
+    '  id TEXT PRIMARY KEY, tool TEXT NOT NULL, created TEXT NOT NULL, log_name TEXT, log_time TEXT, serial INTEGER,' +
+    '  tune_id TEXT, tune_name TEXT, note TEXT, summary_json TEXT NOT NULL, data_json TEXT NOT NULL)',
+    'CREATE INDEX IF NOT EXISTS runs_by_tool ON runs (tool, log_time)',
     'CREATE VIEW IF NOT EXISTS cell_values AS' +
     '  SELECT p.id AS package_id, p.tune_name, p.modified, n.name AS item_name, c.cell_key, c.value, c.text_value' +
     '  FROM cells c JOIN packages p ON p.pk = c.package_pk JOIN item_names n ON n.id = c.name_id'
@@ -159,6 +165,9 @@ TuneStore.prototype.importBackup = function (backup) {
         });
         var names = backup.resourceNames || {};
         Object.keys(names).forEach(function (k) { self.setResourceName(k, names[k]); });
+        (Array.isArray(backup.runs) ? backup.runs : []).forEach(function (run) {
+            if (run && run.id && !self.getRun(run.id) && RUN_TOOLS.indexOf(run.tool) >= 0 && run.summary) self.saveRun(run);
+        });
     });
     return added;
 };
@@ -351,8 +360,57 @@ TuneStore.prototype.exportBackup = function () {
     return {
         format: 'tunercontrol-m1-backup', version: 1, exportedAt: new Date().toISOString(),
         packages: this.listSummaries().map(function (s) { return self.getPackage(s.id); }),
-        resourceNames: this.listResourceNames()
+        resourceNames: this.listResourceNames(),
+        runs: this.listRuns(null, true)
     };
+};
+
+// --- Tuning history: saved analysis runs ---------------------------------------------------------------
+
+var RUN_TOOLS = ['ve', 'transient', 'knock', 'fuel-pressure'];
+
+function runRecord(r, full) {
+    var rec = { id: r.id, tool: r.tool, created: r.created, logName: r.log_name, logTime: r.log_time, serial: r.serial,
+                tuneId: r.tune_id, tuneName: r.tune_name, note: r.note || '', summary: JSON.parse(r.summary_json) };
+    if (full) {
+        var d = JSON.parse(r.data_json);
+        rec.settings = d.settings || null;
+        rec.data = d.data || null;
+    }
+    return rec;
+}
+
+/** Saved runs, oldest log first (tool null = all tools). full adds settings and detail data. */
+TuneStore.prototype.listRuns = function (tool, full) {
+    var sql = 'SELECT * FROM runs' + (tool ? ' WHERE tool = ?' : '') + ' ORDER BY COALESCE(log_time, created), created';
+    var rows = tool ? this.db.prepare(sql).all(tool) : this.db.prepare(sql).all();
+    return rows.map(function (r) { return runRecord(r, full); });
+};
+
+TuneStore.prototype.getRun = function (id) {
+    var r = this.db.prepare('SELECT * FROM runs WHERE id = ?').get(id);
+    return r ? runRecord(r, true) : null;
+};
+
+/** Store a run { tool, logName, logTime, serial, tuneId, tuneName, note, settings, summary, data } (id kept if given). */
+TuneStore.prototype.saveRun = function (run) {
+    if (!run || RUN_TOOLS.indexOf(run.tool) < 0) throw new Error('tool must be one of ' + RUN_TOOLS.join(', '));
+    if (!run.summary || typeof run.summary !== 'object') throw new Error('summary is required');
+    var id = run.id && /^[0-9a-zA-Z-]{8,64}$/.test(run.id) ? run.id : require('crypto').randomUUID();
+    this.db.prepare('INSERT INTO runs (id, tool, created, log_name, log_time, serial, tune_id, tune_name, note, summary_json, data_json) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING').run(
+        id, run.tool, run.created || new Date().toISOString(), run.logName || null, run.logTime || null,
+        typeof run.serial === 'number' ? run.serial : null, run.tuneId || null, run.tuneName || null, run.note || '',
+        JSON.stringify(run.summary), JSON.stringify({ settings: run.settings || null, data: run.data || null }));
+    return this.getRun(id);
+};
+
+TuneStore.prototype.setRunNote = function (id, note) {
+    return this.db.prepare('UPDATE runs SET note = ? WHERE id = ?').run(String(note || ''), id).changes > 0;
+};
+
+TuneStore.prototype.deleteRun = function (id) {
+    return this.db.prepare('DELETE FROM runs WHERE id = ?').run(id).changes > 0;
 };
 
 module.exports = { TuneStore: TuneStore };

@@ -1,0 +1,9 @@
+/* history/run-save.css — the "Save to tuning history" control on the tool pages. */
+.rs-save { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; font-size: 0.85rem; color: #bbb; }
+.rs-save .rs-note { background: #222; color: #fff; border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font: inherit; width: 280px; max-width: 100%; }
+.rs-save .rs-btn { background: #222; color: #fff; border: 1px solid #E31837; border-radius: 4px; padding: 6px 12px; font: inherit; cursor: pointer; }
+.rs-save .rs-btn:hover { background: #333; }
+.rs-save .rs-btn:disabled { opacity: 0.5; cursor: default; }
+.rs-save .rs-status { color: #81c784; }
+.rs-save .rs-status.rs-error { color: #f44336; }
+.rs-save .rs-link { color: #ff5a6e; margin-left: auto; }

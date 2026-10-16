@@ -32,6 +32,11 @@
  *   POST   /api/harness-systems             body { name, harnesses, manual, rejected } → system
  *   PUT    /api/harness-systems/:id         same body → system
  *   DELETE /api/harness-systems/:id         (the harnesses themselves are kept)
+ *   GET    /api/runs[?tool=T][&full=1]       tuning history runs, oldest log first (full adds settings and data)
+ *   POST   /api/runs                         body { tool, logName, logTime, serial, tuneId, tuneName, note, settings, summary, data } → run
+ *   GET    /api/runs/:id                     one run with settings and data
+ *   PUT    /api/runs/:id                     body { note } → run
+ *   DELETE /api/runs/:id
  *   POST   /api/harness-images              body = PNG/JPEG/GIF/WebP bytes (Content-Type image/*) → { id }
  *   GET    /api/harness-images/:id          image bytes (ids are SHA-256 of the content, so cacheable forever)
  */
@@ -163,6 +168,36 @@ function handleApi(req, res, url, store) {
         var item = url.searchParams.get('item');
         if (!item) throw new HttpError(400, 'item is required');
         return sendJson(req, res, 200, store.history(item, url.searchParams.has('cell') ? url.searchParams.get('cell') : null));
+    }
+
+    if (parts[0] === 'runs') {
+        if (parts.length === 1 && method === 'GET') {
+            return sendJson(req, res, 200, store.listRuns(url.searchParams.get('tool') || null, url.searchParams.get('full') === '1'));
+        }
+        if (parts.length === 1 && method === 'POST') {
+            return readJson(req).then(function (body) {
+                var saved;
+                try { saved = store.saveRun(body); } catch (err) { throw new HttpError(400, err.message); }
+                sendJson(req, res, 201, saved);
+            });
+        }
+        var runId = parts[1];
+        if (parts.length === 2 && method === 'GET') {
+            var run = store.getRun(runId);
+            if (!run) throw new HttpError(404, 'Run not found');
+            return sendJson(req, res, 200, run);
+        }
+        if (parts.length === 2 && method === 'PUT') {
+            return readJson(req).then(function (body) {
+                if (!body || typeof body.note !== 'string') throw new HttpError(400, 'note is required');
+                if (!store.setRunNote(runId, body.note)) throw new HttpError(404, 'Run not found');
+                sendJson(req, res, 200, store.getRun(runId));
+            });
+        }
+        if (parts.length === 2 && method === 'DELETE') {
+            if (!store.deleteRun(runId)) throw new HttpError(404, 'Run not found');
+            res.writeHead(204); return res.end();
+        }
     }
 
     if (parts[0] === 'resource-names' && parts.length === 1) {

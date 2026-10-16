@@ -33,6 +33,8 @@ var selectedFile = null;
 var worker = null;
 var collectedWarnings = [];
 var tuneKnock = null;      // knock settings from the chosen tune (m1pkg-knock.js), or null
+var tuneId = null;         // stored tune id of tuneKnock (null for a .m1pkg file)
+var lastRunInfo = null;    // { file, settings, tuneId, tuneName } of the shown results, for the tuning history
 var tunePicked = false;    // the user chose the tune source themselves
 var storedTunes = [];
 var lastRunFile = null;    // the log of the shown results, for the log panel
@@ -77,6 +79,7 @@ pkgInput.addEventListener('change', function () {
     tuneSelect.value = '';
     tuneHint.textContent = '';
     file.arrayBuffer().then(function (buf) {
+        tuneId = null;
         setTune(m1pkgKnock(parseM1Pkg(buf)), 'Tune file ' + file.name);
     }).catch(function (err) {
         setTune(null);
@@ -91,6 +94,7 @@ function useStoredTune(id, hint, suggested) {
     return tsLoad(id).then(function (pkg) {
         if (tuneSelect.value !== id) return;
         pkgInput.value = '';
+        tuneId = id;
         setTune(m1pkgKnock(pkg), 'Stored tune');
         tuneHint.textContent = hint || '';
         tuneHint.classList.toggle('suggested', !!suggested);
@@ -264,6 +268,7 @@ function handleAnalyzeClick() {
 
         var settings = knockSettings();
         lastRunFile = selectedFile;
+        lastRunInfo = { file: selectedFile, settings: settings, tuneId: tuneKnock ? tuneId : null, tuneName: tuneKnock ? tuneKnock.tuneName : null };
         logPanelReady = null;
         if (isLD) {
             // Post ArrayBuffer for .ld binary parsing
@@ -431,6 +436,17 @@ function renderReport(analysis) {
     renderCylinderDistribution(analysis.cylinderDistribution);
 
     renderSensorHealth(analysis.sensorHealth);
+    if (typeof rsSaveControl === 'function' && lastRunInfo) {
+        var run = lastRunInfo;
+        rsSaveControl(document.getElementById('history-save'), function () {
+            return rsLogFacts(run.file).then(function (facts) {
+                var s = run.settings;
+                return Object.assign({ tool: 'knock', tuneId: run.tuneId, tuneName: run.tuneName,
+                    settings: { threshold: typeof s.threshold === 'number' ? s.threshold : 'tune', thresholdLabel: s.thresholdLabel } },
+                    facts, rbKnock(analysis));
+            });
+        });
+    }
     renderKnockEvents(analysis.events || [], analysis.totalEvents || 0);
 
     // Render timing recommendations table

@@ -167,6 +167,57 @@ test('HTTP API: harness systems', function () {
     });
 });
 
+test('stores tuning history runs, oldest log first, and backs them up', function () {
+    var store = new TuneStore(':memory:');
+    var b = store.saveRun({ tool: 've', logName: 'b.ld', logTime: '2026-06-11T17:32:21Z', tuneName: 'V55', summary: { cells: 3 },
+                            settings: { steadyWindowMs: 300 }, data: { grid: [1, 2] } });
+    var a = store.saveRun({ tool: 've', logName: 'a.ld', logTime: '2026-05-23T18:11:58Z', summary: { cells: 1 } });
+    store.saveRun({ tool: 'knock', logName: 'a.ld', summary: { events: 0 } });
+    assert.deepStrictEqual(store.listRuns('ve').map(function (r) { return r.logName; }), ['a.ld', 'b.ld']);
+    assert.strictEqual(store.listRuns('ve')[1].data, undefined, 'list leaves out the detail');
+    assert.deepStrictEqual(store.listRuns('ve', true)[1].data, { grid: [1, 2] });
+    assert.strictEqual(store.listRuns(null).length, 3);
+    assert.ok(store.setRunNote(a.id, 'before the VE change'));
+    assert.strictEqual(store.getRun(a.id).note, 'before the VE change');
+    assert.throws(function () { store.saveRun({ tool: 'nope', summary: {} }); });
+    var copy = new TuneStore(':memory:');
+    copy.importBackup(store.exportBackup());
+    assert.strictEqual(copy.listRuns(null).length, 3);
+    assert.deepStrictEqual(copy.getRun(b.id).settings, { steadyWindowMs: 300 });
+    assert.ok(store.deleteRun(b.id));
+    assert.strictEqual(store.getRun(b.id), null);
+});
+
+test('HTTP API: tuning history runs', function () {
+    var server = createServer(new TuneStore(':memory:'));
+    return new Promise(function (resolve) { server.listen(0, '127.0.0.1', resolve); }).then(function () {
+        var base = 'http://127.0.0.1:' + server.address().port + '/api/runs';
+        var headers = { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' }, id;
+        return fetch(base, { method: 'POST', headers: headers, body: JSON.stringify({ tool: 'knock', logName: 'x.ld', summary: { events: 2 }, data: { d: 1 } }) })
+            .then(function (r) { assert.strictEqual(r.status, 201); return r.json(); })
+            .then(function (run) {
+                id = run.id;
+                return fetch(base + '?tool=knock&full=1', { headers: headers });
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (list) {
+                assert.deepStrictEqual(list.map(function (r) { return [r.logName, r.data.d]; }), [['x.ld', 1]]);
+                return fetch(base + '/' + id, { method: 'PUT', headers: headers, body: JSON.stringify({ note: 'n' }) });
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (run) {
+                assert.strictEqual(run.note, 'n');
+                return fetch(base, { method: 'POST', headers: headers, body: JSON.stringify({ tool: 'bad', summary: {} }) });
+            })
+            .then(function (r) {
+                assert.strictEqual(r.status, 400);
+                return fetch(base + '/' + id, { method: 'DELETE', headers: headers });
+            })
+            .then(function (r) { assert.strictEqual(r.status, 204); })
+            .finally(function () { server.close(); });
+    });
+});
+
 test('HTTP API: harness images are stored once by content hash', function () {
     var server = createServer(new TuneStore(':memory:'));
     var png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tuning History — MoTeC M1</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .app-container { max-width: 1200px; }
+    .hi-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 16px; }
+    .hi-tab { background: #222; color: #ccc; border: 1px solid #333; border-radius: 4px; padding: 8px 14px; font: inherit; cursor: pointer; }
+    .hi-tab.active { border-color: #E31837; color: #fff; }
+    .hi-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .hi-table th, .hi-table td { padding: 6px 8px; border-bottom: 1px solid #2a2a2a; text-align: left; color: #ccc; vertical-align: top; }
+    .hi-table th { background: #1d1d1d; color: #fff; }
+    .hi-table small { color: #777; }
+    .hi-actions { white-space: nowrap; }
+    .hi-actions button { background: #222; color: #ddd; border: 1px solid #444; border-radius: 4px; padding: 3px 8px; font: inherit; font-size: 0.78rem; cursor: pointer; }
+    .hi-actions button:hover { border-color: #E31837; }
+    .hi-detail td { background: #151515; }
+    .hi-detail li { margin-bottom: 4px; }
+    .hi-detail .sev-warning { color: #ffb74d; } .hi-detail .sev-critical { color: #f44336; } .hi-detail .sev-good { color: #81c784; }
+    .hi-note { color: #888; font-size: 0.85rem; }
+    .hi-error { color: #f44336; }
+    #hi-trends h3 { margin: 22px 0 6px; font-size: 0.95rem; color: #fff; }
+    .hi-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.78rem; color: #bbb; margin-top: 4px; }
+    .hi-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+    .hi-scroll { overflow-x: auto; }
+    .hi-chart { max-width: 760px; display: block; }
+    .subtitle a { color: #ff5a6e; }
+    .hi-grid { border-collapse: collapse; font-size: 0.72rem; }
+    .hi-grid th, .hi-grid td { border: 1px solid #2a2a2a; padding: 3px 5px; text-align: center; min-width: 34px; color: #ccc; }
+    .hi-grid th { background: #1d1d1d; }
+    .hi-grid td { cursor: pointer; }
+    .hi-grid td.ok { background: rgba(76,175,80,0.15); } .hi-grid td.pos { background: rgba(255,152,0,0.22); } .hi-grid td.neg { background: rgba(33,150,243,0.22); }
+    .hi-grid td.sel, .hi-grid td:focus-visible { outline: 2px solid #E31837; outline-offset: -2px; }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Tuning History</h1>
+    <p class="subtitle">Analysis runs saved from VE Table Tuning, the Transient Fuel Analyzer, the Knock Analyzer and the DI Fuel Pressure tool,
+      in log order — so you can see whether each change to the tune moved the results the right way.
+      <a href="help.html">Help</a></p>
+    <p id="hi-storage" class="hi-note"></p>
+
+    <div id="hi-tabs" class="hi-tabs" role="tablist" aria-label="Tool"></div>
+    <section id="hi-list" aria-label="Saved runs"></section>
+    <section id="hi-trends" aria-label="Trends"></section>
+  </div>
+  <script src="../m1-config/tune-api.js"></script>
+  <script src="../m1-config/tune-source.js"></script>
+  <script src="run-store.js"></script>
+  <script src="run-builders.js"></script>
+  <script src="history.js"></script>
+</body>
+</html>
