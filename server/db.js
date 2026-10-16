@@ -9,7 +9,8 @@
  *   items          one row per parameter/table/IO resource per package (full parsed item as JSON)
  *   cells          one row per individual value (scalar, axis site or table cell) for SQL queries
  *   resource_names user names for I/O resources, key = 'HARDWARE|signature'
- *   harnesses      wiring harness designs (harness/ page); id is a random UUID
+ *   harnesses      wiring harness designs (harness/ page); id is a random UUID; revision = highest revision
+ *                  number ever saved (numbers are not reused after a revision is deleted)
  *   harness_revisions every saved version of a harness (full model as JSON), newest = harnesses.revision
  *   harness_images connector/splice pictures, id = SHA-256 of the bytes (shared by all revisions)
  * View
@@ -234,22 +235,43 @@ TuneStore.prototype.setResourceName = function (key, name) {
 // Wiring harnesses
 // ---------------------------------------------------------------------------
 
+/** Harness summaries, newest first; revision = latest stored revision. */
 TuneStore.prototype.listHarnesses = function () {
-    return this.db.prepare('SELECT id, name, created, updated, revision FROM harnesses ORDER BY updated DESC').all()
+    return this.db.prepare('SELECT h.id, h.name, h.created, h.updated,' +
+        ' (SELECT MAX(revision) FROM harness_revisions r WHERE r.harness_id = h.id) AS revision' +
+        ' FROM harnesses h ORDER BY h.updated DESC').all()
         .map(function (r) { return Object.assign({}, r); });
 };
 
-/** Latest (or a given) revision: { id, name, created, updated, revision, saved, note, data, revisions }. */
+/** Latest (or a given) revision: { id, name, created, updated, revision, saved, note, data, revisions, latest }. */
 TuneStore.prototype.getHarness = function (id, revision) {
-    var h = this.db.prepare('SELECT id, name, created, updated, revision FROM harnesses WHERE id = ?').get(id);
+    var h = this.db.prepare('SELECT id, name, created, updated FROM harnesses WHERE id = ?').get(id);
     if (!h) return null;
-    var rev = this.db.prepare('SELECT revision, saved, note, data_json FROM harness_revisions WHERE harness_id = ? AND revision = ?')
-        .get(id, revision || h.revision);
-    if (!rev) return null;
     var revisions = this.db.prepare('SELECT revision, saved, note FROM harness_revisions WHERE harness_id = ? ORDER BY revision DESC')
         .all(id).map(function (r) { return Object.assign({}, r); });
+    if (!revisions.length) return null;
+    var latest = revisions[0].revision;
+    var rev = this.db.prepare('SELECT revision, saved, note, data_json FROM harness_revisions WHERE harness_id = ? AND revision = ?')
+        .get(id, revision || latest);
+    if (!rev) return null;
     return Object.assign({}, h, { revision: rev.revision, saved: rev.saved, note: rev.note,
-        data: JSON.parse(rev.data_json), revisions: revisions, latest: h.revision });
+        data: JSON.parse(rev.data_json), revisions: revisions, latest: latest });
+};
+
+/**
+ * Delete one revision. Returns { latest } (the newest remaining revision), null when the harness or revision
+ * doesn't exist, or throws when it is the only revision left (delete the harness instead).
+ */
+TuneStore.prototype.deleteHarnessRevision = function (id, revision) {
+    var self = this;
+    return this.transaction(function () {
+        var count = self.db.prepare('SELECT COUNT(*) AS n FROM harness_revisions WHERE harness_id = ?').get(id).n;
+        var exists = self.db.prepare('SELECT 1 FROM harness_revisions WHERE harness_id = ? AND revision = ?').get(id, revision);
+        if (!exists) return null;
+        if (count <= 1) throw new Error('This is the only revision; delete the harness instead');
+        self.db.prepare('DELETE FROM harness_revisions WHERE harness_id = ? AND revision = ?').run(id, revision);
+        return { latest: self.db.prepare('SELECT MAX(revision) AS r FROM harness_revisions WHERE harness_id = ?').get(id).r };
+    });
 };
 
 /** Save a new revision (creating the harness when id is null). Returns { id, revision }. */

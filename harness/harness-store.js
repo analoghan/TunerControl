@@ -3,7 +3,8 @@
  *
  * Uses the TunerControl server when the page is served by one (server/server.js, /api/harnesses),
  * otherwise IndexedDB database "tunercontrol-harness" in this browser:
- *   harnesses : { id, name, created, updated, revision }
+ *   harnesses : { id, name, created, updated, revision, latest }  revision = highest number ever saved
+ *               (not reused after a delete), latest = newest stored revision
  *   revisions : { harnessId, revision, saved, note, data }   key [harnessId, revision]
  *   images    : { id, mime, data: Blob }   connector/splice pictures, id = hash of the bytes
  * Tunes for the tune comparison come from the M1 Config Viewer's storage (tune-db.js / tune-api.js).
@@ -73,17 +74,21 @@ function hsList() {
     var list = hsBackend === 'browser'
         ? hsTx(['harnesses'], 'readonly', function (tx) { return hsReq(tx.objectStore('harnesses').getAll()); })
         : Promise.resolve(Object.keys(hsMemory.harnesses).map(function (k) { return hsMemory.harnesses[k]; }));
-    return list.then(function (rows) { return rows.sort(function (a, b) { return a.updated < b.updated ? 1 : -1; }); });
+    return list.then(function (rows) {
+        return rows.map(function (h) { return Object.assign({}, h, { revision: h.latest || h.revision }); })
+            .sort(function (a, b) { return a.updated < b.updated ? 1 : -1; });
+    });
 }
 
 /** Latest or given revision: { id, name, revision, saved, note, data, revisions: [{ revision, saved, note }], latest }. */
 function hsLoad(id, revision) {
     if (hsBackend === 'server') return tuneApi('GET', 'harnesses/' + encodeURIComponent(id) + (revision ? '?revision=' + revision : ''));
     function build(h, revs) {
-        if (!h) throw new Error('Harness not found');
-        var rev = revs.filter(function (r) { return r.revision === (revision || h.revision); })[0];
+        if (!h || !revs.length) throw new Error('Harness not found');
+        var latest = Math.max.apply(null, revs.map(function (r) { return r.revision; }));
+        var rev = revs.filter(function (r) { return r.revision === (revision || latest); })[0];
         if (!rev) throw new Error('Revision not found');
-        return Object.assign({}, h, { revision: rev.revision, saved: rev.saved, note: rev.note, data: rev.data, latest: h.revision,
+        return Object.assign({}, h, { revision: rev.revision, saved: rev.saved, note: rev.note, data: rev.data, latest: latest,
             revisions: revs.map(function (r) { return { revision: r.revision, saved: r.saved, note: r.note }; })
                 .sort(function (a, b) { return b.revision - a.revision; }) });
     }
@@ -105,7 +110,7 @@ function hsSave(id, name, data, note) {
     if (hsBackend === 'memory') {
         var h = id ? hsMemory.harnesses[id] : null;
         if (!h) { id = hsUuid(); h = hsMemory.harnesses[id] = { id: id, name: name, created: now, updated: now, revision: 0 }; }
-        h.revision++; h.name = name; h.updated = now;
+        h.revision++; h.latest = h.revision; h.name = name; h.updated = now;
         (hsMemory.revisions[id] = hsMemory.revisions[id] || []).push({ harnessId: id, revision: h.revision, saved: now, note: note || '', data: copy });
         return Promise.resolve({ id: id, revision: h.revision, saved: now });
     }
@@ -113,10 +118,38 @@ function hsSave(id, name, data, note) {
         var hs = tx.objectStore('harnesses');
         return (id ? hsReq(hs.get(id)) : Promise.resolve(null)).then(function (h) {
             if (!h) { id = id || hsUuid(); h = { id: id, name: name, created: now, updated: now, revision: 0 }; }
-            h.revision++; h.name = name; h.updated = now;
+            h.revision++; h.latest = h.revision; h.name = name; h.updated = now;
             hs.put(h);
             tx.objectStore('revisions').put({ harnessId: id, revision: h.revision, saved: now, note: note || '', data: copy });
             return { id: id, revision: h.revision, saved: now };
+        });
+    });
+}
+
+/** Delete one revision. Resolves { latest }; rejects when it is the only revision left. */
+function hsDeleteRevision(id, revision) {
+    if (hsBackend === 'server') return tuneApi('DELETE', 'harnesses/' + encodeURIComponent(id) + '/revisions/' + revision);
+    function check(revs) {
+        if (!revs.some(function (r) { return r.revision === revision; })) throw new Error('Revision not found');
+        if (revs.length <= 1) throw new Error('This is the only revision; delete the harness instead');
+        return Math.max.apply(null, revs.filter(function (r) { return r.revision !== revision; }).map(function (r) { return r.revision; }));
+    }
+    if (hsBackend === 'memory') {
+        return Promise.resolve().then(function () {
+            var revs = hsMemory.revisions[id] || [], latest = check(revs);
+            hsMemory.revisions[id] = revs.filter(function (r) { return r.revision !== revision; });
+            hsMemory.harnesses[id].latest = latest;
+            return { latest: latest };
+        });
+    }
+    return hsTx(['harnesses', 'revisions'], 'readwrite', function (tx) {
+        var revStore = tx.objectStore('revisions'), hs = tx.objectStore('harnesses');
+        return Promise.all([hsReq(hs.get(id)), hsReq(revStore.index('harnessId').getAll(id))]).then(function (r) {
+            var latest = check(r[1]);
+            revStore.delete([id, revision]);
+            r[0].latest = latest;
+            hs.put(r[0]);
+            return { latest: latest };
         });
     });
 }

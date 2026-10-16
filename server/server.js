@@ -27,6 +27,7 @@
  *   GET    /api/harnesses/:id[?revision=N]   latest (or given) revision with data and revision list
  *   PUT    /api/harnesses/:id                body { name, data, note } → new revision { id, revision, saved }
  *   DELETE /api/harnesses/:id
+ *   DELETE /api/harnesses/:id/revisions/:n   delete one revision → { latest } (409 if it is the only one)
  *   POST   /api/harness-images              body = PNG/JPEG/GIF/WebP bytes (Content-Type image/*) → { id }
  *   GET    /api/harness-images/:id          image bytes (ids are SHA-256 of the content, so cacheable forever)
  */
@@ -194,6 +195,13 @@ function handleApi(req, res, url, store) {
         if (parts.length === 2 && method === 'DELETE') {
             if (!store.deleteHarness(hid)) throw new HttpError(404, 'Harness not found');
             res.writeHead(204); return res.end();
+        }
+        if (parts.length === 4 && parts[2] === 'revisions' && method === 'DELETE') {
+            var deleted;
+            try { deleted = store.deleteHarnessRevision(hid, parseInt(parts[3], 10)); }
+            catch (err) { throw new HttpError(409, err.message); }
+            if (!deleted) throw new HttpError(404, 'Revision not found');
+            return sendJson(req, res, 200, deleted);
         }
     }
 

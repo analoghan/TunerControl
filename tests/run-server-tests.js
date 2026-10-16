@@ -109,6 +109,23 @@ test('stores harness revisions and deletes them with the harness', function () {
     assert.strictEqual(store.db.prepare('SELECT COUNT(*) AS n FROM harness_revisions').get().n, 0);
 });
 
+test('deletes single harness revisions without reusing their numbers', function () {
+    var store = new TuneStore(':memory:');
+    var model = { name: 'H', sheets: [], connectors: [], splices: [] };
+    var id = store.saveHarness(null, 'H', model, 'one').id;
+    store.saveHarness(id, 'H', model, 'two');
+    store.saveHarness(id, 'H', model, 'three');
+    assert.deepStrictEqual(store.deleteHarnessRevision(id, 2), { latest: 3 });
+    assert.deepStrictEqual(store.getHarness(id).revisions.map(function (r) { return r.revision; }), [3, 1]);
+    assert.deepStrictEqual(store.deleteHarnessRevision(id, 3), { latest: 1 });
+    assert.strictEqual(store.getHarness(id).revision, 1);
+    assert.strictEqual(store.listHarnesses()[0].revision, 1);
+    assert.strictEqual(store.saveHarness(id, 'H', model, 'four').revision, 4, 'numbers are not reused');
+    assert.strictEqual(store.deleteHarnessRevision(id, 2), null);
+    store.deleteHarnessRevision(id, 1);
+    assert.throws(function () { store.deleteHarnessRevision(id, 4); }, /only revision/);
+});
+
 test('HTTP API: harness images are stored once by content hash', function () {
     var server = createServer(new TuneStore(':memory:'));
     var png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
@@ -165,6 +182,15 @@ test('HTTP API: harnesses', function () {
             .then(function (r) { return r.json(); })
             .then(function (h) {
                 assert.deepStrictEqual([h.revision, h.latest, h.revisions.length], [1, 2, 2]);
+                return fetch(base + '/' + id + '/revisions/2', { method: 'DELETE', headers: headers });
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                assert.deepStrictEqual(j, { latest: 1 });
+                return fetch(base + '/' + id + '/revisions/1', { method: 'DELETE', headers: headers });
+            })
+            .then(function (r) {
+                assert.strictEqual(r.status, 409, 'cannot delete the only revision');
                 return fetch(base + '/' + id, { method: 'DELETE', headers: headers });
             })
             .then(function (r) {

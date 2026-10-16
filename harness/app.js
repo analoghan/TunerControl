@@ -136,6 +136,22 @@ function downloadXlsx(bytes) {
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
 }
 
+/** Delete the revision being viewed, then show the newest remaining one. */
+function deleteRevision() {
+    if (!state.id || state.revisions.length < 2) return;
+    var r = state.revisions.filter(function (x) { return x.revision === state.revision; })[0] || {};
+    var msg = 'Delete revision ' + state.revision + (r.saved ? ' (' + new Date(r.saved).toLocaleString() + (r.note ? ' — ' + r.note : '') + ')' : '') +
+        '? ' + (state.revisions.length === 2 ? 'The other revision is kept.' : 'The other ' + (state.revisions.length - 1) + ' revisions are kept.') +
+        (state.dirty ? '\n\nYour unsaved changes will be discarded.' : '');
+    if (!window.confirm(msg)) return;
+    var deleted = state.revision;
+    hsDeleteRevision(state.id, deleted).then(function (res) {
+        setDirty(false);
+        setStatus('Deleted revision ' + deleted + '.');
+        return refreshHarnessList(state.id).then(function () { return openHarness(state.id, res.latest); });
+    }).catch(function (err) { showError('Could not delete the revision: ' + err.message); });
+}
+
 function deleteHarness() {
     if (!state.id) { state.model = null; setDirty(false); hideEditor(); return; }
     if (!window.confirm('Delete "' + state.name + '" and all of its revisions?')) return;
@@ -167,6 +183,8 @@ function showEditor() {
     }).join('') : '<option value="">Not saved</option>';
     if (state.revision) rs.value = String(state.revision);
     rs.disabled = !state.revisions.length;
+    $('delete-revision-btn').disabled = state.revisions.length < 2;
+    $('delete-revision-btn').title = state.revisions.length < 2 ? 'Only one revision — use Delete to remove the harness' : '';
     var older = state.id && state.revision !== state.latest;
     $('revision-hint').hidden = !older;
     $('revision-hint').textContent = older ? 'Viewing revision ' + state.revision + ' of ' + state.latest +
@@ -875,6 +893,7 @@ $('new-btn').addEventListener('click', function () { if (confirmDiscard()) newHa
 $('save-btn').addEventListener('click', saveHarness);
 $('export-btn').addEventListener('click', exportXlsx);
 $('delete-btn').addEventListener('click', deleteHarness);
+$('delete-revision-btn').addEventListener('click', deleteRevision);
 $('name-input').addEventListener('input', function () { setDirty(true); });
 $('revision-select').addEventListener('change', function () {
     var rev = parseInt(this.value, 10);
