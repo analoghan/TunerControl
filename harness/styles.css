@@ -67,6 +67,29 @@ tr.issue-row li.issue-warning .issue-text { color: #ffb74d; }
 .actions { white-space: nowrap; text-align: right; }
 .ok-banner { background: rgba(76,175,80,0.1); border: 1px solid #4caf50; color: #4caf50; border-radius: 4px; padding: 10px 14px; }
 
+/* Images */
+.images-section { margin: 4px 0 14px; }
+.images-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.images-head h3 { margin: 0; font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.image-strip { display: flex; flex-wrap: wrap; gap: 10px; }
+.image-card { position: relative; background: #fff; border: 1px solid #333; border-radius: 6px; padding: 4px; width: 170px; }
+.image-card .thumb { display: block; width: 100%; height: 130px; object-fit: contain; cursor: zoom-in; background: #fff; border: none; padding: 0; }
+.image-card .thumb img { width: 100%; height: 100%; object-fit: contain; }
+.image-card input { width: 100%; margin-top: 4px; background: #222; border: 1px solid #333; color: #ddd; border-radius: 3px; padding: 2px 5px; font-size: 0.75rem; }
+.image-card .remove-image { position: absolute; top: 4px; right: 4px; }
+.image-viewer { max-width: 95vw; max-height: 95vh; background: #fff; border: none; border-radius: 8px; padding: 10px; }
+.image-viewer::backdrop { background: rgba(0,0,0,0.75); }
+.image-viewer img { display: block; max-width: calc(95vw - 40px); max-height: calc(95vh - 90px); margin: 6px auto 0; }
+.image-viewer form { text-align: right; }
+.image-viewer .hint { color: #444; text-align: center; margin: 6px 0 0; }
+
+/* Diagram */
+.diagram-bar { margin: 0 0 12px; }
+.diagram-bar select { min-width: 260px; }
+.diagram-hint { margin: 0; }
+.diagram-wrap { background: #fff; border: 1px solid #333; border-radius: 8px; overflow: auto; max-height: calc(100vh - 120px); }
+.diagram-wrap svg { display: block; }
+
 /* Tune comparison */
 .tune-summary { margin: 12px 0; }
 .summary-stat.status-ok .stat-value { color: #4caf50; }

@@ -87,6 +87,42 @@ describe('XLSX — readXlsx / writeXlsx', function () {
   });
 });
 
+describe('XLSX — pictures', function () {
+  var png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7, 7]);
+
+  it('writes pictures next to cells and reads back their anchors, sizes and bytes', function () {
+    var sheets = [{ name: 'S', rows: [['a']], images: [{ row: 3, col: 8, cx: 300 * 9525, cy: 200 * 9525, mime: 'image/png', data: png }] },
+                  { name: 'T', rows: [['b']] }];
+    return readXlsx(writeXlsx(sheets)).then(function (wb) {
+      assert.equal(wb.sheets[0].images.length, 1);
+      var im = wb.sheets[0].images[0];
+      assert.deepEqual([im.row, im.col, im.cx, im.cy, im.mime], [3, 8, 300 * 9525, 200 * 9525, 'image/png']);
+      assert.deepEqual(Array.from(im.data), Array.from(png));
+      assert.deepEqual(wb.sheets[1].images, []);
+    });
+  });
+
+  it('attaches pictures to the block beside them and exports them again', function () {
+    var wb = hxWorkbook();
+    wb.sheets[1].images = [
+      { row: 1, col: 8, cx: 9525 * 100, cy: 9525 * 50, mime: 'image/png', data: png },     // beside MAP
+      { row: 7, col: 8, cx: 9525 * 80, cy: 9525 * 80, mime: 'image/png', data: png }       // beside PEDAL
+    ];
+    var m = harnessFromWorkbook(wb, 'T');
+    var map = m.connectors.filter(function (c) { return c.id === 'MAP'; })[0];
+    var pedal = m.connectors.filter(function (c) { return c.id === 'PEDAL'; })[0];
+    assert.deepEqual([map.images.length, pedal.images.length], [1, 1]);
+    assert.deepEqual([map.images[0].w, map.images[0].h], [100, 50]);
+    // Stored images are exported from the bytes map.
+    map.images[0] = { id: 'img1', mime: 'image/png', w: 100, h: 50, caption: '' };
+    return readXlsx(writeXlsx(harnessToWorkbook(m, { img1: png }))).then(function (out) {
+      var again = harnessFromWorkbook(out, 'T');
+      assert.equal(again.connectors.filter(function (c) { return c.id === 'MAP'; })[0].images.length, 1);
+      assert.equal(again.connectors.filter(function (c) { return c.id === 'PEDAL'; })[0].images.length, 1);
+    });
+  });
+});
+
 describe('Harness — workbook import and export', function () {
   it('reads connector and splice blocks with their headers and rows', function () {
     var m = harnessFromWorkbook(hxWorkbook(), 'Test');
@@ -276,5 +312,46 @@ describe('Harness — tune comparison', function () {
     assert.ok(!htSameFunction(['Fuel.Cylinder 1.Primary Output'], 'Injector 6 Control (-)'));
     assert.ok(!htSameFunction(['Engine.Oil.Temperature.Sensor'], 'Ambient Temp'));
     assert.ok(htSameFunction(['Fuel.Composition.Sensor.Digital.Decode'], 'Flex Sensor Signal'));
+  });
+});
+
+describe('Harness — wiring diagrams', function () {
+  var m = harnessFromWorkbook(hxWorkbook(), 'Test');
+
+  it('reads wire colour, stripe and gauge from the description', function () {
+    var a = hdWireStyle('22 AWG White/Pink (Shielded 2)');
+    assert.deepEqual([a.color, a.stripe, a.label, a.shield], ['#f4f4f4', '#ec5f9a', '22 AWG White/Pink', true]);
+    var b = hdWireStyle('14 AWG Red');
+    assert.ok(b.width > hdWireStyle('22 AWG Red').width, 'heavier gauge draws thicker');
+    assert.equal(hdWireStyle('Shield (Shielded 2)').label, 'Shield');
+    assert.equal(hdWireStyle('Empty').label, '');
+  });
+
+  it('draws a connector with wires to every pin and splice it reaches', function () {
+    var d = harnessBlockDiagram(m, 'M142.C');
+    assert.ok(/^<svg /.test(d.svg));
+    ['PEDAL', 'MAP', 'SPL.5V'].forEach(function (id) { assert.ok(d.svg.indexOf('data-node="' + id + '"') >= 0, id); });
+    assert.ok(d.svg.indexOf('data-endpoint="M142.C.15"') >= 0);
+    assert.ok(d.svg.indexOf('data-endpoint="MAP.2"') >= 0);
+    assert.ok(d.svg.indexOf('Not in this harness') >= 0, 'SPARE.1 is not in this harness');
+    assert.equal((d.svg.match(/class="wire"/g) || []).length, 6, 'C14, C15, C16, C9, then the splice on to MAP.1 and SPL.5V2');
+  });
+
+  it('follows splices one step to their far ends', function () {
+    var d = harnessBlockDiagram(m, 'MAP');
+    assert.ok(d.svg.indexOf('data-node="SPL.5V"') >= 0);
+    assert.ok(d.svg.indexOf('data-endpoint="M142.C.9"') >= 0, 'the ECU 5V on the far side of the splice');
+  });
+
+  it('draws the overview with each wire counted once', function () {
+    var d = harnessOverviewDiagram(m, { hardware: 'M142' });
+    var edge = d.svg.match(/data-a="M142.C" data-b="SPL.5V"><title>[^<]*: (\d+) wire/);
+    assert.ok(edge, 'M142.C ↔ SPL.5V bundle');
+    assert.equal(edge[1], '1');
+    assert.ok(d.svg.indexOf('data-node="SPL.5V2"') >= 0);
+  });
+
+  it('explains a missing block', function () {
+    assert.ok(harnessBlockDiagram(m, 'NOPE').svg.indexOf('No connector or splice named NOPE') >= 0);
   });
 });

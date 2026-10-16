@@ -8,6 +8,9 @@
  *                    pins: [{ cavity, terminal, wirePn, wire, function, note, remote, status }] }],
  *     splices:    [{ id, sheet, type, boot, notes, columns,
  *                    wires: [{ end, wirePn, wire, function }] }] }
+ * Connectors and splices may have images: [{ id, mime, w, h, caption }] (w/h in pixels). Image bytes are
+ * stored separately (harness-store.js) and referenced by id = SHA-256 of the bytes. Straight after
+ * harnessFromWorkbook() an image has { data, mime, w, h } instead of an id until it is stored.
  *
  * Workbook layout (one block per connector or splice, blank rows between blocks):
  *   <title>
@@ -52,7 +55,7 @@ function harnessFromWorkbook(workbook, name) {
     var model = { name: name || 'Harness', sheets: [], connectors: [], splices: [] };
     workbook.sheets.forEach(function (sheet) {
         var rows = sheet.rows.map(function (r) { return (r || []).map(harnessText); });
-        var kind = null, block = null, inTable = false;
+        var kind = null, block = null, inTable = false, starts = [];
         for (var i = 0; i < rows.length; i++) {
             var r = rows[i], first = r[0] || '';
             if (!r.some(function (v) { return v !== ''; })) { inTable = false; continue; }
@@ -61,13 +64,14 @@ function harnessFromWorkbook(workbook, name) {
                 var title = first;
                 if (next === 'CONNECTOR') {
                     block = { id: harnessConnectorId(title), title: title, sheet: sheet.name, connector: '', boot: '',
-                              mateConn: '', matePin: '', notes: '', columns: HARNESS_PIN_COLUMNS.slice(), pins: [] };
+                              mateConn: '', matePin: '', notes: '', columns: HARNESS_PIN_COLUMNS.slice(), pins: [], images: [] };
                     model.connectors.push(block);
                 } else {
                     block = { id: title, sheet: sheet.name, type: '', boot: '', notes: '',
-                              columns: HARNESS_WIRE_COLUMNS.slice(), wires: [] };
+                              columns: HARNESS_WIRE_COLUMNS.slice(), wires: [], images: [] };
                     model.splices.push(block);
                 }
+                starts.push({ row: i, block: block });
                 if (!kind) kind = next === 'CONNECTOR' ? 'connectors' : 'splices';
                 inTable = false;
                 continue;
@@ -87,6 +91,13 @@ function harnessFromWorkbook(workbook, name) {
             (block.pins || block.wires).push(rec);
         }
         if (kind) model.sheets.push({ name: sheet.name, kind: kind });
+        // Pictures belong to the block whose title row is the last one at or above the picture's top.
+        (sheet.images || []).slice().sort(function (a, b) { return a.row - b.row || a.col - b.col; }).forEach(function (im) {
+            if (!starts.length) return;
+            var owner = starts[0].block;
+            starts.forEach(function (st) { if (st.row <= im.row) owner = st.block; });
+            owner.images.push({ data: im.data, mime: im.mime, w: Math.round(im.cx / 9525), h: Math.round(im.cy / 9525), caption: '' });
+        });
     });
     if (!model.connectors.length && !model.splices.length) {
         throw new Error('No connector or splice blocks found. Each block needs a title row followed by a ' +
@@ -95,17 +106,27 @@ function harnessFromWorkbook(workbook, name) {
     return model;
 }
 
-/** Sheets for writeXlsx() in the same block layout harnessFromWorkbook() reads. */
-function harnessToWorkbook(model) {
+/**
+ * Sheets for writeXlsx() in the same block layout harnessFromWorkbook() reads. `imageData` maps image id →
+ * bytes (Uint8Array); images without bytes there are left out. Pictures go in column I next to their block.
+ */
+function harnessToWorkbook(model, imageData) {
     var sheetNames = model.sheets.map(function (s) { return s.name; });
     function addSheet(n) { if (sheetNames.indexOf(n) < 0) sheetNames.push(n); }
     model.connectors.forEach(function (c) { addSheet(c.sheet || 'Connectors'); });
     model.splices.forEach(function (s) { addSheet(s.sheet || 'Splices'); });
     return sheetNames.map(function (sheetName) {
-        var rows = [], bold = [];
-        function block(title, header, columns, records, fields) {
+        var rows = [], bold = [], images = [];
+        function block(title, header, columns, records, fields, blockImages) {
             if (rows.length) rows.push([]);
             bold.push(rows.length);
+            var row = rows.length;
+            (blockImages || []).forEach(function (im) {
+                var data = im.data || (imageData && im.id ? imageData[im.id] : null);
+                if (!data) return;
+                images.push({ row: row, col: 8, cx: (im.w || 300) * 9525, cy: (im.h || 300) * 9525, mime: im.mime, data: data });
+                row += Math.ceil((im.h || 300) / 20) + 1;   // ~20 px per default row
+            });
             rows.push([title]);
             header.forEach(function (h) { rows.push([h[0], h[1] || '']); });
             bold.push(rows.length);
@@ -114,13 +135,13 @@ function harnessToWorkbook(model) {
         }
         model.connectors.filter(function (c) { return (c.sheet || 'Connectors') === sheetName; }).forEach(function (c) {
             block(c.title || c.id, [['CONNECTOR', c.connector], ['BOOT', c.boot], ['MATE CONN', c.mateConn],
-                ['MATE PIN', c.matePin], ['NOTES', c.notes]], c.columns || HARNESS_PIN_COLUMNS, c.pins, HARNESS_PIN_FIELDS);
+                ['MATE PIN', c.matePin], ['NOTES', c.notes]], c.columns || HARNESS_PIN_COLUMNS, c.pins, HARNESS_PIN_FIELDS, c.images);
         });
         model.splices.filter(function (s) { return (s.sheet || 'Splices') === sheetName; }).forEach(function (s) {
             block(s.id, [['SPLICE', s.type], ['BOOT', s.boot], ['NOTES', s.notes]],
-                s.columns || HARNESS_WIRE_COLUMNS, s.wires, HARNESS_WIRE_FIELDS);
+                s.columns || HARNESS_WIRE_COLUMNS, s.wires, HARNESS_WIRE_FIELDS, s.images);
         });
-        return { name: sheetName, rows: rows, bold: bold, widths: [16, 18, 22, 34, 40, 26, 22, 12] };
+        return { name: sheetName, rows: rows, bold: bold, images: images, widths: [16, 18, 22, 34, 40, 26, 22, 12] };
     });
 }
 

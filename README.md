@@ -55,7 +55,9 @@ Design and check wiring harnesses built around the M1 ECU.
 - Edit connectors, cavities, wires and splices in the browser; renaming a connector updates every connection that refers to it
 - Checks every connection at both ends: references to nothing (with "did you mean" fixes), ends that disagree, splices that don't list their wires, chained splices, wire part numbers that differ between ends
 - Compares the ECU (M142) and E888 pins against the I/O assignments in a tune from the M1 Config Viewer, and harness pin labels against the M142 datasheet pinout
-- Every save is a revision (server or browser storage); export back to `.xlsx` in the same layout
+- Connector and splice images: pictures placed beside each block in the spreadsheet are imported, can be added/removed/captioned, viewed full size, and are written back on export
+- Wiring diagrams drawn from the harness: per connector or splice (every wire in its real colour/gauge to the pins it reaches, through splices to their far ends, with the connector's pictures) and an overview of all connectors and splices with wire counts; click through to the editor, download as SVG
+- Every save is a revision (server or browser storage); export back to `.xlsx` in the same layout, pictures included
 
 ### Calculators
 Quick bidirectional unit conversions for tuning:
@@ -125,7 +127,7 @@ m1-config/                  — M1 Config Viewer (.m1pkg import, tune history, c
   index.html, app.js, format.js, resource-names.js, tune-db.js, tune-api.js, worker.js, styles.css
 
 harness/                    — Harness Builder (.xlsx import/export, editor, checks, tune comparison)
-  index.html, app.js, harness-model.js, harness-tune.js, harness-store.js, styles.css
+  index.html, app.js, harness-model.js, harness-tune.js, harness-diagram.js, harness-store.js, styles.css
 
 lib/                        — Vendored libraries (Chart.js, zoom plugin, Hammer.js) and shared parsers
                               (ld-parser.js, m1pkg-parser.js, xz-decoder.js, xlsx.js)

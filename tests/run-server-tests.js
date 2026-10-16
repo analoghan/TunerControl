@@ -109,6 +109,38 @@ test('stores harness revisions and deletes them with the harness', function () {
     assert.strictEqual(store.db.prepare('SELECT COUNT(*) AS n FROM harness_revisions').get().n, 0);
 });
 
+test('HTTP API: harness images are stored once by content hash', function () {
+    var server = createServer(new TuneStore(':memory:'));
+    var png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    return new Promise(function (resolve) { server.listen(0, '127.0.0.1', resolve); }).then(function () {
+        var base = 'http://127.0.0.1:' + server.address().port + '/api/harness-images';
+        var auth = { Authorization: 'Bearer test-token' };
+        function post(type) { return fetch(base, { method: 'POST', body: png, headers: Object.assign({ 'Content-Type': type }, auth) }); }
+        return post('image/png').then(function (r) { assert.strictEqual(r.status, 201); return r.json(); })
+            .then(function (j) {
+                assert.strictEqual(j.id, sha(png));
+                return post('image/png').then(function (r) { return r.json(); }).then(function (k) {
+                    assert.strictEqual(k.id, j.id);
+                    return fetch(base + '/' + j.id, { headers: auth });
+                });
+            })
+            .then(function (r) {
+                assert.strictEqual(r.headers.get('content-type'), 'image/png');
+                return r.arrayBuffer();
+            })
+            .then(function (b) {
+                assert.deepStrictEqual(new Uint8Array(b), png);
+                return post('text/html');
+            })
+            .then(function (r) {
+                assert.strictEqual(r.status, 415);
+                return fetch(base + '/' + 'f'.repeat(64), { headers: auth });
+            })
+            .then(function (r) { assert.strictEqual(r.status, 404); })
+            .finally(function () { server.close(); });
+    });
+});
+
 test('HTTP API: harnesses', function () {
     var server = createServer(new TuneStore(':memory:'));
     return new Promise(function (resolve) { server.listen(0, '127.0.0.1', resolve); }).then(function () {

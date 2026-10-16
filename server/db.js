@@ -11,6 +11,7 @@
  *   resource_names user names for I/O resources, key = 'HARDWARE|signature'
  *   harnesses      wiring harness designs (harness/ page); id is a random UUID
  *   harness_revisions every saved version of a harness (full model as JSON), newest = harnesses.revision
+ *   harness_images connector/splice pictures, id = SHA-256 of the bytes (shared by all revisions)
  * View
  *   cell_values    cells joined with tune and item names — the easiest table for ad-hoc SQL
  */
@@ -22,7 +23,7 @@ var path = require('path');
 var DatabaseSync = require('node:sqlite').DatabaseSync;
 var parser = require('../lib/m1pkg-parser.js');
 
-var SCHEMA_VERSION = 2;
+var SCHEMA_VERSION = 3;
 var SCHEMA = [
     'CREATE TABLE IF NOT EXISTS packages (' +
     '  pk INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, file_name TEXT, file_size INTEGER, imported_at TEXT NOT NULL,' +
@@ -50,6 +51,7 @@ var SCHEMA = [
     'CREATE TABLE IF NOT EXISTS harness_revisions (' +
     '  harness_id TEXT NOT NULL REFERENCES harnesses(id) ON DELETE CASCADE, revision INTEGER NOT NULL,' +
     '  saved TEXT NOT NULL, note TEXT, data_json TEXT NOT NULL, PRIMARY KEY (harness_id, revision))',
+    'CREATE TABLE IF NOT EXISTS harness_images (id TEXT PRIMARY KEY, mime TEXT NOT NULL, data BLOB NOT NULL, created TEXT NOT NULL)',
     'CREATE VIEW IF NOT EXISTS cell_values AS' +
     '  SELECT p.id AS package_id, p.tune_name, p.modified, n.name AS item_name, c.cell_key, c.value, c.text_value' +
     '  FROM cells c JOIN packages p ON p.pk = c.package_pk JOIN item_names n ON n.id = c.name_id'
@@ -268,6 +270,17 @@ TuneStore.prototype.saveHarness = function (id, name, data, note) {
             .run(id, rev, now, note || '', JSON.stringify(data));
         return { id: id, revision: rev, saved: now };
     });
+};
+
+/** Store an image (id = SHA-256 hex of the bytes); storing the same bytes again is a no-op. */
+TuneStore.prototype.putHarnessImage = function (id, mime, bytes) {
+    this.db.prepare('INSERT INTO harness_images (id, mime, data, created) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING')
+        .run(id, mime, bytes, new Date().toISOString());
+};
+
+TuneStore.prototype.getHarnessImage = function (id) {
+    var r = this.db.prepare('SELECT mime, data FROM harness_images WHERE id = ?').get(id);
+    return r ? { mime: r.mime, data: r.data } : null;
 };
 
 TuneStore.prototype.deleteHarness = function (id) {

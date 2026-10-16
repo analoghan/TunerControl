@@ -13,7 +13,8 @@ var state = {
     tab: 'connectors',
     selConnector: null, selSplice: null,
     tunes: [], tunePkg: null, tuneId: '', resourceNames: {}, show: 'problems',
-    openIssues: {}        // 'kind|block|index' → true for rows whose problem details are shown
+    openIssues: {},       // 'kind|block|index' → true for rows whose problem details are shown
+    diagram: ''           // '' = overview, otherwise the connector/splice id shown in the Diagram tab
 };
 
 function $(id) { return document.getElementById(id); }
@@ -79,11 +80,15 @@ function importXlsx(file) {
     file.arrayBuffer().then(readXlsx).then(function (wb) {
         var name = file.name.replace(/\.xlsx$/i, '');
         var model = harnessFromWorkbook(wb, name);
-        setStatus('Saving ' + name + '…');
-        return hsSave(null, name, model, 'Imported from ' + file.name).then(function (saved) {
+        return hsStoreModelImages(model, function (done, total) {
+            setStatus('Storing images ' + done + ' of ' + total + '…');
+        }).then(function (images) {
+            setStatus('Saving ' + name + '…');
+            return hsSave(null, name, model, 'Imported from ' + file.name).then(function (saved) { saved.images = images; return saved; });
+        }).then(function (saved) {
             var c = model.connectors.length, s = model.splices.length;
             setStatus('Imported ' + file.name + ': ' + c + ' connector' + (c === 1 ? '' : 's') + ', ' + s + ' splice' +
-                (s === 1 ? '' : 's') + '.');
+                (s === 1 ? '' : 's') + (saved.images ? ', ' + saved.images + ' image' + (saved.images === 1 ? '' : 's') : '') + '.');
             return refreshHarnessList(saved.id).then(function () { return openHarness(saved.id); });
         });
     }).catch(function (err) {
@@ -106,7 +111,22 @@ function saveHarness() {
 }
 
 function exportXlsx() {
-    var bytes = writeXlsx(harnessToWorkbook(state.model));
+    var ids = {};
+    state.model.connectors.concat(state.model.splices).forEach(function (b) {
+        (b.images || []).forEach(function (im) { if (im.id) ids[im.id] = true; });
+    });
+    setStatus(Object.keys(ids).length ? 'Collecting images…' : '');
+    var data = {};
+    Promise.all(Object.keys(ids).map(function (id) {
+        return hsImageBytes(id).then(function (b) { data[id] = b; }, function () { /* missing image: left out */ });
+    })).then(function () {
+        downloadXlsx(writeXlsx(harnessToWorkbook(state.model, data)));
+        var missing = Object.keys(ids).length - Object.keys(data).length;
+        setStatus(missing ? missing + ' image' + (missing === 1 ? ' was' : 's were') + ' not found and left out of the export.' : '');
+    }).catch(function (err) { showError('Could not export: ' + err.message); });
+}
+
+function downloadXlsx(bytes) {
     var blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -168,8 +188,9 @@ function selectTab(tab) {
         t.classList.toggle('active', on);
         t.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    ['connectors', 'splices', 'checks', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
+    ['connectors', 'splices', 'diagram', 'checks', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
     if (tab === 'checks') renderChecks();
+    if (tab === 'diagram') renderDiagram();
     if (tab === 'tune') loadTunes();
 }
 
@@ -182,6 +203,7 @@ function renderAll() {
     renderSpliceEditor();
     if (state.tab === 'checks') renderChecks();
     if (state.tab === 'tune') renderTune();
+    if (state.tab === 'diagram') renderDiagram();
 }
 
 // =========================================================================
@@ -435,9 +457,70 @@ function renderConnectorEditor() {
         el.innerHTML = '<p class="muted">' + (state.model.connectors.length ? 'Select a connector.' : 'No connectors yet — add one.') + '</p>';
         return;
     }
-    el.innerHTML = '<div class="editor-head"><h2>' + esc(c.id) + '</h2><button class="btn btn-small btn-danger" id="remove-block">Delete connector</button></div>' +
-        fieldsHtml(c, CONNECTOR_FIELDS) + rowsHtml('pin', c, c.pins, HARNESS_PIN_FIELDS, c.columns || []) +
+    el.innerHTML = editorHeadHtml(c, 'connector') +
+        fieldsHtml(c, CONNECTOR_FIELDS) + imagesHtml(c) + rowsHtml('pin', c, c.pins, HARNESS_PIN_FIELDS, c.columns || []) +
         '<button class="btn btn-secondary btn-small" id="add-row">Add cavity</button>';
+    loadThumbnails(el);
+}
+
+function editorHeadHtml(block, what) {
+    return '<div class="editor-head"><h2>' + esc(block.id) + '</h2>' +
+        '<button class="btn btn-small btn-secondary" id="show-diagram">Wiring diagram</button>' +
+        '<button class="btn btn-small btn-danger" id="remove-block">Delete ' + what + '</button></div>';
+}
+
+/** Pictures of a connector/splice: thumbnails (click for full size), captions, add and remove. */
+function imagesHtml(block) {
+    var images = block.images || [];
+    return '<section class="images-section" aria-label="Images"><div class="images-head"><h3>Images</h3>' +
+        '<label class="btn btn-secondary btn-small">Add image<input type="file" class="add-image" accept="image/png,image/jpeg,image/gif" hidden multiple></label>' +
+        '</div><div class="image-strip">' + (images.length ? images.map(function (im, i) {
+            return '<div class="image-card"><button class="thumb" data-view-image="' + i + '" aria-label="View image ' + (i + 1) +
+                ' full size"><img data-image-id="' + esc(im.id) + '" alt="' + esc(im.caption || block.id + ' image ' + (i + 1)) + '"></button>' +
+                '<input type="text" data-image-caption="' + i + '" value="' + esc(im.caption) + '" placeholder="Caption" aria-label="Caption for image ' + (i + 1) + '">' +
+                '<button class="btn btn-small btn-danger remove-image" data-remove-image="' + i + '" aria-label="Remove image ' + (i + 1) + '">&times;</button></div>';
+        }).join('') : '<p class="muted">No images. Add a connector face or pinout drawing.</p>') + '</div></section>';
+}
+
+function loadThumbnails(root) {
+    root.querySelectorAll('img[data-image-id]').forEach(function (img) {
+        hsImageUrl(img.getAttribute('data-image-id')).then(function (url) { img.src = url; },
+            function () { img.alt = 'Image not found'; });
+    });
+}
+
+function viewImage(im, fallbackCaption) {
+    hsImageUrl(im.id).then(function (url) {
+        $('image-viewer-img').src = url;
+        $('image-viewer-img').alt = im.caption || fallbackCaption;
+        $('image-viewer-caption').textContent = im.caption || fallbackCaption;
+        $('image-viewer').showModal();
+    }).catch(function (err) { showError('Could not show the image: ' + err.message); });
+}
+
+/** Store picked files as images of a block. */
+function addImages(block, files) {
+    var list = Array.prototype.slice.call(files || []);
+    return list.reduce(function (p, file) {
+        return p.then(function () {
+            if (!/^image\/(png|jpeg|gif)$/.test(file.type)) throw new Error(file.name + ' is not a PNG, JPEG or GIF image.');
+            return Promise.all([hsPutImage(file, file.type), imageSize(file)]).then(function (r) {
+                (block.images = block.images || []).push({ id: r[0], mime: file.type, w: r[1].w, h: r[1].h, caption: '' });
+            });
+        });
+    }, Promise.resolve()).then(function () {
+        setDirty(true);
+        renderAll();
+    }).catch(function (err) { showError('Could not add the image: ' + err.message); renderAll(); });
+}
+
+function imageSize(file) {
+    return new Promise(function (resolve) {
+        var img = new Image(), url = URL.createObjectURL(file);
+        img.onload = function () { resolve({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(url); };
+        img.onerror = function () { resolve({ w: 300, h: 300 }); URL.revokeObjectURL(url); };
+        img.src = url;
+    });
 }
 
 function renderSpliceEditor() {
@@ -446,9 +529,10 @@ function renderSpliceEditor() {
         el.innerHTML = '<p class="muted">' + (state.model.splices.length ? 'Select a splice.' : 'No splices yet — add one.') + '</p>';
         return;
     }
-    el.innerHTML = '<div class="editor-head"><h2>' + esc(s.id) + '</h2><button class="btn btn-small btn-danger" id="remove-block">Delete splice</button></div>' +
-        fieldsHtml(s, SPLICE_FIELDS) + rowsHtml('wire', s, s.wires, HARNESS_WIRE_FIELDS, s.columns || []) +
+    el.innerHTML = editorHeadHtml(s, 'splice') +
+        fieldsHtml(s, SPLICE_FIELDS) + imagesHtml(s) + rowsHtml('wire', s, s.wires, HARNESS_WIRE_FIELDS, s.columns || []) +
         '<button class="btn btn-secondary btn-small" id="add-row">Add wire</button>';
+    loadThumbnails(el);
 }
 
 /** References to a connector ("ID.cavity") or splice ("ID") across the harness. */
@@ -497,6 +581,9 @@ function wireEditor(containerId, isConnector) {
             recs[parseInt(t.getAttribute('data-row'), 10)][t.getAttribute('data-field')] = t.value;
             setDirty(true);
             scheduleChecks();
+        } else if (t.hasAttribute('data-image-caption')) {
+            block.images[parseInt(t.getAttribute('data-image-caption'), 10)].caption = t.value;
+            setDirty(true);
         } else if (t.hasAttribute('data-block-field') && t.getAttribute('data-block-field') !== 'id') {
             block[t.getAttribute('data-block-field')] = t.value;
             setDirty(true);
@@ -508,12 +595,25 @@ function wireEditor(containerId, isConnector) {
     el.addEventListener('change', function (e) {
         var t = e.target, block = current();
         if (block && t.getAttribute('data-block-field') === 'id') renameBlock(block, isConnector, t.value, t);
+        if (block && t.classList.contains('add-image')) addImages(block, t.files);
     });
     el.addEventListener('click', function (e) {
         var block = current(), t = e.target.closest('button');
         if (!block || !t) return;
         var recs = isConnector ? block.pins : block.wires;
         var kind = isConnector ? 'pin' : 'wire';
+        if (t.hasAttribute('data-view-image')) {
+            viewImage(block.images[parseInt(t.getAttribute('data-view-image'), 10)], block.id);
+            return;
+        }
+        if (t.hasAttribute('data-remove-image')) {
+            var ii = parseInt(t.getAttribute('data-remove-image'), 10);
+            if (!window.confirm('Remove image ' + (ii + 1) + ' from ' + block.id + '?')) return;
+            block.images.splice(ii, 1);
+            setDirty(true); renderAll();
+            return;
+        }
+        if (t.id === 'show-diagram') { showDiagram(block.id); return; }
         if (t.hasAttribute('data-goto')) {
             var gi = parseInt(t.getAttribute('data-goto'), 10), rec = recs[gi], where = isConnector ? rec.remote : rec.end;
             if (gotoEndpoint(where)) return;
@@ -586,6 +686,89 @@ function addBlock(isConnector) {
     }
     showError('');
     setDirty(true); runChecks(); renderAll();
+}
+
+// =========================================================================
+// Diagram
+// =========================================================================
+
+function showDiagram(id) {
+    state.diagram = id || '';
+    selectTab('diagram');
+}
+
+function renderDiagram() {
+    var sel = $('diagram-select'), opts = '<option value="">Overview — all connectors and splices</option>';
+    function group(label, blocks) {
+        if (!blocks.length) return '';
+        return '<optgroup label="' + esc(label) + '">' + blocks.map(function (b) {
+            return '<option value="' + esc(b.id) + '">' + esc(b.id) + '</option>';
+        }).join('') + '</optgroup>';
+    }
+    sel.innerHTML = opts + group('Connectors', state.model.connectors) + group('Splices', state.model.splices);
+    if (state.diagram && !findConnector(state.diagram) && !findSplice(state.diagram)) state.diagram = '';
+    sel.value = state.diagram;
+    var focus = state.diagram ? findConnector(state.diagram) || findSplice(state.diagram) : null;
+    $('diagram-hint').textContent = focus
+        ? 'Click a pin to edit it, or a connector or splice header to show its diagram.'
+        : 'Hover a box to highlight its wires; click it to show its wiring diagram.';
+    var images = focus ? (focus.images || []) : [], seq = (renderDiagram.seq = (renderDiagram.seq || 0) + 1);
+    Promise.all(images.map(function (im) {
+        return hsImageUrl(im.id).then(function (url) { return [im.id, url]; }, function () { return null; });
+    })).then(function (pairs) {
+        if (seq !== renderDiagram.seq) return;   // a newer diagram was requested while images loaded
+        var urls = {};
+        pairs.forEach(function (p) { if (p) urls[p[0]] = p[1]; });
+        var hardware = state.tunePkg && state.tunePkg.meta ? state.tunePkg.meta['Summary.Hardware'] : '';
+        var d = focus ? harnessBlockDiagram(state.model, focus.id, { imageUrls: urls })
+                      : harnessOverviewDiagram(state.model, { hardware: hardware || undefined });
+        $('diagram').innerHTML = d.svg;
+    });
+}
+
+/** Download the diagram as a standalone SVG, with pictures embedded. */
+function downloadDiagram() {
+    var svg = $('diagram').querySelector('svg');
+    if (!svg) return;
+    var copy = svg.cloneNode(true);
+    copy.classList.remove('dimmed');
+    copy.querySelectorAll('.hl').forEach(function (e) { e.classList.remove('hl'); });
+    var images = Array.prototype.slice.call(copy.querySelectorAll('image'));
+    Promise.all(images.map(function (img) {
+        var href = img.getAttribute('href');
+        return fetch(href).then(function (r) { return r.blob(); }).then(function (blob) {
+            return new Promise(function (resolve) {
+                var fr = new FileReader();
+                fr.onload = function () { img.setAttribute('href', fr.result); img.setAttribute('xlink:href', fr.result); resolve(); };
+                fr.onerror = function () { resolve(); };
+                fr.readAsDataURL(blob);
+            });
+        }, function () { /* leave the link */ });
+    })).then(function () {
+        var blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(copy)], { type: 'image/svg+xml' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = (($('name-input').value.trim() || 'harness') + ' - ' + (state.diagram || 'overview')).replace(/[\\/:*?"<>|]+/g, '_') + '.svg';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    });
+}
+
+/** Overview: highlight the hovered box and its bundles. */
+function highlightNode(id) {
+    var svg = $('diagram').querySelector('svg');
+    if (!svg || state.diagram) return;
+    svg.classList.toggle('dimmed', !!id);
+    svg.querySelectorAll('.hl').forEach(function (e) { e.classList.remove('hl'); });
+    if (!id) return;
+    svg.querySelectorAll('.node').forEach(function (n) { if (n.getAttribute('data-node') === id) n.classList.add('hl'); });
+    svg.querySelectorAll('.edge').forEach(function (e) {
+        var a = e.getAttribute('data-a'), b = e.getAttribute('data-b');
+        if (a !== id && b !== id) return;
+        e.classList.add('hl');
+        var other = a === id ? b : a;
+        svg.querySelectorAll('.node').forEach(function (n) { if (n.getAttribute('data-node') === other) n.classList.add('hl'); });
+    });
 }
 
 // =========================================================================
@@ -723,6 +906,24 @@ $('checks').addEventListener('click', function (e) {
     else if (b.hasAttribute('data-goto-issue')) gotoIssue(state.checks[parseInt(b.getAttribute('data-goto-issue'), 10)]);
 });
 $('tune-select').addEventListener('change', function () { loadTune(this.value); });
+$('diagram-select').addEventListener('change', function () { state.diagram = this.value; renderDiagram(); });
+$('diagram-download').addEventListener('click', downloadDiagram);
+$('diagram').addEventListener('click', function (e) {
+    var row = e.target.closest('[data-endpoint]'), node = e.target.closest('[data-node]');
+    if (row) {
+        var ep = row.getAttribute('data-endpoint');
+        if (findSplice(ep)) gotoRow('splices', ep, null); else gotoEndpoint(ep);
+    } else if (node) {
+        state.diagram = node.getAttribute('data-node');
+        renderDiagram();
+        $('diagram').scrollTop = 0;
+    }
+});
+$('diagram').addEventListener('mouseover', function (e) {
+    var node = e.target.closest('[data-node]');
+    highlightNode(node ? node.getAttribute('data-node') : null);
+});
+$('diagram').addEventListener('mouseleave', function () { highlightNode(null); });
 document.querySelectorAll('[data-show]').forEach(function (b) {
     b.addEventListener('click', function () {
         state.show = b.getAttribute('data-show');

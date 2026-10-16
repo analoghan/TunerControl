@@ -55,6 +55,7 @@
       <div class="tabs" role="tablist" aria-label="Harness views">
         <button class="tab active" role="tab" aria-selected="true" data-tab="connectors">Connectors <span class="count" id="count-connectors"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="splices">Splices <span class="count" id="count-splices"></span></button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="diagram">Diagram</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="checks">Checks <span class="count" id="count-checks"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="tune">Tune comparison</button>
       </div>
@@ -81,6 +82,17 @@
         </div>
       </div>
 
+      <div id="panel-diagram" class="panel" role="tabpanel" hidden>
+        <div class="compare-row diagram-bar">
+          <label for="diagram-select">Show</label>
+          <select id="diagram-select" aria-label="Diagram"></select>
+          <span class="hint diagram-hint" id="diagram-hint"></span>
+          <span class="spacer"></span>
+          <button id="diagram-download" class="btn btn-secondary">Download SVG</button>
+        </div>
+        <div id="diagram" class="diagram-wrap" aria-label="Wiring diagram"></div>
+      </div>
+
       <div id="panel-checks" class="panel" role="tabpanel" hidden>
         <h2>Checks</h2>
         <p class="panel-desc">Every remote connection is followed to the other end: references that point nowhere, ends that disagree, splices that don't list their wires, and wire part numbers that differ between ends.</p>
@@ -102,6 +114,12 @@
       </div>
     </div>
 
+    <dialog id="image-viewer" class="image-viewer" aria-label="Image">
+      <form method="dialog"><button class="btn btn-secondary btn-small" aria-label="Close">Close</button></form>
+      <img id="image-viewer-img" alt="">
+      <p id="image-viewer-caption" class="hint"></p>
+    </dialog>
+
     <div id="empty-state" class="empty-state">
       <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5" aria-hidden="true">
         <path d="M4 7h4v10H4zM16 7h4v10h-4zM8 10h8M8 14h8"/>
@@ -117,6 +135,7 @@
   <script src="../m1-config/tune-api.js"></script>
   <script src="harness-model.js"></script>
   <script src="harness-tune.js"></script>
+  <script src="harness-diagram.js"></script>
   <script src="harness-store.js"></script>
   <script src="app.js"></script>
 </body>

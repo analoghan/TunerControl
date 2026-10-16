@@ -5,25 +5,28 @@
  * otherwise IndexedDB database "tunercontrol-harness" in this browser:
  *   harnesses : { id, name, created, updated, revision }
  *   revisions : { harnessId, revision, saved, note, data }   key [harnessId, revision]
+ *   images    : { id, mime, data: Blob }   connector/splice pictures, id = hash of the bytes
  * Tunes for the tune comparison come from the M1 Config Viewer's storage (tune-db.js / tune-api.js).
  */
 
 var HS_DB_NAME = 'tunercontrol-harness';
 var hsBackend = 'memory';          // 'server' | 'browser' | 'memory'
 var hsDbPromise = null;
-var hsMemory = { harnesses: {}, revisions: {} };
+var hsMemory = { harnesses: {}, revisions: {}, images: {} };
+var hsImageUrls = {};              // image id → object URL (cached for the page's lifetime)
 
 function hsOpenDb() {
     if (hsDbPromise) return hsDbPromise;
     hsDbPromise = new Promise(function (resolve, reject) {
         if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB is not available')); return; }
-        var req = indexedDB.open(HS_DB_NAME, 1);
+        var req = indexedDB.open(HS_DB_NAME, 2);
         req.onupgradeneeded = function () {
             var db = req.result;
             if (!db.objectStoreNames.contains('harnesses')) db.createObjectStore('harnesses', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('revisions')) {
                 db.createObjectStore('revisions', { keyPath: ['harnessId', 'revision'] }).createIndex('harnessId', 'harnessId');
             }
+            if (!db.objectStoreNames.contains('images')) db.createObjectStore('images', { keyPath: 'id' });
         };
         req.onsuccess = function () { resolve(req.result); };
         req.onerror = function () { reject(req.error || new Error('Could not open the harness database')); };
@@ -128,6 +131,63 @@ function hsDelete(id) {
             keys.forEach(function (k) { revs.delete(k); });
         });
     });
+}
+
+// ---- Images ----
+
+/** Store image bytes (Uint8Array or Blob). Resolves the image id; the same bytes always get the same id. */
+function hsPutImage(data, mime) {
+    var blob = data instanceof Blob ? data : new Blob([data], { type: mime });
+    if (hsBackend === 'server') {
+        return tuneApi('POST', 'harness-images', { body: blob, headers: { 'Content-Type': mime } }).then(function (r) { return r.id; });
+    }
+    return blob.arrayBuffer().then(tuneDbFileId).then(function (id) {
+        if (hsBackend === 'memory') { hsMemory.images[id] = { id: id, mime: mime, data: blob }; return id; }
+        return hsTx(['images'], 'readwrite', function (tx) {
+            tx.objectStore('images').put({ id: id, mime: mime, data: blob });
+            return id;
+        });
+    });
+}
+
+function hsImageBlob(id) {
+    if (hsBackend === 'server') {
+        return tuneApi('GET', 'harness-images/' + encodeURIComponent(id), { raw: true }).then(function (r) { return r.blob(); });
+    }
+    var get = hsBackend === 'memory' ? Promise.resolve(hsMemory.images[id])
+        : hsTx(['images'], 'readonly', function (tx) { return hsReq(tx.objectStore('images').get(id)); });
+    return get.then(function (rec) {
+        if (!rec) throw new Error('Image ' + id.slice(0, 12) + '… is not stored here');
+        return rec.data;
+    });
+}
+
+/** Object URL for showing an image (fetched with the API token when needed). */
+function hsImageUrl(id) {
+    if (hsImageUrls[id]) return Promise.resolve(hsImageUrls[id]);
+    return hsImageBlob(id).then(function (blob) { return (hsImageUrls[id] = URL.createObjectURL(blob)); });
+}
+
+function hsImageBytes(id) {
+    return hsImageBlob(id).then(function (b) { return b.arrayBuffer(); }).then(function (a) { return new Uint8Array(a); });
+}
+
+/** Replace freshly imported images ({ data, mime, … }) in a model with stored ones ({ id, mime, … }). */
+function hsStoreModelImages(model, onProgress) {
+    var pending = [];
+    model.connectors.concat(model.splices).forEach(function (b) {
+        (b.images || []).forEach(function (im) { if (im.data) pending.push(im); });
+    });
+    var done = 0;
+    return pending.reduce(function (p, im) {
+        return p.then(function () {
+            return hsPutImage(im.data, im.mime).then(function (id) {
+                im.id = id;
+                delete im.data;
+                if (onProgress) onProgress(++done, pending.length);
+            });
+        });
+    }, Promise.resolve()).then(function () { return pending.length; });
 }
 
 // ---- Tunes (read-only, from the M1 Config Viewer's storage) ----

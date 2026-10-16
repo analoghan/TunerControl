@@ -1,7 +1,7 @@
 # TunerControl Server
 
 Optional backend that serves the TunerControl web app and stores the M1 Config Viewer's tune history and the
-Harness Builder's harnesses (every saved revision) in a SQLite database, so every browser sees the same data
+Harness Builder's harnesses (every saved revision, plus connector images) in a SQLite database, so every browser sees the same data
 and it can be queried with SQL.
 
 - No npm dependencies — Node's built-in HTTP server and `node:sqlite`.

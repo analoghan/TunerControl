@@ -27,6 +27,8 @@
  *   GET    /api/harnesses/:id[?revision=N]   latest (or given) revision with data and revision list
  *   PUT    /api/harnesses/:id                body { name, data, note } → new revision { id, revision, saved }
  *   DELETE /api/harnesses/:id
+ *   POST   /api/harness-images              body = PNG/JPEG/GIF/WebP bytes (Content-Type image/*) → { id }
+ *   GET    /api/harness-images/:id          image bytes (ids are SHA-256 of the content, so cacheable forever)
  */
 
 'use strict';
@@ -46,6 +48,7 @@ var TOKEN = process.env.TUNERCONTROL_TOKEN || '';
 
 var MAX_PACKAGE_BYTES = 64 * 1024 * 1024;
 var MAX_JSON_BYTES = 512 * 1024 * 1024;
+var MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 // Top-level folders that hold private data or server code and must never be served.
 var PRIVATE_DIRS = ['files', 'data', 'server', 'analysis', 'node_modules', 'deploy'];
@@ -191,6 +194,26 @@ function handleApi(req, res, url, store) {
         if (parts.length === 2 && method === 'DELETE') {
             if (!store.deleteHarness(hid)) throw new HttpError(404, 'Harness not found');
             res.writeHead(204); return res.end();
+        }
+    }
+
+    if (parts[0] === 'harness-images') {
+        if (parts.length === 1 && method === 'POST') {
+            var mime = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+            if (!/^image\/(png|jpeg|gif|webp)$/.test(mime)) throw new HttpError(415, 'Images must be PNG, JPEG, GIF or WebP');
+            return readBody(req, MAX_IMAGE_BYTES).then(function (buf) {
+                if (!buf.length) throw new HttpError(400, 'Empty upload');
+                var imageId = crypto.createHash('sha256').update(buf).digest('hex');
+                store.putHarnessImage(imageId, mime, new Uint8Array(buf.buffer, buf.byteOffset, buf.length));
+                sendJson(req, res, 201, { id: imageId });
+            });
+        }
+        if (parts.length === 2 && method === 'GET') {
+            var image = /^[0-9a-f]{64}$/.test(parts[1]) ? store.getHarnessImage(parts[1]) : null;
+            if (!image) throw new HttpError(404, 'Image not found');
+            res.writeHead(200, { 'Content-Type': image.mime, 'Content-Length': image.data.length,
+                                 'Cache-Control': 'private, max-age=31536000, immutable' });
+            return res.end(Buffer.from(image.data));
         }
     }
 
