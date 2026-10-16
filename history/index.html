@@ -27,7 +27,10 @@
     .hi-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
     .hi-scroll { overflow-x: auto; }
     .hi-chart { max-width: 760px; display: block; }
-    .subtitle a { color: #ff5a6e; }
+    .hi-top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+    .hi-top .hi-note { margin: 0; flex: 1; }
+    .hi-help { padding: 6px 14px; font-size: 0.85rem; }
+    #hi-list a, #hi-trends a { color: #ff5a6e; }
     .hi-grid { border-collapse: collapse; font-size: 0.72rem; }
     .hi-grid th, .hi-grid td { border: 1px solid #2a2a2a; padding: 3px 5px; text-align: center; min-width: 34px; color: #ccc; }
     .hi-grid th { background: #1d1d1d; }
@@ -45,9 +48,11 @@
 
     <h1>Tuning History</h1>
     <p class="subtitle">Analysis runs saved from VE Table Tuning, the Transient Fuel Analyzer, the Knock Analyzer and the DI Fuel Pressure tool,
-      in log order — so you can see whether each change to the tune moved the results the right way.
-      <a href="help.html">Help</a></p>
-    <p id="hi-storage" class="hi-note"></p>
+      in log order — so you can see whether each change to the tune moved the results the right way.</p>
+    <div class="hi-top">
+      <p id="hi-storage" class="hi-note"></p>
+      <a href="help.html" class="help-link-btn hi-help">Help</a>
+    </div>
 
     <div id="hi-tabs" class="hi-tabs" role="tablist" aria-label="Tool"></div>
     <section id="hi-list" aria-label="Saved runs"></section>
