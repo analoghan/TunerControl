@@ -151,6 +151,11 @@
     <p>Select the M1 Tune package (<code>.m1pkg</code>) directly and the tool reads <strong>Engine Efficiency Main</strong> from it — no CSV export needed. The file name line shows which tune and table size were read. Use the package that was in the ECU when the log was recorded, so the corrections apply to the values that were actually running.</p>
     <p>The tool works on a single RPM × manifold-pressure table. If Engine Efficiency Main has more than one Ambient Pressure slice, export the slice you want as a CSV instead. <code>VE_New_Values.csv</code> is the same M1 v2 CSV either way, ready to import into M1 Tune.</p>
 
+    <h3>Stored tunes</h3>
+    <p>Tunes imported in the <a href="../m1-config/index.html">M1 Config Viewer</a> appear in <strong>Or a stored tune</strong>. When you choose a
+      log, the tool suggests the tune that was most likely in the ECU when it was recorded — the latest tune from the same ECU saved before the
+      log started — and says why (or why none fits). Picking a file or another tune yourself always takes precedence.</p>
+
     <h3>VE Table CSV (M1 v2 format)</h3>
     <p>This is the CSV exported from MoTeC M1 Tune. The tool expects the standard M1 v2 header format:</p>
     <div class="example-box">

@@ -24,7 +24,7 @@ const sandbox = {
   undefined: undefined,
 };
 
-const code = fs.readFileSync(__dirname + '/../worker.js', 'utf8');
+const code = fs.readFileSync(__dirname + '/../ve-table/worker.js', 'utf8');
 vm.runInNewContext(code, sandbox);
 
 const resolveChannels = sandbox.resolveChannels;

@@ -66,7 +66,7 @@ const CHANNEL_MAP = {
  * The .ld format uses dots as hierarchy separators and truncates at 32 chars.
  * This map provides exact matches for known channels.
  */
-const LD_NAME_MAP = {
+const INJ_LD_NAME_MAP = {
     'Engine.Speed':                          'Engine Speed',
     'Inlet.Manifold.Pressure':               'Inlet Manifold Pressure',
     'Exhaust.Lambda.Bank 1':                 'Exhaust Lambda Bank 1',
@@ -87,9 +87,9 @@ const LD_NAME_MAP = {
  * @param {string} ldName - Channel name from .ld file
  * @returns {string} Normalized channel name matching CSV conventions
  */
-function normalizeLdChannelName(ldName) {
-    if (LD_NAME_MAP[ldName]) {
-        return LD_NAME_MAP[ldName];
+function injNormalizeLdChannelName(ldName) {
+    if (INJ_LD_NAME_MAP[ldName]) {
+        return INJ_LD_NAME_MAP[ldName];
     }
     // Fallback: replace dots with spaces, collapse multiple spaces
     return ldName.replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
@@ -103,10 +103,10 @@ function normalizeLdChannelName(ldName) {
  * @param {string} unit - Unit string from the channel header (stored in short_name field)
  * @returns {string} Best-guess normalized channel name
  */
-function normalizeLdChannelNameWithUnit(ldName, unit) {
+function injNormalizeLdChannelNameWithUnit(ldName, unit) {
     // Check explicit map first
-    if (LD_NAME_MAP[ldName]) {
-        return LD_NAME_MAP[ldName];
+    if (INJ_LD_NAME_MAP[ldName]) {
+        return INJ_LD_NAME_MAP[ldName];
     }
 
     // Handle truncated names using unit hints
@@ -135,7 +135,7 @@ function normalizeLdChannelNameWithUnit(ldName, unit) {
  * @param {number} length - Maximum number of bytes to read
  * @returns {string} Decoded string with trailing nulls removed
  */
-function readString(view, offset, length) {
+function injReadString(view, offset, length) {
     var bytes = [];
     for (var i = 0; i < length; i++) {
         var b = view.getUint8(offset + i);
@@ -153,7 +153,7 @@ function readString(view, offset, length) {
  * @param {function} progressCallback - Called with (channelsProcessed, totalChannels)
  * @returns {{columnNames: string[], data: number[][], maxFreq: number}}
  */
-function parseLdFile(buffer, progressCallback) {
+function injParseLdFile(buffer, progressCallback) {
     var view = new DataView(buffer);
 
     // --- Parse header ---
@@ -212,9 +212,9 @@ function parseLdFile(buffer, progressCallback) {
         var scale = view.getInt16(ptr + 28, true);
         var dec = view.getInt16(ptr + 30, true);
 
-        var name = readString(view, ptr + 32, 32);
-        var shortName = readString(view, ptr + 64, 8);  // actually contains unit in MoTeC M1 files
-        var unit = readString(view, ptr + 72, 12);
+        var name = injReadString(view, ptr + 32, 32);
+        var shortName = injReadString(view, ptr + 64, 8);  // actually contains unit in MoTeC M1 files
+        var unit = injReadString(view, ptr + 72, 12);
 
         // Determine data type and bytes per sample
         var bytesPerSample = 0;
@@ -287,11 +287,11 @@ function parseLdFile(buffer, progressCallback) {
         var chan = channels[ci];
 
         // Normalize channel name for CHANNEL_MAP compatibility
-        var normalizedName = normalizeLdChannelNameWithUnit(chan.name, chan.shortName);
+        var normalizedName = injNormalizeLdChannelNameWithUnit(chan.name, chan.shortName);
         columnNames.push(normalizedName);
 
         // Read raw data
-        var rawData = readChannelData(buffer, chan);
+        var rawData = injReadChannelData(buffer, chan);
 
         // Apply scale/shift/mul/dec transformation: (raw/scale * 10^(-dec) + shift) * mul
         var transformed = new Float64Array(rawData.length);
@@ -340,7 +340,7 @@ function parseLdFile(buffer, progressCallback) {
  * @param {Object} chan - Channel metadata object
  * @returns {Float64Array} Raw (untransformed) numeric values
  */
-function readChannelData(buffer, chan) {
+function injReadChannelData(buffer, chan) {
     if (!chan.dataType || chan.bytesPerSample === 0) {
         // Unknown data type — return zeros
         return new Float64Array(chan.nData);
@@ -359,7 +359,7 @@ function readChannelData(buffer, chan) {
                 break;
             case 'float16':
                 // JavaScript doesn't have native float16, decode manually
-                result[i] = decodeFloat16(view.getUint16(offset, true));
+                result[i] = injDecodeFloat16(view.getUint16(offset, true));
                 break;
             case 'int16':
                 result[i] = view.getInt16(offset, true);
@@ -382,7 +382,7 @@ function readChannelData(buffer, chan) {
  * @param {number} h - The uint16 representation of a float16
  * @returns {number} The decoded floating-point value
  */
-function decodeFloat16(h) {
+function injDecodeFloat16(h) {
     var sign = (h >> 15) & 1;
     var exp = (h >> 10) & 0x1f;
     var frac = h & 0x3ff;
@@ -1402,7 +1402,7 @@ self.onmessage = function (event) {
             self.postMessage({ type: 'progress', rowsProcessed: 0, totalRows: 100 });
 
             // Parse the .ld binary file
-            var ldResult = parseLdFile(buffer, function (channelsProcessed, totalChannels) {
+            var ldResult = injParseLdFile(buffer, function (channelsProcessed, totalChannels) {
                 var pct = Math.round((channelsProcessed / totalChannels) * 100);
                 self.postMessage({ type: 'progress', rowsProcessed: pct, totalRows: 100 });
             });

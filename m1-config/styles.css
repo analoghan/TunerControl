@@ -73,6 +73,20 @@ tr.grid-row > td { background: #0d0d0d; padding: 10px; }
 .change-note { color: #b0b0b0; font-size: 0.85rem; white-space: pre-wrap; }
 .more { color: #888; font-size: 0.8rem; margin-top: 4px; }
 
+/* Value history */
+.hist-dialog { width: min(760px, 95vw); max-height: 90vh; background: #1a1a1a; color: #fff; border: 1px solid #333; border-radius: 8px; padding: 16px 20px; }
+.hist-dialog::backdrop { background: rgba(0,0,0,0.7); }
+.hist-head { display: flex; align-items: center; gap: 12px; }
+.hist-head h2 { margin: 0; flex: 1; font-size: 1rem; word-break: break-word; }
+#hist-chart { margin: 8px 0 12px; background: #111; border: 1px solid #333; border-radius: 6px; padding: 6px; }
+#hist-chart:empty { display: none; }
+.hist-up { color: #4caf50; }
+.hist-down { color: #ff9800; }
+.grid-table td.hcell { cursor: pointer; }
+.grid-table td.hcell:hover { background: #3a1a20; color: #fff; }
+.link-btn { background: none; border: none; color: #ff5a6e; cursor: pointer; padding: 0; font: inherit; text-align: left; }
+.link-btn:hover { text-decoration: underline; }
+
 /* Empty state */
 .empty-state { text-align: center; padding: 48px 16px; color: #888; }
 .empty-state p { margin: 10px 0 0; }

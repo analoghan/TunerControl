@@ -151,12 +151,14 @@ describe('Channel Resolver (via parseLog)', function () {
         'Exhaust Lambda',
         'Fuel Mixture Aim',
         'Fuel Closed Loop Control Bank 1 Trim',
-        'Fuel Closed Loop Control Bank 2 Trim'
+        'Fuel Closed Loop Control Bank 2 Trim',
+        'Coolant Temperature',      // optional, for the coolant temperature filter
+        'Throttle Position'         // optional, for the TPS rate filter
     ];
-    var ALL_VALUES = ['0.001', '1000', '100', '0.98', '1.02', '1.0', '1.0', '0.5', '-0.3'];
+    var ALL_VALUES = ['0.001', '1000', '100', '0.98', '1.02', '1.0', '1.0', '0.5', '-0.3', '90', '10'];
 
     // ----- Test 1: All 8 channels present -----
-    it('all 8 channels present — parses without warnings', function () {
+    it('all channels present — parses without warnings', function () {
         var csv = buildCsv(ALL_COLUMNS, ALL_VALUES);
         var result = parseLog(csv, noop);
         assert.ok(result.samples.length > 0);

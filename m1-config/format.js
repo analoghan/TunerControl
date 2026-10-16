@@ -8,7 +8,13 @@
 var M1C_UNIT_CONVERSIONS = {
     'deg/s|rpm': function (v) { return v / 6; },
     'deg/s/s|rpm/s': function (v) { return v / 6; },
+    // Angles are stored with positive = later in the cycle (dBTDC verified against M1 Tune). Units that
+    // count later events positive (after TDC, retard) show as stored; units counting earlier events (before
+    // TDC, advance) are negated.
     'deg|dBTDC': function (v) { return -v; },
+    'deg|dATDC': function (v) { return v; },
+    'deg|dRTD': function (v) { return v; },
+    'deg|dADV': function (v) { return -v; },
     's|ms': function (v) { return v * 1e3; },
     's|us': function (v) { return v * 1e6; },
     'ratio|%': function (v) { return v * 100; },

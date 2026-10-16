@@ -29,6 +29,12 @@
         <span id="ff-filename" class="filename-display">No file selected</span>
       </div>
 
+      <div class="file-row" id="ff-tune-row" hidden>
+        <label for="ff-tune">Or a stored tune:</label>
+        <select id="ff-tune" class="tune-select"><option value="">— choose a tune from the M1 Config Viewer —</option></select>
+        <span id="ff-tune-hint" class="tune-hint"></span>
+      </div>
+
       <div class="file-row">
         <label for="ff-scale">Fuel Film Scale (%):</label>
         <input type="number" id="ff-scale" min="0" max="500" value="100" step="5" style="width:80px;" />
@@ -149,6 +155,9 @@
   <script src="../lib/ld-parser.js"></script>
   <script src="../lib/xz-decoder.js"></script>
   <script src="../lib/m1pkg-parser.js"></script>
+  <script src="../m1-config/tune-db.js"></script>
+  <script src="../m1-config/tune-api.js"></script>
+  <script src="../m1-config/tune-source.js"></script>
   <script src="m1pkg-film.js"></script>
   <script src="worker.js"></script>
   <script src="app.js"></script>

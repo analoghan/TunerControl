@@ -77,6 +77,8 @@
   <script src="../lib/m1pkg-parser.js"></script>
   <script src="../m1-config/format.js"></script>
   <script src="../m1-config/resource-names.js"></script>
+  <script src="../m1-config/history.js"></script>
+  <script src="../m1-config/tune-source.js"></script>
   <script src="../ve-table/m1pkg-ve.js"></script>
   <script src="../transient-fuel/m1pkg-film.js"></script>
   <script src="../lib/xlsx.js"></script>
@@ -86,7 +88,12 @@
   <script src="../harness/harness-system.js"></script>
 
   <!-- Load fast-check from CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/fast-check@3.22.0/lib/bundle.js"></script>
+  <!-- fast-check 3.x has no browser bundle file; jsDelivr serves it as an ES module. Module scripts run
+       before DOMContentLoaded, when the tests start. -->
+  <script type="module">
+    import * as fc from 'https://cdn.jsdelivr.net/npm/fast-check@3.22.0/+esm';
+    window.fc = fc;
+  </script>
 
   <!-- Test framework and runner -->
   <script>
@@ -376,6 +383,7 @@
         'test-ve-m1pkg.js',
         'test-transient-m1pkg.js',
         'test-harness.js',
+        'test-tune-history.js',
       ];
 
       for (const mod of testModules) {

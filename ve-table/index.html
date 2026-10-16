@@ -29,6 +29,12 @@
         <span id="ve-filename" class="filename-display">No file selected</span>
       </div>
 
+      <div class="file-row" id="ve-tune-row" hidden>
+        <label for="ve-tune">Or a stored tune:</label>
+        <select id="ve-tune" class="tune-select"><option value="">— choose a tune from the M1 Config Viewer —</option></select>
+        <span id="ve-tune-hint" class="tune-hint"></span>
+      </div>
+
       <div class="file-row">
         <label for="hit-threshold">Min Hit Count:</label>
         <input type="number" id="hit-threshold" min="1" value="50" style="width: 80px;" />
@@ -160,6 +166,9 @@
 
   <script src="../lib/xz-decoder.js"></script>
   <script src="../lib/m1pkg-parser.js"></script>
+  <script src="../m1-config/tune-db.js"></script>
+  <script src="../m1-config/tune-api.js"></script>
+  <script src="../m1-config/tune-source.js"></script>
   <script src="m1pkg-ve.js"></script>
   <script src="app.js"></script>
 </body>

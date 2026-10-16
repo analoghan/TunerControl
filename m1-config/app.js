@@ -28,7 +28,8 @@ var state = {
     tab: 'changes',
     filter: 'all',
     search: '',
-    resourceNames: {}     // 'HARDWARE|signature' → user-entered I/O resource name
+    resourceNames: {},    // 'HARDWARE|signature' → user-entered I/O resource name
+    pkgCache: {}          // id → loaded package, for value histories from browser storage
 };
 
 function hardwareOf(pkg) {
@@ -373,11 +374,14 @@ function paramRow(item, idx) {
     } else {
         value = esc(m1cFormatValue(item, item.value, item.label));
     }
+    if (!item.axes && state.packages.length > 1) {
+        value += ' <button class="btn btn-small btn-secondary" data-history="' + idx + '" aria-label="History of ' + esc(item.name) + '">History</button>';
+    }
     return '<tr><td class="param-name">' + esc(item.name) + '</td><td class="num">' + value + '</td>' +
         '<td class="param-pin">' + pin + '</td><td>' + esc(m1cUnit(item)) + '</td><td class="param-kind">' + esc(item.kind) + '</td></tr>';
 }
 
-function gridHtml(item) {
+function gridHtml(item, idx) {
     var g = m1cTableGrid(item), axes = {};
     item.axes.forEach(function (a) { axes[a.axis] = a; });
     function axisLabel(a) {
@@ -386,19 +390,26 @@ function gridHtml(item) {
         return esc((a.input || a.axis) + (u ? ' (' + u + ')' : ''));
     }
     function num(v, src) { return esc(m1cFormatNumber(v, m1cConvert(0, src).dps)); }
+    var hist = state.packages.length > 1;
     var html = '<div class="grid-caption">Values' + (m1cUnit(item) ? ' (' + esc(m1cUnit(item)) + ')' : '') +
-        ' · X: ' + axisLabel(axes.X) + (axes.Y ? ' · Y: ' + axisLabel(axes.Y) : '') + '</div>';
-    g.slices.forEach(function (s) {
+        ' · X: ' + axisLabel(axes.X) + (axes.Y ? ' · Y: ' + axisLabel(axes.Y) : '') +
+        (hist ? ' · click a cell for its history' : '') + '</div>';
+    function cellKey(ix, iy, iz) {
+        return 'V[' + [ix, iy, iz].slice(0, item.axes.length).join(',') + ']';
+    }
+    g.slices.forEach(function (s, iz) {
         if (axes.Z) html += '<div class="grid-caption">Z = ' + num(s.zValue, axes.Z) + ' · ' + axisLabel(axes.Z) + '</div>';
         html += '<div class="grid-wrap"><table class="grid-table"><thead><tr><th>' + (axes.Y ? 'Y \\ X' : 'X') + '</th>' +
             g.x.map(function (x) { return '<th scope="col">' + num(x, axes.X) + '</th>'; }).join('') + '</tr></thead><tbody>';
         s.rows.forEach(function (row, iy) {
             html += '<tr><th scope="row">' + (axes.Y ? num(g.y[iy], axes.Y) : 'Value') + '</th>' +
-                row.map(function (v) { return '<td>' + num(v, item) + '</td>'; }).join('') + '</tr>';
+                row.map(function (v, ix) {
+                    return hist ? '<td class="hcell" data-hkey="' + cellKey(ix, iy, iz) + '">' + num(v, item) + '</td>' : '<td>' + num(v, item) + '</td>';
+                }).join('') + '</tr>';
         });
         html += '</tbody></table></div>';
     });
-    return html;
+    return '<div data-hist-item="' + idx + '">' + html + '</div>';
 }
 
 function toggleGrid(btn) {
@@ -412,7 +423,7 @@ function toggleGrid(btn) {
     var item = state.index[parseInt(btn.getAttribute('data-grid'), 10)].item;
     var row = document.createElement('tr');
     row.className = 'grid-row';
-    row.innerHTML = '<td colspan="5">' + gridHtml(item) + '</td>';
+    row.innerHTML = '<td colspan="5">' + gridHtml(item, parseInt(btn.getAttribute('data-grid'), 10)) + '</td>';
     tr.parentNode.insertBefore(row, tr.nextSibling);
     btn.textContent = 'Hide';
     btn.setAttribute('aria-expanded', 'true');
@@ -497,17 +508,19 @@ function changeHtml(ch, item) {
     if (item.type === 'io_resource') {
         var r0 = ch.cells[0];
         return html + '<div><span class="change-from">' + esc(resourceLabelWithPin(r0.from, state.compare.a)) +
-            '</span> &rarr; <span class="change-to">' + esc(resourceLabelWithPin(r0.to, state.compare.b)) + '</span></div></div>';
+            '</span> &rarr; <span class="change-to">' + esc(resourceLabelWithPin(r0.to, state.compare.b)) + '</span>' +
+            ' <button class="link-btn" data-hist-name="' + esc(ch.name) + '" data-hist-key="">history</button></div></div>';
     }
     if (!item.axes) {
         var c0 = ch.cells[0];
         return html + '<div><span class="change-from">' + esc(m1cFormatCell(item, '', c0.from, c0.fromLabel)) +
             '</span> &rarr; <span class="change-to">' + esc(m1cFormatCell(item, '', c0.to, c0.toLabel)) + '</span>' +
-            (unit ? ' ' + esc(unit) : '') + '</div></div>';
+            (unit ? ' ' + esc(unit) : '') + ' <button class="link-btn" data-hist-name="' + esc(ch.name) + '" data-hist-key="">history</button></div></div>';
     }
     html += '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Cell</th><th>From</th><th>To</th></tr></thead><tbody>';
     ch.cells.slice(0, MAX_CELLS_SHOWN).forEach(function (cell) {
-        html += '<tr><td>' + esc(m1cCellLabel(item, cell.key)) + '</td><td class="num change-from">' +
+        html += '<tr><td><button class="link-btn" data-hist-name="' + esc(ch.name) + '" data-hist-key="' + esc(cell.key) +
+            '" title="History of this cell">' + esc(m1cCellLabel(item, cell.key)) + '</button></td><td class="num change-from">' +
             esc(m1cFormatCell(item, cell.key, cell.from)) + '</td><td class="num change-to">' +
             esc(m1cFormatCell(item, cell.key, cell.to)) + '</td></tr>';
     });
@@ -617,9 +630,74 @@ searchInput.addEventListener('input', function () {
 $('main-content').addEventListener('click', function (e) {
     var btn = e.target.closest('[data-grid]');
     if (btn) toggleGrid(btn);
+    var hb = e.target.closest('[data-history]');
+    if (hb) showHistory(state.index[parseInt(hb.getAttribute('data-history'), 10)].item, '');
+    var hc = e.target.closest('[data-hkey]');
+    if (hc) showHistory(state.index[parseInt(hc.closest('[data-hist-item]').getAttribute('data-hist-item'), 10)].item, hc.getAttribute('data-hkey'));
+    var hn = e.target.closest('[data-hist-name]');
+    if (hn && state.compare) showHistory(state.compare.byName[hn.getAttribute('data-hist-name')], hn.getAttribute('data-hist-key'));
     var nameBtn = e.target.closest('[data-name-res]');
     if (nameBtn) nameResource(state.index[parseInt(nameBtn.getAttribute('data-name-res'), 10)].item);
 });
+
+// =========================================================================
+// Value history across tune versions
+// =========================================================================
+
+function loadPackageCached(id) {
+    if (state.pkgCache[id]) return Promise.resolve(state.pkgCache[id]);
+    return storeLoad(id).then(function (p) { state.pkgCache[id] = p; return p; });
+}
+
+/** Rows [{ tuneName, modified, value, label }] oldest first for one item/cell, from the server or stored tunes. */
+function historyRows(item, key) {
+    if (state.backend === 'server') {
+        return tuneApi('GET', 'history?item=' + encodeURIComponent(item.name) + '&cell=' + encodeURIComponent(key)).then(function (rows) {
+            return rows.map(function (r) {
+                var value = item.type === 'io_resource' ? (r.text_value ? r.text_value.split(',') : null)
+                    : r.value !== null ? r.value : r.text_value;
+                return { tuneName: r.tune_name, modified: r.modified, value: value, label: r.text_value };
+            });
+        });
+    }
+    return Promise.all(state.packages.map(function (p) {
+        return loadPackageCached(p.id).then(function (pkg) {
+            var it = pkg.items.filter(function (x) { return x.name === item.name; })[0];
+            var cell = it ? m1pkgCells(it).filter(function (c) { return c.key === key; })[0] : null;
+            return { tuneName: p.tuneName || p.fileName, modified: p.modified, value: cell ? cell.value : null, label: cell ? cell.label : null };
+        });
+    }));
+}
+
+function showHistory(item, key) {
+    if (!item) return;
+    var where = key ? m1cCellLabel(item, key) : '';
+    $('hist-title').textContent = item.name + (where ? ' — ' + where : '');
+    $('hist-sub').textContent = 'Loading…';
+    $('hist-chart').innerHTML = '';
+    $('hist-table').innerHTML = '';
+    if (!$('hist-dialog').open) $('hist-dialog').showModal();
+    historyRows(item, key).then(function (rows) {
+        var unit = m1cUnit(key && /^[XYZ]\[/.test(key) ? item.axes.filter(function (a) { return a.axis === key[0]; })[0] : item);
+        var pts = m1hPoints(rows, item, key, function (ids) { return resourceLabel(ids, state.current); });
+        var changes = 0;
+        pts.forEach(function (p, i) { if (i && p.text !== pts[i - 1].text) changes++; });
+        $('hist-sub').textContent = pts.length + ' tune version' + (pts.length === 1 ? '' : 's') + ', ' +
+            (changes ? 'changed ' + changes + ' time' + (changes === 1 ? '' : 's') : 'never changed') + (unit ? ' · values in ' + unit : '') + '.';
+        $('hist-chart').innerHTML = m1hChartSvg(pts, unit);
+        $('hist-table').innerHTML = '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Tune</th><th>Saved</th>' +
+            '<th>Value</th><th>Change</th></tr></thead><tbody>' + pts.slice().reverse().map(function (p, i, arr) {
+                var prev = arr[i + 1], change = '';
+                if (prev && p.num !== null && prev.num !== null && p.num !== prev.num) {
+                    var d = p.num - prev.num;
+                    change = '<span class="' + (d > 0 ? 'hist-up' : 'hist-down') + '">' + (d > 0 ? '+' : '') + esc(+d.toPrecision(4)) + '</span>';
+                } else if (prev && p.text !== prev.text) change = 'changed';
+                return '<tr><td title="' + esc(p.tuneName) + '">' + esc(p.tuneName) + '</td><td>' +
+                    esc(p.modified ? new Date(p.modified).toLocaleString() : '') + '</td><td class="num">' + esc(p.text) + '</td><td class="num">' +
+                    change + '</td></tr>';
+            }).join('') + '</tbody></table></div>';
+    }).catch(function (err) { $('hist-sub').textContent = 'Could not load the history: ' + err.message; });
+}
 
 /** Ask for the M1 Tune name of an I/O resource and remember it for this hardware. */
 function nameResource(item) {

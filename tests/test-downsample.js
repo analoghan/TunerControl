@@ -93,9 +93,9 @@ describe('downsampleForCharts', function () {
         var data = makeData(300000, 8);
         var channels = makeChannels();
         var result = downsampleForCharts(data, channels);
-        // floor(300000 / 150000) = 2
-        assert.equal(result.downsampleStep, 2);
-        assert.ok(result.time.length <= 150000);
+        var max = THRESHOLDS.MAX_CHART_POINTS;
+        assert.equal(result.downsampleStep, Math.floor(300000 / max));
+        assert.ok(result.time.length <= max);
     });
 
     it('uniformly samples every Nth element', function () {

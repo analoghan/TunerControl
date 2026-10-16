@@ -25,7 +25,7 @@ describe('M1 Config format — unit conversion', function () {
   });
 
   it('keeps the stored unit when the conversion is unknown', function () {
-    var c = m1cConvert(-30, { unit: 'deg', displayUnit: 'dADV', dps: 1 });
+    var c = m1cConvert(-30, { unit: 'deg', displayUnit: 'dCAM', dps: 1 });
     assert.equal(c.value, -30);
     assert.equal(c.unit, 'deg');
     assert.equal(c.dps, null);
@@ -71,5 +71,16 @@ describe('M1 Config format — item values', function () {
       ['all', 'driver', 'vehicle']);
     assert.deepEqual(m1cCategories({ name: 'Anti Lag.Mode', tags: ['Engine', 'Setup', 'Feature'] }),
       ['all', 'firmware', 'engine']);
+  });
+});
+
+describe('M1 Config — angle units', function () {
+  // Packages store angles with positive = later in the cycle.
+  it('shows after-TDC and retard angles as stored, before-TDC and advance angles negated', function () {
+    function conv(unit, v) { return m1cConvert(v, { unit: 'deg', displayUnit: unit, dps: 1 }); }
+    assert.deepEqual([conv('dATDC', 5).value, conv('dATDC', 5).unit], [5, 'dATDC']);
+    assert.deepEqual([conv('dRTD', 8).value, conv('dRTD', 8).unit], [8, 'dRTD']);
+    assert.deepEqual([conv('dADV', -30).value, conv('dADV', -30).unit], [30, 'dADV']);
+    assert.deepEqual([conv('dBTDC', -20).value, conv('dBTDC', -20).unit], [20, 'dBTDC']);
   });
 });

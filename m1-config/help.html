@@ -43,6 +43,7 @@
       <li><a href="#storage">Where tunes are stored</a></li>
       <li><a href="#history">Tune history and comparing</a></li>
       <li><a href="#browse">Browsing parameters and tables</a></li>
+      <li><a href="#value-history">Value history across versions</a></li>
       <li><a href="#units">Units</a></li>
       <li><a href="#io">I/O resources, names and pins</a></li>
       <li><a href="#backup">Backups</a></li>
@@ -95,11 +96,21 @@
     <p>Tables show their size (e.g. <em>20 × 24</em>, or <em>20 × 24 of 36 × 24</em> when not every axis site is used). Click
       <strong>Show</strong> to expand the grid with its axis breakpoints.</p>
 
+    <h2 id="value-history">Value history across versions</h2>
+    <p>With two or more tunes imported, you can see how any value changed over every saved version:</p>
+    <ul>
+      <li><strong>Parameters and I/O assignments</strong> — click <strong>History</strong> next to the value.</li>
+      <li><strong>Table cells</strong> — expand the table with <strong>Show</strong> and click a cell.</li>
+      <li><strong>Changes tab</strong> — click a changed cell's location, or <strong>history</strong> next to a changed value.</li>
+    </ul>
+    <p>The history lists every tune (newest first) with its save time, the value in display units and the change from the previous
+      version, with a chart for numbers. A tune that doesn't have the parameter shows —.</p>
+
     <h2 id="units">Units</h2>
     <p>Packages store values in base units (deg/s, Pa, seconds, ratios). The viewer converts them to the units M1 Tune shows — rpm, kPa,
       ms, %, °C — so values match what you see in M1 Tune.</p>
-    <div class="warning"><strong>Angles:</strong> ignition timing in dBTDC is converted. A few other angle references (dADV, dATDC, dRTD)
-      are shown as stored, because their sign convention hasn't been confirmed yet — check those against M1 Tune.</div>
+    <p><strong>Angles</strong> are shown in M1 Tune's units: dBTDC (before top dead centre), dATDC (after top dead centre), dRTD (degrees
+      retarded) and dADV (degrees advanced).</p>
 
     <h2 id="io">I/O resources, names and pins</h2>
     <p>A package stores each I/O assignment as resource IDs, not as the name M1 Tune shows. The viewer turns the IDs it knows into names —
@@ -128,10 +139,15 @@
 
     <h2 id="other">Used by other tools</h2>
     <ul>
-      <li><strong><a href="../ve-table/index.html">VE Table Tuning</a></strong> reads Engine Efficiency Main straight from a <code>.m1pkg</code>.</li>
-      <li><strong><a href="../transient-fuel/index.html">Transient Fuel Analyzer</a></strong> reads Fuel Film Primary and its scale, offset and time constants.</li>
+      <li><strong><a href="../ve-table/index.html">VE Table Tuning</a></strong> reads Engine Efficiency Main from a <code>.m1pkg</code> or
+        straight from a tune stored here.</li>
+      <li><strong><a href="../transient-fuel/index.html">Transient Fuel Analyzer</a></strong> reads Fuel Film Primary and its scale, offset and
+        time constants the same way.</li>
       <li><strong><a href="../harness/index.html">Harness Builder</a></strong> compares tunes stored here with your wiring harness, pin by pin.</li>
     </ul>
+    <p>When you choose a log in the VE or Transient Fuel tool, it suggests the stored tune that was most likely in the ECU when the log was
+      recorded: the latest tune from the same ECU (serial number) saved before the log started. Logs carry the ECU serial and start time in
+      their header (<code>.ld</code>) or file name (<code>…#30924_20260611_173221…</code>). Choosing a file or another tune yourself always wins.</p>
 
     <h2 id="troubleshooting">Troubleshooting</h2>
     <ul>

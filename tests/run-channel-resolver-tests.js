@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Load worker.js
-const workerCode = fs.readFileSync(path.join(__dirname, '..', 'worker.js'), 'utf8');
+const workerCode = fs.readFileSync(path.join(__dirname, '..', 've-table', 'worker.js'), 'utf8');
 // Remove the self.onmessage block that references 'self'
 const safeCode = workerCode.replace(/if \(typeof self[\s\S]*?^\}/m, '');
 eval(safeCode);
@@ -21,8 +21,8 @@ function buildCsv(columns, values) {
   return header + '\n' + units + '\n' + dataRow + '\n';
 }
 
-var ALL_COLUMNS = ['Time','Engine Speed','Inlet Manifold Pressure','Exhaust Lambda Bank 1','Exhaust Lambda Bank 2','Exhaust Lambda','Fuel Mixture Aim','Fuel Closed Loop Control Bank 1 Trim','Fuel Closed Loop Control Bank 2 Trim'];
-var ALL_VALUES = ['0.001','1000','100','0.98','1.02','1.0','1.0','0.5','-0.3'];
+var ALL_COLUMNS = ['Time','Engine Speed','Inlet Manifold Pressure','Exhaust Lambda Bank 1','Exhaust Lambda Bank 2','Exhaust Lambda','Fuel Mixture Aim','Fuel Closed Loop Control Bank 1 Trim','Fuel Closed Loop Control Bank 2 Trim','Coolant Temperature','Throttle Position'];
+var ALL_VALUES = ['0.001','1000','100','0.98','1.02','1.0','1.0','0.5','-0.3','90','10'];
 function noop() {}
 
 console.log('Channel Resolver (via parseLog):');

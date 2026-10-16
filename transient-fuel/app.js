@@ -13,6 +13,7 @@ logInput.addEventListener('change', function() {
     var file = logInput.files[0];
     document.getElementById('log-filename').textContent = file ? file.name : 'No file selected';
     analyzeBtn.disabled = !file;
+    if (file) suggestStoredTune(file);
 });
 
 var ffFromPkg = null;   // fuel film table read from a selected .m1pkg (null for CSV or no file)
@@ -21,6 +22,7 @@ ffTableInput.addEventListener('change', function() {
     var file = ffTableInput.files[0];
     var label = document.getElementById('ff-filename');
     ffFromPkg = null;
+    if (file) { ffPicked = true; clearStoredTune(); }
     errorContainer.hidden = true;
     if (!file || !file.name.toLowerCase().endsWith('.m1pkg')) {
         label.textContent = file ? file.name : 'No file selected';
@@ -52,6 +54,76 @@ ffTableInput.addEventListener('change', function() {
     };
     reader.readAsArrayBuffer(file);
 });
+
+// Stored tunes (from the M1 Config Viewer) ------------------------------------
+
+var ffTuneSelect = document.getElementById('ff-tune');
+var ffTuneHint = document.getElementById('ff-tune-hint');
+var ffFromStore = false;   // ffFromPkg came from a stored tune
+var ffPicked = false;      // the user chose the fuel film source themselves
+var storedTunes = [];
+
+function clearStoredTune() {
+    if (ffFromStore) { ffFromPkg = null; ffFromStore = false; }
+    ffTuneSelect.value = '';
+    ffTuneHint.textContent = '';
+    ffTuneHint.classList.remove('suggested');
+}
+
+/** Use the fuel film table and settings of a stored tune. */
+function useStoredTune(id, hint, suggested) {
+    if (!id) { clearStoredTune(); return Promise.resolve(); }
+    var label = document.getElementById('ff-filename');
+    ffTuneSelect.value = id;
+    ffTuneHint.textContent = 'Loading…';
+    return tsLoad(id).then(function (pkg) {
+        if (ffTuneSelect.value !== id) return;
+        var film = m1pkgFuelFilm(pkg);
+        ffFromPkg = film.table;
+        ffFromStore = true;
+        ffTableInput.value = '';
+        applyTuneSettings(film);
+        label.textContent = 'Stored tune: ' + (film.tuneName || 'tune') + ', Fuel Film Primary Main (' + film.table.breakpoints.length +
+            ' sites); scale, offset and time constants filled from the tune' + (film.notes.length ? '. ' + film.notes.join(' ') : '');
+        ffTuneHint.textContent = hint || '';
+        ffTuneHint.classList.toggle('suggested', !!suggested);
+        errorContainer.hidden = true;
+    }).catch(function (err) {
+        clearStoredTune();
+        errorContainer.textContent = 'Could not read the fuel film table from the stored tune: ' + err.message;
+        errorContainer.hidden = false;
+    });
+}
+
+/** After a log is chosen: suggest the stored tune that was most likely in the ECU, unless a source was picked. */
+function suggestStoredTune(file) {
+    if (!storedTunes.length || ffPicked) return;
+    tsLogInfo(file).then(function (info) {
+        var s = tsSuggest(storedTunes, info);
+        if (s.tune) return useStoredTune(s.tune.id, s.reason, true);
+        ffTuneHint.textContent = s.reason;
+        ffTuneHint.classList.remove('suggested');
+    });
+}
+
+ffTuneSelect.addEventListener('change', function () {
+    ffPicked = !!ffTuneSelect.value;
+    if (ffTuneSelect.value) useStoredTune(ffTuneSelect.value, '', false);
+    else { clearStoredTune(); document.getElementById('ff-filename').textContent = 'No file selected'; }
+});
+
+tsInit().then(tsList).then(function (list) {
+    storedTunes = list;
+    if (!list.length) return;
+    list.forEach(function (t) {
+        var o = document.createElement('option');
+        o.value = t.id;
+        o.textContent = tsLabel(t);
+        ffTuneSelect.appendChild(o);
+    });
+    document.getElementById('ff-tune-row').hidden = false;
+    if (logInput.files[0]) suggestStoredTune(logInput.files[0]);
+}).catch(function () { /* no stored tunes available: the file inputs still work */ });
 
 /** Fills the scale, offset and time-constant inputs with the values read from a tune package. */
 function applyTuneSettings(film) {

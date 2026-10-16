@@ -135,6 +135,17 @@
 
     </div>
 
+    <!-- Value history -->
+    <dialog id="hist-dialog" class="hist-dialog" aria-labelledby="hist-title">
+      <div class="hist-head">
+        <h2 id="hist-title">History</h2>
+        <form method="dialog"><button class="btn btn-secondary btn-small">Close</button></form>
+      </div>
+      <p id="hist-sub" class="hint"></p>
+      <div id="hist-chart"></div>
+      <div id="hist-table"></div>
+    </dialog>
+
     <!-- Empty state -->
     <div id="empty-state" class="empty-state">
       <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5" aria-hidden="true">
@@ -154,6 +165,7 @@
   <script src="../lib/xz-decoder.js"></script>
   <script src="../lib/m1pkg-parser.js"></script>
   <script src="format.js"></script>
+  <script src="history.js"></script>
   <script src="resource-names.js"></script>
   <script src="tune-db.js"></script>
   <script src="tune-api.js"></script>
