@@ -12,7 +12,8 @@ var state = {
     checks: [], issuesByRow: {}, issuesByBlock: {},
     tab: 'connectors',
     selConnector: null, selSplice: null,
-    tunes: [], tunePkg: null, tuneId: '', resourceNames: {}, show: 'problems'
+    tunes: [], tunePkg: null, tuneId: '', resourceNames: {}, show: 'problems',
+    openIssues: {}        // 'kind|block|index' → true for rows whose problem details are shown
 };
 
 function $(id) { return document.getElementById(id); }
@@ -222,18 +223,48 @@ function rowIssues(kind, block, index) {
     return state.issuesByRow[kind + '|' + block + '|' + index] || [];
 }
 
-function markerHtml(issues) {
+/**
+ * Error (!) / warning (?) marker. Hovering shows the problems; with `row` (an editor row index) it is a button
+ * that opens the problem details under the row.
+ */
+function markerHtml(issues, row, open) {
     if (!issues.length) return '';
     var error = issues.some(function (i) { return i.severity === 'error'; });
     var text = issues.map(function (i) { return i.message; }).join('\n');
-    return '<span class="marker ' + (error ? 'marker-error' : 'marker-warning') + '" title="' + esc(text) + '" role="img" aria-label="' +
-        esc((error ? 'Error: ' : 'Warning: ') + text) + '">' + (error ? '!' : '?') + '</span>';
+    var cls = 'marker ' + (error ? 'marker-error' : 'marker-warning'), label = (error ? 'Error: ' : 'Warning: ') + text;
+    if (row === undefined) {
+        return '<span class="' + cls + '" title="' + esc(text) + '" role="img" aria-label="' + esc(label) + '">' + (error ? '!' : '?') + '</span>';
+    }
+    return '<button class="' + cls + '" data-show-issues="' + row + '" title="' + esc(text) + '" aria-expanded="' + (open ? 'true' : 'false') +
+        '" aria-label="' + esc(label + ' (show details)') + '">' + (error ? '!' : '?') + '</button>';
 }
 
+function issueKey(kind, block, index) { return kind + '|' + block + '|' + index; }
+
+/** Problem details for one editor row: each message, with "Use …" (suggested fix) and "Go to …" buttons. */
+function issueDetailHtml(kind, blockId, index, colspan) {
+    var issues = rowIssues(kind, blockId, index);
+    if (!issues.length) return '';
+    return '<tr class="issue-row" data-issues-for="' + index + '"><td colspan="' + colspan + '"><ul>' + issues.map(function (i, n) {
+        var actions = '';
+        if (i.fix) actions += ' <button class="btn btn-small" data-row-fix="' + index + '|' + n + '">Use ' + esc(i.fix) + '</button>';
+        if (i.target && i.target !== i.fix) {
+            actions += ' <button class="btn btn-small btn-secondary" data-goto-target="' + esc(i.target) + '">Go to ' + esc(i.target) + '</button>';
+        }
+        return '<li class="issue-' + i.severity + '"><span class="issue-text">' + esc(i.message) + '</span>' + actions + '</li>';
+    }).join('') + '</ul></td></tr>';
+}
+
+/** After checks re-run: update markers and open detail rows without rebuilding the inputs being typed in. */
 function refreshRowMarkers() {
     document.querySelectorAll('[data-marker]').forEach(function (cell) {
-        var parts = cell.getAttribute('data-marker').split('|');
-        cell.innerHTML = markerHtml(rowIssues(parts[0], parts[1], parseInt(parts[2], 10)));
+        var parts = cell.getAttribute('data-marker').split('|'), index = parseInt(parts[2], 10);
+        var key = issueKey(parts[0], parts[1], index), issues = rowIssues(parts[0], parts[1], index);
+        if (!issues.length) delete state.openIssues[key];
+        cell.innerHTML = markerHtml(issues, index, !!state.openIssues[key]);
+        var tr = cell.parentNode, next = tr.nextElementSibling;
+        if (next && next.classList.contains('issue-row')) next.remove();
+        if (state.openIssues[key]) tr.insertAdjacentHTML('afterend', issueDetailHtml(parts[0], parts[1], index, tr.children.length));
     });
 }
 
@@ -260,6 +291,7 @@ function applyFix(issue) {
     var rec = rowRecord(issue.ref);
     if (!rec) return;
     if (issue.ref.kind === 'pin') rec.remote = issue.fix; else rec.end = issue.fix;
+    showError('');
     setDirty(true);
     runChecks();
     renderAll();
@@ -302,14 +334,28 @@ function gotoRow(tab, blockId, index) {
 }
 
 /** Jump to whatever a remote reference points at. */
+/** Jump to whatever a reference points at. Returns false when it points at nothing in this harness. */
 function gotoEndpoint(text) {
     var r = harnessResolve(harnessIndex(state.model), text);
-    if (r.kind === 'pin') {
-        gotoRow('connectors', r.connector.id, r.pin ? r.connector.pins.indexOf(r.pin) : null);
-    } else if (r.kind === 'splice') {
-        gotoRow('splices', r.splice.id, null);
-    } else if (findConnector(text)) gotoRow('connectors', text, null);
+    if (r.kind === 'pin' && r.pin) gotoRow('connectors', r.connector.id, r.connector.pins.indexOf(r.pin));
+    else if (r.kind === 'splice') gotoRow('splices', r.splice.id, null);
+    else if (findConnector(text)) gotoRow('connectors', text, null);
     else if (findSplice(text)) gotoRow('splices', text, null);
+    else return false;
+    return true;
+}
+
+/** Show (or toggle) the problem details under an editor row. */
+function showRowIssues(kind, blockId, index, toggle) {
+    var key = issueKey(kind, blockId, index);
+    if (toggle && state.openIssues[key]) delete state.openIssues[key]; else state.openIssues[key] = true;
+    refreshRowMarkers();
+    document.querySelectorAll('[data-marker]').forEach(function (cell) {
+        if (cell.getAttribute('data-marker') !== key) return;
+        var marker = cell.querySelector('.marker');
+        if (marker) marker.focus();
+        cell.parentNode.scrollIntoView({ block: 'nearest' });
+    });
 }
 
 // =========================================================================
@@ -364,8 +410,9 @@ function rowsHtml(kind, block, records, fields, columns) {
         '<th><span class="sr-only">Actions</span></th></tr></thead><tbody>';
     var remoteField = kind === 'pin' ? 'remote' : 'end';
     records.forEach(function (rec, i) {
+        var open = !!state.openIssues[issueKey(kind, block.id, i)];
         html += '<tr data-row="' + i + '"><td class="mark-col" data-marker="' + kind + '|' + esc(block.id) + '|' + i + '">' +
-            markerHtml(rowIssues(kind, block.id, i)) + '</td>';
+            markerHtml(rowIssues(kind, block.id, i), i, open) + '</td>';
         fields.forEach(function (f) {
             var input = '<input type="text" class="cell-input cell-' + f + '" data-row="' + i + '" data-field="' + f + '" value="' +
                 esc(rec[f]) + '" aria-label="' + esc(f + ' row ' + (i + 1)) + '">';
@@ -377,6 +424,7 @@ function rowsHtml(kind, block, records, fields, columns) {
         });
         html += '<td class="actions"><button class="btn btn-small btn-danger" data-remove-row="' + i + '" aria-label="Remove row ' + (i + 1) +
             '">&times;</button></td></tr>';
+        if (open) html += issueDetailHtml(kind, block.id, i, fields.length + 2);
     });
     return html + '</tbody></table></div>';
 }
@@ -465,11 +513,29 @@ function wireEditor(containerId, isConnector) {
         var block = current(), t = e.target.closest('button');
         if (!block || !t) return;
         var recs = isConnector ? block.pins : block.wires;
+        var kind = isConnector ? 'pin' : 'wire';
         if (t.hasAttribute('data-goto')) {
-            var rec = recs[parseInt(t.getAttribute('data-goto'), 10)];
-            gotoEndpoint(isConnector ? rec.remote : rec.end);
+            var gi = parseInt(t.getAttribute('data-goto'), 10), rec = recs[gi], where = isConnector ? rec.remote : rec.end;
+            if (gotoEndpoint(where)) return;
+            // Nothing to jump to: explain why on the row itself.
+            if (rowIssues(kind, block.id, gi).length) showRowIssues(kind, block.id, gi, false);
+            else showError(String(where || '').trim() ? '"' + where + '" is not a connector pin or splice in this harness.'
+                                                      : 'This row has no ' + (isConnector ? 'remote connection' : 'location') + '.');
+        } else if (t.hasAttribute('data-show-issues')) {
+            showRowIssues(kind, block.id, parseInt(t.getAttribute('data-show-issues'), 10), true);
+        } else if (t.hasAttribute('data-row-fix')) {
+            var fp = t.getAttribute('data-row-fix').split('|');
+            applyFix(rowIssues(kind, block.id, parseInt(fp[0], 10))[parseInt(fp[1], 10)]);
+        } else if (t.hasAttribute('data-goto-target')) {
+            gotoEndpoint(t.getAttribute('data-goto-target'));
         } else if (t.hasAttribute('data-remove-row')) {
-            recs.splice(parseInt(t.getAttribute('data-remove-row'), 10), 1);
+            var ri = parseInt(t.getAttribute('data-remove-row'), 10), r = recs[ri];
+            var what = isConnector
+                ? 'cavity ' + (r.cavity || '(no location)') + (r.function ? ' (' + r.function + ')' : '') + ' from ' + block.id
+                : 'wire ' + (r.end || '(no location)') + (r.function ? ' (' + r.function + ')' : '') + ' from splice ' + block.id;
+            if (!window.confirm('Remove ' + what + '?')) return;
+            recs.splice(ri, 1);
+            state.openIssues = {};
             setDirty(true); runChecks(); renderAll();
         } else if (t.id === 'add-row') {
             var blank = {};

@@ -49,8 +49,16 @@
 tr.flash td { background: rgba(227,24,55,0.25); transition: background 0.3s; }
 #add-row { margin-top: 8px; }
 
-.marker { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%;
-  font-size: 0.7rem; font-weight: 700; cursor: help; }
+.marker { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%;
+  font-size: 0.72rem; font-weight: 700; cursor: help; border: none; padding: 0; font-family: inherit; }
+button.marker { cursor: pointer; }
+button.marker:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+button.marker[aria-expanded="true"] { box-shadow: 0 0 0 2px #fff; }
+tr.issue-row > td { background: #160b0d; text-align: left; padding: 6px 10px 8px 30px; }
+tr.issue-row ul { margin: 0; padding: 0; list-style: none; }
+tr.issue-row li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px 0; font-size: 0.8rem; }
+tr.issue-row li.issue-error .issue-text { color: #ff8a80; }
+tr.issue-row li.issue-warning .issue-text { color: #ffb74d; }
 .marker-error { background: #f44336; color: #fff; }
 .marker-warning { background: #ff9800; color: #111; }
 
