@@ -187,7 +187,7 @@ describe('Harness — tune comparison', function () {
     io('Fuel.Pressure.Sensor.Resource.Value', slot2('0x6203')),                // AVI4 → C17 (not wired)
     io('Throttle.Pedal.Sensor Main Resource', slot2('0x654c')),                // E888 AVI7
     io('Knock.Cylinder 1.Resource.Value', slot2('0x6100')),                    // Knock Input 1 → D07 (not wired)
-    io('Fuel.Temperature.Sensor.Resource.Value', slot2('0x6480')),             // unnamed
+    io('Fuel.Temperature.Sensor.Resource.Value', slot2('0x6555')),             // unnamed
     io('Coolant.Fan 2.Output Resource.Value', ['0x0000', '0x0000', '0x0000', '0x0000', '0x0000'])
   ] };
   var m = harnessFromWorkbook(hxWorkbook(), 'Test');
@@ -205,6 +205,15 @@ describe('Harness — tune comparison', function () {
     assert.equal(row('M142 C17').status, 'missing');
     assert.equal(row('M142 D07').status, 'missing', 'Knock Input 1 = D07, not wired');
     assert.equal(row('E888 A32').status, 'no-connector');
+  });
+
+  it('lists every resource name used on a shared pin', function () {
+    var hybrid = { items: [io('Throttle.Servo.Bank 1.Position.Sensor.Main.Digital.Decode Resource.Value', ['0x6402', '0x0000', '0x6465', '0x0000', '0x6442']),
+                           io('Throttle.Servo.Bank 1 Position Sensor Main Resource.Value', slot2('0x6477')),
+                           io('Throttle.Servo.Bank 1 Position Sensor Tracking Resource.Value', slot2('0x6478'))] };
+    var d08 = harnessTuneCompare(m, hybrid, 'M142', {}).rows.filter(function (x) { return x.pin === 'M142 D08'; })[0];
+    assert.equal(d08.resource, 'UDIG3, UDIG3 Hybrid A, UDIG3 Hybrid B');
+    assert.equal(d08.tune.length, 3);
   });
 
   it('says when the tune uses a pin the harness marks as spare', function () {
@@ -225,11 +234,11 @@ describe('Harness — tune comparison', function () {
   });
 
   it('lists unnamed tune assignments separately', function () {
-    assert.deepEqual(r.unnamed, [{ ids: '0x6480', tune: ['Fuel.Temperature.Sensor'] }]);
+    assert.deepEqual(r.unnamed, [{ ids: '0x6555', tune: ['Fuel.Temperature.Sensor'] }]);
   });
 
   it('uses user-entered resource names', function () {
-    var named = harnessTuneCompare(m, pkg, 'M142', { 'M142|0x0000,0x0000,0x6480,0x0000,0x0000': 'AT4' });
+    var named = harnessTuneCompare(m, pkg, 'M142', { 'M142|0x0000,0x0000,0x6555,0x0000,0x0000': 'AT4' });
     assert.equal(named.unnamed.length, 0);
     assert.equal(named.rows.filter(function (x) { return x.pin === 'M142 D06'; })[0].status, 'missing', 'AT4 = D06, not in harness');
   });

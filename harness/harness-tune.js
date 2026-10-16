@@ -109,9 +109,10 @@ function harnessTuneCompare(model, pkg, hardware, userNames) {
             var key = p.unit + '.' + connector + '.' + cavity;
             if (!byPin[key]) {
                 byPin[key] = { pin: p.unit + ' ' + connector + String(cavity).padStart(2, '0'), connectorId: p.unit + '.' + connector,
-                               cavity: cavity, resource: resource, tune: [], partnerNote: partnerNote || '' };
+                               cavity: cavity, resource: resource, resources: [], tune: [], partnerNote: partnerNote || '' };
             }
             byPin[key].tune.push(htItemName(item.name));
+            if (byPin[key].resources.indexOf(resource) < 0) byPin[key].resources.push(resource);
         }
         add(p.connector, p.cavity, n.name);
         if (p.second) {
@@ -135,7 +136,9 @@ function harnessTuneCompare(model, pkg, hardware, userNames) {
         else { r.status = 'check'; r.note = 'The harness function does not look like the tune assignment.'; }
         if (r.tune.length > 1) r.note = (r.note ? r.note + ' ' : '') + 'The tune assigns ' + r.tune.length + ' items to this pin.';
         if (r.partnerNote) r.note = r.partnerNote + (r.note ? ' ' + r.note : '');
+        r.resource = r.resources.sort().join(', ');
         delete r.partnerNote;
+        delete r.resources;
         rows.push(r);
     });
 

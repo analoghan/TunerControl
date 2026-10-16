@@ -13,7 +13,7 @@ describe('M1 Config — I/O resource names', function () {
     assert.equal(m1cResourceName(['0x65a0', '0x0000', '0x6520', '0x0000', '0x0000'], 'M142').name, 'FIRMWARE0');
     assert.equal(m1cResourceName(slot2('0x652a'), 'M142').name, 'FIRMWARE10');
     assert.equal(m1cResourceName(slot2('0x653f'), 'M142').name, 'FIRMWARE31');
-    assert.equal(m1cResourceName(slot2('0x6541'), 'M142'), null);
+    assert.equal(m1cResourceName(slot2('0x6542'), 'M142'), null);
   });
 
   it('names local analogue voltage and temperature inputs', function () {
@@ -48,6 +48,20 @@ describe('M1 Config — I/O resource names', function () {
     assert.equal(m1cResourcePinFor(udig('0x6401', '0x6464', '0x6441'), 'M142'), 'M142 pin D02');
     assert.equal(m1cResourceName(slot2('0x646e'), 'M142').name, 'UDIG12', 'switch input: slot 2 only');
     assert.equal(m1cResourcePinFor(slot2('0x646e'), 'M142'), 'M142 pin B07');
+  });
+
+  it('names UDIG hybrid functions, RS232 and the remaining E888 inputs', function () {
+    assert.equal(m1cResourceName(slot2('0x6477'), 'M142').name, 'UDIG3 Hybrid A');
+    assert.equal(m1cResourceName(slot2('0x6478'), 'M142').name, 'UDIG3 Hybrid B');
+    assert.equal(m1cResourceName(slot2('0x647f'), 'M142').name, 'UDIG7 Hybrid A');
+    assert.equal(m1cResourceName(slot2('0x6480'), 'M142').name, 'UDIG7 Hybrid B');
+    assert.equal(m1cResourcePinFor(slot2('0x6480'), 'M142'), 'M142 pin D14');
+    assert.equal(m1cResourceName(slot2('0x648a'), 'M142').name, 'UDIG12 Hybrid B');
+    var gps = ['0x0000', '0x649f', '0x0000', '0x0000', '0x0000'];
+    assert.equal(m1cResourceName(gps, 'M142').name, 'RS232');
+    assert.equal(m1cResourcePinFor(gps, 'M142'), 'M142 pin A21 (TX A22)');
+    assert.equal(m1cResourcePinFor(slot2('0x6541'), 'M142'), 'E888 pin A23');
+    assert.equal(m1cResourcePinFor(slot2('0x6554'), 'M142'), 'E888 pin B11');
   });
 
   it('names knock inputs, low side injectors and bridge outputs', function () {
@@ -99,7 +113,7 @@ describe('M1 Config — I/O resource names', function () {
     assert.equal(m1cResourcePinFor(slot2('0x6211'), 'M142'), 'M142 pin D03');
     assert.equal(m1cResourcePinFor(['0x0000', '0x640f', '0x6110', '0x0000', '0x644c'], 'M142'), 'M142 pin A06 (+ A07)');
     assert.equal(m1cResourcePinFor(slot2('0x6524'), 'M142'), null, 'FIRMWARE has no pin');
-    assert.equal(m1cResourcePinFor(slot2('0x6554'), 'M142'), null, 'unnamed has no pin');
+    assert.equal(m1cResourcePinFor(slot2('0x6555'), 'M142'), null, 'unnamed has no pin');
     assert.equal(m1cResourcePin('Low Side Ignition 8', 'M142'), 'M142 pin C13');
     assert.equal(m1cResourcePin('FIRMWARE4', 'M142'), null);
     assert.equal(m1cResourcePin('AVI2', 'M150'), null);
@@ -128,7 +142,7 @@ describe('M1 Config — I/O resource names', function () {
 
   it('formats labels with the raw IDs', function () {
     assert.equal(m1cResourceLabel(['0x0000', '0x0000', '0x6524', '0x0000', '0x0000'], 'M142'), 'FIRMWARE4 (0x6524)');
-    assert.equal(m1cResourceLabel(['0x0000', '0x0000', '0x6554', '0x0000', '0x0000'], 'M142'), '0x6554');
+    assert.equal(m1cResourceLabel(['0x0000', '0x0000', '0x6555', '0x0000', '0x0000'], 'M142'), '0x6555');
     assert.equal(m1cResourceLabel(none, 'M142'), 'Not assigned');
     assert.equal(m1cResourceName(none, 'M142'), null);
   });

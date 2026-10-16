@@ -9,8 +9,8 @@
 
 /**
  * Exact signatures confirmed against M1 Tune.
- * E888 (CAN expander) inputs stay exact: AVI1/3/5/7 = 0x6540/44/48/4c suggest two IDs per input, but
- * AVI8 = 0x6550 breaks that pattern.
+ * E888 (CAN expander) inputs stay exact: AVI1/2/3/5/7/8 = 0x6540/41/44/48/4c/50 and DIG1 = 0x6554 follow no
+ * simple numbering.
  */
 var M1C_KNOWN_RESOURCES = {
     M142: {
@@ -18,7 +18,11 @@ var M1C_KNOWN_RESOURCES = {
         '0x0000,0x0000,0x6544,0x0000,0x0000': 'E888 AVI3',
         '0x0000,0x0000,0x6548,0x0000,0x0000': 'E888 AVI5',
         '0x0000,0x0000,0x654c,0x0000,0x0000': 'E888 AVI7',
-        '0x0000,0x0000,0x6550,0x0000,0x0000': 'E888 AVI8'
+        '0x0000,0x0000,0x6550,0x0000,0x0000': 'E888 AVI8',
+        '0x0000,0x0000,0x6541,0x0000,0x0000': 'E888 AVI2',
+        '0x0000,0x0000,0x6554,0x0000,0x0000': 'E888 DIG1',
+        // GPS serial port on the ECU's RS232 (A21 receive, A22 transmit).
+        '0x0000,0x649f,0x0000,0x0000,0x0000': 'RS232'
     }
 };
 
@@ -43,6 +47,13 @@ var M1C_RESOURCE_RULES = {
         // use slot 2 only (UDIG12 = 0x646e confirmed: Driver Switch 1).
         { slot: 0, from: 0x6400, to: 0x640b, name: function (id) { return 'UDIG' + (id - 0x6400 + 1); } },
         { slot: 2, from: 0x6463, to: 0x646e, name: function (id) { return 'UDIG' + (id - 0x6462); } },
+        // UDIG hybrid functions: one pin used for two things (e.g. resistance + frequency). UDIGn Hybrid A =
+        // 0x6473+2(n-1), Hybrid B = the next ID (UDIG3 A/B = throttle main/tracking, UDIG7 B = fuel temperature
+        // confirmed; UDIG7 A = 0x647f fuel composition sensor).
+        { slot: 2, from: 0x6473, to: 0x648a, name: function (id) {
+            var k = id - 0x6473;
+            return 'UDIG' + (Math.floor(k / 2) + 1) + ' Hybrid ' + (k % 2 ? 'B' : 'A');
+        } },
         // Knock inputs 1-4 (1 and 2 confirmed: odd / even cylinders).
         { slot: 2, from: 0x6100, to: 0x6103, name: function (id) { return 'Knock Input ' + (id - 0x6100 + 1); } },
         // Low side injector outputs 1-6 (2 and 3 confirmed: Auxiliary Outputs 2 and 3).
@@ -116,7 +127,7 @@ var M1C_PIN_PATTERNS = [
     [/^(?:low side injector|inj_?ls) ?(\d+)$/, 'inj'],
     [/^(?:half bridge(?: output)?|out_?hb|hb) ?(\d+)$/, 'hb'],
     [/^(?:h-?bridge|bridge)(?: output)? ?(\d+)$/, 'bridge'],
-    [/^(?:universal digital(?: input)?|udig) ?(\d+)$/, 'udig'],
+    [/^(?:universal digital(?: input)?|udig) ?(\d+)(?: hybrid [ab])?$/, 'udig'],
     [/^(?:digital input|dig) ?(\d+)$/, 'dig'],
     [/^knock(?: input)? ?(\d+)$/, 'knock'],
     [/^(?:lambda narrow(?: input)?|la_?nb) ?(\d+)$/, 'lambda'],
