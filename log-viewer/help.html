@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Log Viewer — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content h3 { color: #fff; margin-top: 16px; margin-bottom: 4px; font-size: 1rem; }
+    .help-content p, .help-content li, .help-content td { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #ff9800; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content table { border-collapse: collapse; margin: 10px 0; width: 100%; }
+    .help-content th, .help-content td { border: 1px solid #333; padding: 6px 10px; text-align: left; vertical-align: top; }
+    .help-content th { background: #222; color: #fff; font-size: 0.85rem; }
+    .help-content a { color: #ff5a6e; }
+    .help-content .top-nav a { color: #E31837; }
+    .sw { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Log Viewer</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Log Viewer — Help</h1>
+    <p>The Log Viewer plots channels from a MoTeC log and overlays what the analysis tools do with it: which stretches the
+      <a href="../ve-table/help.html">VE Table Tuning</a> filters leave out, and where the
+      <a href="../transient-fuel/help.html">Transient Fuel Analyzer</a> finds tip-in and tip-out events. Use it to check that an
+      analysis result comes from data you trust.</p>
+
+    <h2>Opening a log</h2>
+    <p>Choose a MoTeC <code>.ld</code> log or a MoTeC CSV export. The file is read in your browser and nothing is uploaded. Once it is
+      loaded, the VE filters and transient detection run with the settings under <strong>Analysis settings</strong> (the same defaults as
+      on those pages); change them and click <strong>Re-run analysis</strong>.</p>
+    <p>The same viewer appears on the analysis pages:</p>
+    <ul>
+      <li><strong>VE Table Tuning</strong>: after processing, click any cell of the results table. The viewer opens below the table with
+        that log and highlights in green the samples that count towards the cell. The bar above the chart shows how many separate
+        stretches there are, their total weight (the cell's hit count) and their mean correction, and
+        <strong>Previous / Next</strong> step through them.</li>
+      <li><strong>Transient Fuel Analyzer</strong>: click an event in the tip-in or tip-out table to zoom to it.</li>
+    </ul>
+    <p>Both use exactly the settings the page's analysis ran with, so the counts in the viewer match the page's results.</p>
+
+    <h2>Channels and layouts</h2>
+    <ul>
+      <li><strong>Fuelling layout</strong>: lambda (both banks) with Fuel Mixture Aim, closed-loop trims, MAP, engine speed and throttle.</li>
+      <li><strong>Transient layout</strong>: lambda with aim, MAP, throttle, Engine Overrun State and Fuel Output Cut Count.</li>
+      <li><strong>My layout</strong>: your own. Type a channel name into <em>Add a channel…</em> (the list offers every channel in the
+        log), choose a pane or <em>a new pane</em>, and click <strong>Add</strong>. Remove a channel with its <strong>×</strong>. Your
+        layout is remembered in this browser, separately for each page.</li>
+    </ul>
+    <p>Each channel shows its logging rate. In many M1 logs lambda, MAP and throttle are logged at 10 Hz while engine speed is
+      100 Hz; the analysis tools hold each slow value until the next one arrives, and so does the chart.</p>
+    <p>Channels in a pane that share a unit share one scale, with values on the left. Channels with different units each scale to the
+      pane, and their range is shown in the legend.</p>
+
+    <h2>Moving around</h2>
+    <table>
+      <tr><th>Action</th><th>How</th></tr>
+      <tr><td>Zoom into a span</td><td>Drag across the chart</td></tr>
+      <tr><td>Zoom in / out</td><td>Mouse wheel or trackpad, the ＋ / － buttons, or the + and − keys</td></tr>
+      <tr><td>Pan</td><td>Shift + drag, shift + wheel, a sideways trackpad swipe, or the ← → keys</td></tr>
+      <tr><td>Show the whole log</td><td>Double-click, <strong>Fit</strong>, or the 0 key</td></tr>
+      <tr><td>Jump elsewhere</td><td>Click or drag in the overview strip at the top</td></tr>
+      <tr><td>Read values</td><td>Hover. The legend shows each channel's value at the cursor, and the time label names the VE filter
+        that excludes that moment, if any</td></tr>
+    </table>
+    <p>Keyboard shortcuts work once the chart has focus (click it or Tab to it).</p>
+
+    <h2>VE filter bands</h2>
+    <p>Shaded bands mark the samples the VE analysis leaves out, coloured by the reason. Each legend chip gives the number of samples;
+      click a chip to hide or show that band. Unshaded time is used.</p>
+    <table>
+      <tr><th>Band</th><th>Meaning</th></tr>
+      <tr><td><span class="sw" style="background:#969696"></span>Run time</td><td>The first part of the log (Min Run Time)</td></tr>
+      <tr><td><span class="sw" style="background:#42a5f5"></span>Coolant</td><td>Below Min Coolant Temp</td></tr>
+      <tr><td><span class="sw" style="background:#f44336"></span>Overrun / fuel cut</td><td>During overrun or a fuel cut, and for 1 s after</td></tr>
+      <tr><td><span class="sw" style="background:#ff9800"></span>Decel</td><td>Closed throttle with MAP falling or low (Decel filter)</td></tr>
+      <tr><td><span class="sw" style="background:#ffeb3b"></span>TPS rate</td><td>Throttle moving faster than Max TPS Rate</td></tr>
+      <tr><td><span class="sw" style="background:#ab47bc"></span>Not steady</td><td>MAP or throttle moved more than 10 kPa / 10% within the steady-state window</td></tr>
+      <tr><td><span class="sw" style="background:#26a69a"></span>Below min MAP</td><td>MAP below Min MAP for Corrections</td></tr>
+      <tr><td><span class="sw" style="background:#ec407a"></span>Lambda implausible</td><td>Measured lambda outside 0.6–1.4, or no lambda after the lambda delay</td></tr>
+      <tr><td><span class="sw" style="background:#5a5a5a"></span>No lambda / outside table</td><td>No lambda or target reading</td></tr>
+      <tr><td><span class="sw" style="background:#8d6e63"></span>Outlier</td><td>Removed by the outlier filter</td></tr>
+    </table>
+
+    <h2>Transient events</h2>
+    <p>Each detected event is a dashed line at its start (cyan for tip-in, amber for tip-out) with a shaded measuring window, which runs
+      until 1.5 s after MAP settles. The label gives the lean spike or rich overshoot. Grey lines mark events skipped because they
+      overlap overrun or a fuel cut. The table below the chart lists all of them in time order; click a row to zoom to it.</p>
+    <div class="tip"><strong>What to look for:</strong> lambda should only swing while the throttle or MAP is moving. If a band or event
+      looks wrong, for example a lambda spike that isn't shaded or an event lined up with a fuel cut, note the time and the settings
+      used.</div>
+
+    <h2>Troubleshooting</h2>
+    <ul>
+      <li><strong>"VE filters" shows an error</strong>: the log is missing a channel the VE analysis needs (Engine Speed, Inlet Manifold
+        Pressure, Fuel Mixture Aim, and a lambda channel). The chart still works.</li>
+      <li><strong>No transient events</strong>: the log needs Inlet Manifold Pressure and a lambda channel. Events also need a warm engine
+        (Transient: Min coolant).</li>
+      <li><strong>"Time" header row not found</strong>: the CSV isn't a MoTeC export (for example a Haltech log).</li>
+    </ul>
+  </div>
+</body>
+</html>

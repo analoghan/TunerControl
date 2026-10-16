@@ -1014,6 +1014,10 @@ const FUEL_CUT_HOLDOFF_S = 1.0;
 const STEADY_MAP_SPAN_KPA = 10;
 const STEADY_TPS_SPAN = 10;
 
+/** Why analyzeVE left a sample out (settings.reasons); 0 = used. */
+const VE_REASON = { USED: 0, RUN_TIME: 1, COOLANT: 2, FUEL_CUT: 3, DECEL: 4, TPS_RATE: 5, NOT_STEADY: 6, MIN_MAP: 7, LAMBDA: 8,
+                    NO_DATA: 9, OUTLIER: 10 };
+
 /**
  * Prepares an axis for interpolation weights: breakpoints in ascending order with their original indices
  * (M1 exports MAP highest first).
@@ -1067,6 +1071,10 @@ function analyzeVE(samples, veTable, settings) {
 
     const n = samples.length;
     const filtered = { time: 0, coolant: 0, fuelCut: 0, decel: 0, tps: 0, steady: 0, minMap: 0, lambda: 0, outlier: 0 };
+    // Optional per-sample outputs (for the Log Viewer): why each sample was left out (VE_REASON codes, 0 = used)
+    // and the correction of each used sample.
+    const reasons = settings.reasons || null, corrections = settings.corrections || null;
+    const skip = (i, key, code) => { filtered[key]++; if (reasons) reasons[i] = code; };
 
     // Measured lambda lags the fuelling that caused it: pair each sample with lambda read lambdaDelay later.
     const lambdaAt = new Array(n);
@@ -1098,19 +1106,19 @@ function analyzeVE(samples, veTable, settings) {
         const s = samples[i], prev = i > 0 ? samples[i - 1] : null;
         const dt = prev ? s.time - prev.time : 0;
 
-        if (!Number.isNaN(s.time) && s.time < runTimeThreshold) { filtered.time++; continue; }
-        if (!Number.isNaN(s.coolantTemp) && s.coolantTemp < coolantThreshold) { filtered.coolant++; continue; }
-        if (s.time - lastCut[i] < FUEL_CUT_HOLDOFF_S) { filtered.fuelCut++; continue; }
+        if (!Number.isNaN(s.time) && s.time < runTimeThreshold) { skip(i, 'time', VE_REASON.RUN_TIME); continue; }
+        if (!Number.isNaN(s.coolantTemp) && s.coolantTemp < coolantThreshold) { skip(i, 'coolant', VE_REASON.COOLANT); continue; }
+        if (s.time - lastCut[i] < FUEL_CUT_HOLDOFF_S) { skip(i, 'fuelCut', VE_REASON.FUEL_CUT); continue; }
 
         if (decelFilter) {
             const mapRate = dt > 0 && !Number.isNaN(s.map - prev.map) ? (s.map - prev.map) / dt : 0;
             const tps = s.throttlePos;
             if (!Number.isNaN(tps) && ((tps < 1 && mapRate < -50) || (tps < 0.5 && !Number.isNaN(s.map) && s.map < 40))) {
-                filtered.decel++; continue;
+                skip(i, 'decel', VE_REASON.DECEL); continue;
             }
         }
         if (tpsRateLimit > 0 && dt > 0 && !Number.isNaN(s.throttlePos - prev.throttlePos) &&
-            Math.abs((s.throttlePos - prev.throttlePos) / dt) > tpsRateLimit) { filtered.tps++; continue; }
+            Math.abs((s.throttlePos - prev.throttlePos) / dt) > tpsRateLimit) { skip(i, 'tps', VE_REASON.TPS_RATE); continue; }
 
         // Steady state: MAP and RPM roughly constant over the preceding window.
         if (steadyWindow > 0) {
@@ -1122,26 +1130,27 @@ function analyzeVE(samples, veTable, settings) {
                 if (o.throttlePos < minTps) minTps = o.throttlePos;
                 if (o.throttlePos > maxTps) maxTps = o.throttlePos;
             }
-            if (s.time - samples[0].time < steadyWindow) { filtered.steady++; continue; }   // not enough history yet
-            if (maxMap - minMap > STEADY_MAP_SPAN_KPA || maxTps - minTps > STEADY_TPS_SPAN) { filtered.steady++; continue; }
+            if (s.time - samples[0].time < steadyWindow) { skip(i, 'steady', VE_REASON.NOT_STEADY); continue; }   // not enough history yet
+            if (maxMap - minMap > STEADY_MAP_SPAN_KPA || maxTps - minTps > STEADY_TPS_SPAN) { skip(i, 'steady', VE_REASON.NOT_STEADY); continue; }
         }
 
-        if (minMapFilter > 0 && !Number.isNaN(s.map) && s.map < minMapFilter) { filtered.minMap++; continue; }
+        if (minMapFilter > 0 && !Number.isNaN(s.map) && s.map < minMapFilter) { skip(i, 'minMap', VE_REASON.MIN_MAP); continue; }
 
         const lam = lambdaAt[i];
-        if (!lam) { filtered.lambda++; continue; }
+        if (!lam) { skip(i, 'lambda', VE_REASON.LAMBDA); continue; }
         const result = computeSampleCorrection(Object.assign({}, s, {
             lambdaB1: lam.lambdaB1, lambdaB2: lam.lambdaB2, lambdaAvg: lam.lambdaAvg
         }));
-        if (!result.isValid) continue;
-        if (result.lambdaActual < LAMBDA_MIN_VALID || result.lambdaActual > LAMBDA_MAX_VALID) { filtered.lambda++; continue; }
+        if (!result.isValid) { if (reasons) reasons[i] = VE_REASON.NO_DATA; continue; }
+        if (result.lambdaActual < LAMBDA_MIN_VALID || result.lambdaActual > LAMBDA_MAX_VALID) { skip(i, 'lambda', VE_REASON.LAMBDA); continue; }
 
         const mw = axisWeights(s.map, mapAxis), rw = axisWeights(s.rpm, rpmAxis);
-        if (!mw || !rw) continue;
+        if (!mw || !rw) { if (reasons) reasons[i] = VE_REASON.NO_DATA; continue; }
+        if (corrections) corrections[i] = result.correction;
         mw.forEach(([mapIdx, wm]) => rw.forEach(([rpmIdx, wr]) => {
             const w = wm * wr;
             accumulateSample(grid, mapIdx, rpmIdx, result.correction, result.clTrimAvg, w, result.lambdaError);
-            binned.push({ mapIdx, rpmIdx, w, correction: result.correction, clTrimAvg: result.clTrimAvg, lambdaError: result.lambdaError });
+            binned.push({ i, mapIdx, rpmIdx, w, correction: result.correction, clTrimAvg: result.clTrimAvg, lambdaError: result.lambdaError });
         }));
     }
 
@@ -1163,7 +1172,11 @@ function analyzeVE(samples, veTable, settings) {
         let removedWeight = 0;
         binned.forEach(e => {
             const sd = st.sd[e.mapIdx][e.rpmIdx];
-            if (sd > 0 && Math.abs(e.correction - st.means[e.mapIdx][e.rpmIdx]) > outlierSigma * sd) { removedWeight += e.w; return; }
+            if (sd > 0 && Math.abs(e.correction - st.means[e.mapIdx][e.rpmIdx]) > outlierSigma * sd) {
+                removedWeight += e.w;
+                if (reasons) reasons[e.i] = VE_REASON.OUTLIER;
+                return;
+            }
             accumulateSample(finalGrid, e.mapIdx, e.rpmIdx, e.correction, e.clTrimAvg, e.w, e.lambdaError);
             kept.push(e);
         });
@@ -1295,6 +1308,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
 if (typeof module !== 'undefined') {
     module.exports = {
         HIT_THRESHOLD,
+        VE_REASON,
         formatScientific,
         findNearestBreakpoint,
         createAccumulatorGrid,

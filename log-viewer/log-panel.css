@@ -1,0 +1,44 @@
+/* log-viewer/log-panel.css — Log Viewer panel (standalone page and embedded in the VE / Transient tools). */
+.lv-panel { --lv-bg: #111; --lv-grid: #262626; --lv-text: #ddd; --lv-muted: #888; background: #111; border: 1px solid #333; border-radius: 8px; padding: 12px; }
+.lv-panel h3 { margin: 0 0 6px; font-size: 0.95rem; color: #fff; }
+.lv-toolbar, .lv-overlays, .lv-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 0.85rem; color: #bbb; }
+.lv-toolbar select, .lv-toolbar input[type="text"], .lv-settings input, .lv-settings select { background: #222; color: #fff; border: 1px solid #333; border-radius: 4px; padding: 4px 8px; font: inherit; }
+.lv-toolbar input[type="text"] { width: 260px; max-width: 100%; }
+.lv-btn { background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; padding: 4px 10px; font: inherit; font-size: 0.85rem; cursor: pointer; }
+.lv-btn:hover { border-color: #E31837; }
+.lv-btn:disabled { opacity: 0.4; cursor: default; }
+.lv-spacer { flex: 1; }
+.lv-range { font-variant-numeric: tabular-nums; color: #888; }
+.lv-chart { position: relative; width: 100%; overflow: hidden; border-radius: 4px; }
+.lv-canvas { display: block; cursor: crosshair; touch-action: none; outline: none; }
+.lv-canvas:focus-visible { box-shadow: 0 0 0 1px #E31837; }
+.lv-hint { font-size: 0.75rem; color: #777; margin: 4px 0 0; }
+.lv-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 12px; border: 1px solid #333; background: #1a1a1a; font-size: 0.78rem; color: #ccc; cursor: pointer; user-select: none; }
+.lv-chip.off { opacity: 0.4; text-decoration: line-through; }
+.lv-chip .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.lv-chip button { background: none; border: 0; color: #999; cursor: pointer; padding: 0 0 0 2px; font-size: 0.9rem; line-height: 1; }
+.lv-chip button:hover { color: #E31837; }
+.lv-panes { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 0.8rem; color: #888; }
+.lv-panes > div { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.lv-legend { display: flex; flex-wrap: wrap; gap: 6px; }
+.lv-status { font-size: 0.85rem; color: #bbb; margin: 6px 0; }
+.lv-status.error { color: #f44336; }
+.lv-events { max-height: 260px; overflow: auto; margin-top: 10px; border: 1px solid #333; border-radius: 4px; }
+.lv-events table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.lv-events th, .lv-events td { padding: 4px 8px; border-bottom: 1px solid #262626; text-align: center; color: #ccc; }
+.lv-events th { background: #1d1d1d; color: #fff; position: sticky; top: 0; }
+.lv-events tbody tr { cursor: pointer; }
+.lv-events tbody tr:hover { background: #1f1f1f; }
+.lv-events tr.sel { background: rgba(227, 24, 55, 0.18); }
+.lv-events tr.skipped td { color: #777; }
+.lv-cell { background: rgba(57, 255, 136, 0.07); border: 1px solid rgba(57, 255, 136, 0.35); border-radius: 4px; padding: 6px 10px; color: #cfe; }
+.lv-settings { margin: 8px 0; font-size: 0.85rem; color: #bbb; }
+.lv-settings summary { cursor: pointer; color: #ddd; }
+.lv-settings .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px 14px; margin: 8px 0; }
+.lv-settings label { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.lv-settings input { width: 80px; }
+.ve-table-clickable td { cursor: pointer; }
+.ve-table-clickable td:hover { outline: 1px solid #39ff88; outline-offset: -1px; }
+.event-table.lv-clickable tbody tr { cursor: pointer; }
+.event-table.lv-clickable tbody tr:hover td { background: #1f1f1f; }
+@media (max-width: 600px) { .lv-toolbar input[type="text"] { width: 100%; } }

@@ -43,6 +43,8 @@ let vePicked = false;    // the user chose the VE source themselves (don't repla
 let storedTunes = [];    // tunes stored by the M1 Config Viewer, newest first
 let lastResult = null; // stores the last processing result for table toggling
 let worker  = null;   // current Web Worker instance
+let lastRun = null;   // { file, settings } of the last processed log, for the log panel
+let logPanel = null, logPanelReady = null;   // log panel (../log-viewer/log-panel.js) and its load promise for lastRun
 
 // ---------------------------------------------------------------------------
 // File input handling (Task 9.1 context — needed for Process button state)
@@ -422,12 +424,42 @@ processBtn.addEventListener('click', async () => {
     const steadyWindowMs = Number.isNaN(steadyWindowRaw) ? 300 : steadyWindowRaw;
     const lambdaDelayMs = parseFloat(document.getElementById('lambda-delay').value) || 0;
     const payload = { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing, minMapForCorrection, decelFilterEnabled, steadyWindowMs, lambdaDelayMs };
+    lastRun = { file: logFile, settings: Object.assign({}, payload, { veText: undefined }) };
+    logPanelReady = null;
     if (isLd) {
         worker.postMessage(Object.assign({ type: 'process_ld', logBuffer: logData }, payload));
     } else {
         worker.postMessage(Object.assign({ type: 'process', logText: logData }, payload));
     }
 });
+
+// ---------------------------------------------------------------------------
+// Log panel: click a table cell to see the samples behind it
+// ---------------------------------------------------------------------------
+
+document.getElementById('table-container').addEventListener('click', (e) => {
+    const td = e.target.closest('td');
+    if (!td || !lastResult || !lastRun || typeof LogPanel === 'undefined') return;
+    const tr = td.parentElement, m = Array.prototype.indexOf.call(tr.parentElement.children, tr);
+    const r = Array.prototype.indexOf.call(tr.children, td) - 1;   // the first cell is the MAP heading
+    const grid = lastResult.correctionGrid;
+    if (m < 0 || r < 0 || m >= grid.mapBreakpoints.length || r >= grid.rpmBreakpoints.length) return;
+    showCellInLog(m, r);
+});
+
+function showCellInLog(m, r) {
+    const grid = lastResult.correctionGrid, el = document.getElementById('log-panel');
+    el.hidden = false;
+    if (!logPanel) logPanel = new LogPanel(el, { preset: 'fuelling', storageKey: 've', showTf: false });
+    if (!logPanelReady) {
+        const veTable = { mapBreakpoints: grid.mapBreakpoints, rpmBreakpoints: grid.rpmBreakpoints,
+                          values: grid.mapBreakpoints.map(() => grid.rpmBreakpoints.map(() => 0)) };
+        logPanelReady = logPanel.open(lastRun.file).then(() => logPanel.analyze({ ve: lastRun.settings, veTable }));
+    }
+    const label = grid.mapBreakpoints[m] + ' kPa × ' + grid.rpmBreakpoints[r] + ' rpm';
+    logPanelReady.then(() => logPanel.showCell(m, r, label)).catch(() => { logPanelReady = null; });
+    document.getElementById('log-check').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
 // ---------------------------------------------------------------------------
 // Result rendering (Task 9.3)
@@ -614,6 +646,8 @@ function renderResults(msg) {
     showCorrectionsBtn.classList.add('active');
     showCltrimBtn.classList.remove('active');
     renderCorrectionTable(correctionGrid, tableContainer, tableLabel);
+
+    document.getElementById('log-check').hidden = typeof LogPanel === 'undefined' || !lastRun;
 
     // Show 3D surface section and initialize
     const surfaceSection = document.getElementById('surface-section');

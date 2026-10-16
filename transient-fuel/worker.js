@@ -125,7 +125,7 @@ function detectTransientEvents(samples, settings) {
     var defaultTarget = settings.lambdaTarget || 1.0;
 
     var events = [];
-    var skippedFuelCut = 0;
+    var skippedFuelCut = 0, skipped = [];
     var i = 0;
     var lastEventEndIdx = -20; // prevent overlapping detections
 
@@ -195,7 +195,10 @@ function detectTransientEvents(samples, settings) {
             if (maxChange > totalMapChange) totalMapChange = maxChange;
 
             var excursion = totalMapChange >= minMapChange ? measureLambdaExcursion(samples, i, j, isTipIn, defaultTarget) : null;
-            if (totalMapChange >= minMapChange && !excursion) skippedFuelCut++;
+            if (totalMapChange >= minMapChange && !excursion) {
+                skippedFuelCut++;
+                skipped.push({ type: isTipIn ? 'tip-in' : 'tip-out', time: timeAtStart, endTime: samples[j].time });
+            }
             if (excursion) {
                 var target = !isNaN(samples[j].lambdaTarget) && samples[j].lambdaTarget > 0.5 ? samples[j].lambdaTarget : defaultTarget;
 
@@ -212,7 +215,11 @@ function detectTransientEvents(samples, settings) {
                     richOvershoot: excursion.richOvershoot,
                     leanAfter: excursion.leanAfter,
                     recoveryTime: excursion.recoveryTime,
+                    settled: excursion.settled,
                     peakError: excursion.peakError,
+                    endTime: samples[j].time,
+                    windowEnd: excursion.windowEnd,
+                    baseline: excursion.baseline,
                 });
 
                 lastEventEndIdx = j + 5;
@@ -225,6 +232,7 @@ function detectTransientEvents(samples, settings) {
     }
 
     events.skippedFuelCut = skippedFuelCut;
+    events.skipped = skipped;
     return events;
 }
 
@@ -271,7 +279,10 @@ function measureLambdaExcursion(samples, startIdx, endIdx, isTipIn, defaultTarge
     var settled = raw.filter(function (p) { return p.t >= tEnd - TF_SETTLE_S; }).map(function (p) { return p.r; }).sort(function (a, b) { return a - b; });
     var base = settled.length ? settled[Math.floor(settled.length / 2)] : 1;
     var pts = raw.map(function (p) { return { t: p.t, r: p.r / base }; });
-    if (!pts.length) return { leanSpike: 0, richOvershoot: 0, leanAfter: 0, recoveryTime: Math.round((tEnd - t0) * 1000), peakError: 0, baseline: base };
+    if (!pts.length) {
+        return { leanSpike: 0, richOvershoot: 0, leanAfter: 0, recoveryTime: Math.round((tEnd - t0) * 1000), settled: false, peakError: 0,
+                 baseline: base, windowEnd: tEnd };
+    }
 
     var iMax = 0, iMin = 0;
     pts.forEach(function (p, i) { if (p.r > pts[iMax].r) iMax = i; if (p.r < pts[iMin].r) iMin = i; });
@@ -297,9 +308,11 @@ function measureLambdaExcursion(samples, startIdx, endIdx, isTipIn, defaultTarge
         leanSpike: r1(isTipIn ? lean : 0),
         richOvershoot: r1(rich),
         leanAfter: r1(leanAfter),
-        recoveryTime: recovery !== null ? recovery : Math.round((tEnd - t0) * 1000),
+        recoveryTime: recovery !== null ? recovery : Math.round((tEnd - t0) * 1000),   // not settled: the window length
+        settled: recovery !== null,
         peakError: r1(isTipIn ? lean : rich),
-        baseline: base
+        baseline: base,
+        windowEnd: tEnd
     };
 }
 
@@ -339,6 +352,7 @@ function generateRecommendations(events, settings) {
     var avgLean = avg(tipIns, function (e) { return e.leanSpike; });
     var avgRichTipIn = avg(tipIns, function (e) { return e.richOvershoot; });
     var avgRecovery = avg(tipIns, function (e) { return e.recoveryTime; });
+    var unsettled = tipIns.filter(function (e) { return e.settled === false; }).length;
     var tipOutRich = avg(tipOuts, function (e) { return e.richOvershoot; });
     var tipOutLean = avg(tipOuts, function (e) { return e.leanAfter || 0; });
     var mismatch = tipIns.length > 3 && avgLean > 3 && avgRichTipIn > 3;
@@ -362,7 +376,8 @@ function generateRecommendations(events, settings) {
     }
     if (tipIns.length && avgRecovery > 500 && avgLean > 3) {
         recs.push({ severity: 'info',
-            text: 'Slow recovery: lambda takes ' + Math.round(avgRecovery) + 'ms on average to settle within 2% after tip-ins. If the lean ' +
+            text: 'Slow recovery: lambda takes ' + Math.round(avgRecovery) + 'ms on average to settle within 2% after tip-ins' +
+                (unsettled ? ' (' + unsettled + ' of ' + tipIns.length + ' never settled and are counted at the window length)' : '') + '. If the lean ' +
                 'spikes last, the compensation is building too slowly — shorten the Slow Increase time constant.' });
     }
 
@@ -496,6 +511,8 @@ function analyzeTransientSamples(samples, settings) {
         warmSamples: warmSamples.length,
         totalEvents: events.length,
         skippedFuelCut: events.skippedFuelCut || 0,
+        skipped: events.skipped || [],
+        unsettledTipIns: tipIns.filter(function(e) { return e.settled === false; }).length,
         tipInCount: tipIns.length,
         tipOutCount: tipOuts.length,
         avgLeanSpike: tipIns.length > 0 ? tipIns.reduce(function(a, e) { return a + e.leanSpike; }, 0) / tipIns.length : 0,

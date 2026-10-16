@@ -195,7 +195,12 @@ analyzeBtn.addEventListener('click', function() {
     });
 });
 
+var lastRun = null;                          // { file, settings } of the last analysis, for the log panel
+var logPanel = null, logPanelReady = null;   // log panel (../log-viewer/log-panel.js) and its load promise for lastRun
+
 function runAnalysis(logFile, files, settings) {
+    lastRun = { file: logFile, settings: settings };
+    logPanelReady = null;
     try {
         var result;
         if (logFile.name.toLowerCase().endsWith('.ld')) {
@@ -226,6 +231,7 @@ function renderResults(result) {
     renderSummary(result);
     renderTipInTable(result.tipIns);
     renderTipOutTable(result.tipOuts);
+    document.getElementById('log-check').hidden = typeof LogPanel === 'undefined';
     renderRecommendations(result.recommendations);
     if (result.ffCorrected) {
         renderCorrectedTable(result.ffTable, result.ffCorrected);
@@ -240,7 +246,8 @@ function renderSummary(r) {
         stat(r.tipOutCount, 'Tip-Out Events') +
         stat(r.avgLeanSpike.toFixed(1) + '%', 'Avg Lean Spike') +
         stat(r.avgRichOvershoot.toFixed(1) + '%', 'Avg Rich Overshoot') +
-        stat(Math.round(r.avgRecoveryTime) + 'ms', 'Avg Recovery Time') +
+        stat((r.unsettledTipIns ? '≥ ' : '') + Math.round(r.avgRecoveryTime) + 'ms', 'Avg Recovery Time' +
+            (r.unsettledTipIns ? ' (' + r.unsettledTipIns + ' never settled)' : '')) +
         stat(r.skippedFuelCut || 0, 'Skipped (overrun/fuel cut)') +
         '</div>';
 }
@@ -249,18 +256,45 @@ function stat(value, label) {
     return '<div class="summary-stat"><span class="stat-value">' + value + '</span><span class="stat-label">' + label + '</span></div>';
 }
 
+/** Recovery time, or "> window" for an event whose lambda never settled within the measuring window. */
+function fmtRecovery(e) {
+    return (e.settled === false ? '&gt; ' : '') + e.recoveryTime + 'ms';
+}
+
+/** Click an event row: show that event in the log panel. */
+['tipin-content', 'tipout-content'].forEach(function (id) {
+    document.getElementById(id).addEventListener('click', function (e) {
+        var tr = e.target.closest('tr[data-time]');
+        if (tr && lastRun && typeof LogPanel !== 'undefined') showEventInLog(parseFloat(tr.dataset.time));
+    });
+});
+
+function showEventInLog(time) {
+    var el = document.getElementById('log-panel');
+    el.hidden = false;
+    if (!logPanel) logPanel = new LogPanel(el, { preset: 'transient', storageKey: 'transient', showVe: false });
+    if (!logPanelReady) {
+        var s = lastRun.settings;
+        logPanelReady = logPanel.open(lastRun.file).then(function () {
+            return logPanel.analyze({ tf: s, ve: { minCoolantTemp: s.minCoolant } });
+        });
+    }
+    logPanelReady.then(function () { logPanel.showEvent(time); }).catch(function () { logPanelReady = null; });
+    document.getElementById('log-check').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function renderTipInTable(events) {
     var c = document.getElementById('tipin-content');
     if (events.length === 0) { c.innerHTML = '<p style="color:#888;">No tip-in events detected.</p>'; return; }
 
-    var html = '<table class="event-table"><thead><tr><th>Time</th><th>RPM</th><th>MAP Change</th><th>Rate</th><th>Lean Spike</th><th>Rich Overshoot</th><th>Recovery</th></tr></thead><tbody>';
+    var html = '<table class="event-table lv-clickable"><thead><tr><th>Time</th><th>RPM</th><th>MAP Change</th><th>Rate</th><th>Lean Spike</th><th>Rich Overshoot</th><th>Recovery</th></tr></thead><tbody>';
     var limit = Math.min(events.length, 30);
     for (var i = 0; i < limit; i++) {
         var e = events[i];
         var leanCls = e.leanSpike > 10 ? 'severity-high' : e.leanSpike > 5 ? 'severity-med' : 'severity-low';
         var richCls = e.richOvershoot > 10 ? 'severity-high' : e.richOvershoot > 5 ? 'severity-med' : 'severity-low';
         var recCls = e.recoveryTime > 800 ? 'severity-high' : e.recoveryTime > 500 ? 'severity-med' : 'severity-low';
-        html += '<tr><td>' + e.time.toFixed(2) + 's</td><td>' + e.rpm + '</td><td>' + e.mapFrom + '→' + e.mapTo + ' kPa</td><td>' + e.mapRate + ' kPa/s</td><td class="' + leanCls + '">' + e.leanSpike.toFixed(1) + '%</td><td class="' + richCls + '">' + e.richOvershoot.toFixed(1) + '%</td><td class="' + recCls + '">' + e.recoveryTime + 'ms</td></tr>';
+        html += '<tr data-time="' + e.time + '" title="Show in the log"><td>' + e.time.toFixed(2) + 's</td><td>' + e.rpm + '</td><td>' + e.mapFrom + '→' + e.mapTo + ' kPa</td><td>' + e.mapRate + ' kPa/s</td><td class="' + leanCls + '">' + e.leanSpike.toFixed(1) + '%</td><td class="' + richCls + '">' + e.richOvershoot.toFixed(1) + '%</td><td class="' + recCls + '">' + fmtRecovery(e) + '</td></tr>';
     }
     html += '</tbody></table>';
     if (events.length > limit) html += '<p style="color:#888;font-size:0.8rem;">Showing top ' + limit + ' of ' + events.length + ' events.</p>';
@@ -271,13 +305,13 @@ function renderTipOutTable(events) {
     var c = document.getElementById('tipout-content');
     if (events.length === 0) { c.innerHTML = '<p style="color:#888;">No tip-out events detected.</p>'; return; }
 
-    var html = '<table class="event-table"><thead><tr><th>Time</th><th>RPM</th><th>MAP Change</th><th>Rate</th><th>Rich Overshoot</th><th>Recovery</th></tr></thead><tbody>';
+    var html = '<table class="event-table lv-clickable"><thead><tr><th>Time</th><th>RPM</th><th>MAP Change</th><th>Rate</th><th>Rich Overshoot</th><th>Recovery</th></tr></thead><tbody>';
     var limit = Math.min(events.length, 30);
     for (var i = 0; i < limit; i++) {
         var e = events[i];
         var richCls = e.richOvershoot > 10 ? 'severity-high' : e.richOvershoot > 5 ? 'severity-med' : 'severity-low';
         var recCls = e.recoveryTime > 800 ? 'severity-high' : e.recoveryTime > 500 ? 'severity-med' : 'severity-low';
-        html += '<tr><td>' + e.time.toFixed(2) + 's</td><td>' + e.rpm + '</td><td>' + e.mapFrom + '→' + e.mapTo + ' kPa</td><td>' + e.mapRate + ' kPa/s</td><td class="' + richCls + '">' + e.richOvershoot.toFixed(1) + '%</td><td class="' + recCls + '">' + e.recoveryTime + 'ms</td></tr>';
+        html += '<tr data-time="' + e.time + '" title="Show in the log"><td>' + e.time.toFixed(2) + 's</td><td>' + e.rpm + '</td><td>' + e.mapFrom + '→' + e.mapTo + ' kPa</td><td>' + e.mapRate + ' kPa/s</td><td class="' + richCls + '">' + e.richOvershoot.toFixed(1) + '%</td><td class="' + recCls + '">' + fmtRecovery(e) + '</td></tr>';
     }
     html += '</tbody></table>';
     if (events.length > limit) html += '<p style="color:#888;font-size:0.8rem;">Showing top ' + limit + ' of ' + events.length + ' events.</p>';

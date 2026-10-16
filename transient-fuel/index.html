@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Transient Fuel Analyzer — MoTeC M1</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="../log-viewer/log-panel.css" />
 </head>
 <body>
   <div class="app-container">
@@ -140,6 +141,12 @@
         <div id="tipout-content"></div>
       </div>
 
+      <div class="report-block" id="log-check">
+        <h2>Check Against the Log</h2>
+        <p class="section-desc">Click an event in the tables above to see it in the log: lambda, aim, MAP and throttle, with the measuring window shaded.</p>
+        <div id="log-panel" hidden></div>
+      </div>
+
       <div class="report-block">
         <h2>Fuel Film Recommendations</h2>
         <p class="section-desc">Suggested adjustments to the fuel film primary table and time constants based on the transient analysis.</p>
@@ -167,6 +174,8 @@
   <script src="m1pkg-film.js"></script>
   <script src="worker.js"></script>
   <script src="film-correct.js"></script>
+  <script src="../log-viewer/log-chart.js"></script>
+  <script src="../log-viewer/log-panel.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

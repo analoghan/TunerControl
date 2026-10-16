@@ -109,9 +109,13 @@
         <li><a href="#outlier">Outlier Filtering</a></li>
         <li><a href="#tps">TPS Rate Filter</a></li>
         <li><a href="#smoothing">Correction Smoothing</a></li>
+        <li><a href="#fuel-cut">Overrun, Fuel Cut and Implausible Lambda</a></li>
+        <li><a href="#steady-state">Steady-State Window</a></li>
+        <li><a href="#lambda-delay">Lambda Delay</a></li>
         <li><a href="#decel">Decel/Overrun Filter</a></li>
         <li><a href="#min-map">Min MAP for Corrections</a></li>
         <li><a href="#views">Display Views</a></li>
+        <li><a href="#log-check">Checking a Cell Against the Log</a></li>
         <li><a href="#3d-plot">3D Surface Plot</a></li>
         <li><a href="#clipboard">Copy to Clipboard</a></li>
         <li><a href="#outputs">Output Files</a></li>
@@ -350,6 +354,11 @@
     </ul>
 
     <!-- 3D Surface Plot -->
+    <h2 id="log-check">Checking a Cell Against the Log</h2>
+    <p>Click any cell in the results table to open the <a href="../log-viewer/help.html">Log Viewer</a> below it. It shows the log with the
+      samples that count towards that cell highlighted, and shaded bands where each filter left data out, so you can see what a
+      correction is based on. <strong>Previous / Next</strong> step through the stretches of samples in the cell.</p>
+
     <h2 id="3d-plot">3D Surface Plot</h2>
     <p>A 3D wireframe surface visualization appears below the table. It renders the selected data (corrections, new VE values, or std dev) as a color-coded surface over the RPM × MAP grid.</p>
     <h3>Controls</h3>

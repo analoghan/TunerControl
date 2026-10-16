@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Log Viewer — MoTeC M1</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <link rel="stylesheet" href="log-panel.css" />
+  <style>.app-container { max-width: 1400px; }</style>
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Log Viewer</h1>
+    <p class="subtitle">Plot any channels from a MoTeC log, and see exactly which stretches the VE Table Tuning filters leave out and
+      where the Transient Fuel Analyzer finds its events — so you can check the analysis against the raw data.</p>
+
+    <div class="form-section">
+      <div class="file-row">
+        <label for="log-input">MoTeC Log (.ld or .csv):</label>
+        <input type="file" id="log-input" accept=".ld,.csv" />
+        <a href="help.html" class="help-link-btn" style="padding:6px 14px;font-size:0.85rem;margin-left:auto;">Help</a>
+      </div>
+
+      <details class="lv-settings" id="settings">
+        <summary>Analysis settings (as on the VE and Transient pages)</summary>
+        <div class="grid">
+          <label>VE: Min coolant temp (°C) <input type="number" id="ve-coolant" value="55" step="1"></label>
+          <label>VE: Min run time (s) <input type="number" id="ve-runtime" value="60" step="5"></label>
+          <label>VE: Steady-state window (ms) <input type="number" id="ve-steady" value="300" min="0" step="50"></label>
+          <label>VE: Lambda delay (ms) <input type="number" id="ve-delay" value="0" min="0" step="10"></label>
+          <label>VE: Max TPS rate (%/s, 0 = off) <input type="number" id="ve-tps" value="0" min="0" step="10"></label>
+          <label>VE: Min MAP (kPa, 0 = off) <input type="number" id="ve-minmap" value="0" min="0" step="5"></label>
+          <label>VE: Decel filter <select id="ve-decel"><option value="on">On</option><option value="off">Off</option></select></label>
+          <label>Transient: MAP rate (kPa/s) <input type="number" id="tf-rate" value="200" min="50" step="50"></label>
+          <label>Transient: Min MAP change (kPa) <input type="number" id="tf-change" value="20" min="5" step="5"></label>
+          <label>Transient: Window (ms) <input type="number" id="tf-window" value="500" min="50" step="50"></label>
+          <label>Transient: Min coolant (°C) <input type="number" id="tf-coolant" value="60" step="1"></label>
+        </div>
+        <button type="button" class="lv-btn" id="rerun" disabled>Re-run analysis</button>
+      </details>
+    </div>
+
+    <div id="panel"></div>
+  </div>
+
+  <script src="log-chart.js"></script>
+  <script src="log-panel.js"></script>
+  <script>
+    (function () {
+      var panel = new LogPanel(document.getElementById('panel'), { preset: 'fuelling', storageKey: 'page' });
+      var input = document.getElementById('log-input'), rerun = document.getElementById('rerun');
+      function num(id) { var v = parseFloat(document.getElementById(id).value); return isNaN(v) ? undefined : v; }
+      function settings() {
+        return {
+          ve: { minCoolantTemp: num('ve-coolant'), minRunTime: num('ve-runtime'), steadyWindowMs: num('ve-steady'), lambdaDelayMs: num('ve-delay'),
+                maxTpsRate: num('ve-tps'), minMapForCorrection: num('ve-minmap'), decelFilterEnabled: document.getElementById('ve-decel').value === 'on' },
+          tf: { mapRateThreshold: num('tf-rate'), minMapChange: num('tf-change'), mapWindow: num('tf-window'), minCoolant: num('tf-coolant'), lambdaTarget: 1.0 },
+        };
+      }
+      input.addEventListener('change', function () {
+        var file = input.files[0];
+        if (!file) return;
+        rerun.disabled = true;
+        panel.open(file).then(function () { return panel.analyze(settings()); }).then(function () { rerun.disabled = false; }, function () {});
+      });
+      rerun.addEventListener('click', function () { panel.analyze(settings()).catch(function () {}); });
+    })();
+  </script>
+</body>
+</html>
