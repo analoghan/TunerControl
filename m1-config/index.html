@@ -23,7 +23,7 @@
         <label for="pkg-input">M1 Tune package (.m1pkg):</label>
         <input type="file" id="pkg-input" accept=".m1pkg" multiple aria-describedby="import-status import-error">
       </div>
-      <p class="hint">Packages are stored in this browser only. Import each saved version (e.g. V54, V55) to build up the tune history.</p>
+      <p class="hint" id="storage-hint">Packages are stored in this browser only. Import each saved version (e.g. V54, V55) to build up the tune history.</p>
       <div id="import-status" class="import-status" role="status" aria-live="polite" hidden></div>
       <div id="import-error" class="error-banner" role="alert" hidden></div>
     </section>
@@ -155,6 +155,7 @@
   <script src="format.js"></script>
   <script src="resource-names.js"></script>
   <script src="tune-db.js"></script>
+  <script src="tune-api.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

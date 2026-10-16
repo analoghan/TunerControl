@@ -44,7 +44,7 @@ Import MoTeC M1 Tune packages (`.m1pkg`) directly — no export step needed — 
 **Features:**
 - Decodes every calibration parameter, table, I/O resource assignment and calibration library selection from the package
 - Values shown in M1 Tune display units (rpm, kPa, dBTDC, ms, %…) with expandable table grids
-- Tune history stored in the browser (IndexedDB), with JSON backup export/restore
+- Tune history stored in the browser (IndexedDB) with JSON backup export/restore, or on the optional TunerControl server (SQLite) when served from it
 - Compare any two versions: changed values, table cells (with axis breakpoints), I/O assignments, calibration selections and save notes
 
 ### Calculators
@@ -73,6 +73,12 @@ python3 -m http.server 8080
 > **Note:** The tools use Web Workers for heavy computation. Some browsers restrict
 > Web Workers on `file://` URLs. If a tool doesn't respond after clicking Process,
 > use a local HTTP server as shown above.
+
+### Optional server (shared tune history)
+
+`server/server.js` serves the same files plus an API that stores the M1 Config Viewer's tune history in
+SQLite, so it persists on a server and is shared between browsers. It has no npm dependencies and needs
+Node.js 22.13+. See [server/README.md](server/README.md) for systemd and Docker setup.
 
 ---
 
@@ -105,7 +111,14 @@ calculators/                — Unit Conversion Calculators
   index.html                — Main calculators page
   lambda-fuel.html          — Lambda/AFR fuel conversion chart (gasoline & E85)
 
-lib/                        — Vendored libraries (Chart.js, zoom plugin, Hammer.js)
+m1-config/                  — M1 Config Viewer (.m1pkg import, tune history, compare)
+  index.html, app.js, format.js, resource-names.js, tune-db.js, tune-api.js, worker.js, styles.css
+
+lib/                        — Vendored libraries (Chart.js, zoom plugin, Hammer.js) and shared parsers
+                              (ld-parser.js, m1pkg-parser.js, xz-decoder.js)
+
+server/                     — Optional Node server: static files + SQLite tune history API (see server/README.md)
+deploy/                     — systemd unit for the server (Dockerfile at the repo root)
 
 tests/                      — Browser-based test suite
   index.html                — Test harness (no build step required)

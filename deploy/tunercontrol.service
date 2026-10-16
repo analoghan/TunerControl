@@ -1,0 +1,33 @@
+# systemd unit for the TunerControl server.
+# Install: see server/README.md. Put TUNERCONTROL_TOKEN (and any overrides) in /etc/tunercontrol.env.
+
+[Unit]
+Description=TunerControl server (MoTeC M1 tune history)
+After=network.target
+
+[Service]
+Type=simple
+User=tunercontrol
+Group=tunercontrol
+WorkingDirectory=/opt/tunercontrol
+Environment=HOST=127.0.0.1
+Environment=PORT=8080
+Environment=TUNERCONTROL_DB=/var/lib/tunercontrol/tunercontrol.db
+EnvironmentFile=-/etc/tunercontrol.env
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning /opt/tunercontrol/server/server.js
+Restart=on-failure
+RestartSec=5
+
+# Database lives in /var/lib/tunercontrol; everything else is read-only to the service.
+StateDirectory=tunercontrol
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

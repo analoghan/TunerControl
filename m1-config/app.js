@@ -19,8 +19,8 @@ var backupInput = $('backup-input');
 var searchInput = $('search-input');
 
 var state = {
-    noDb: false,          // IndexedDB unavailable → keep imports in memory for this session only
-    memory: {},           // id → package (with items) when noDb
+    backend: 'browser',   // 'server' (TunerControl server API), 'browser' (IndexedDB) or 'memory'
+    memory: {},           // id → package (with items) when backend is 'memory'
     packages: [],         // summaries, oldest first
     current: null,        // package being viewed (with items)
     index: [],            // [{ item, cats, lname }] for the current package
@@ -73,11 +73,11 @@ function lastNote(pkg) {
 }
 
 // =========================================================================
-// Storage (IndexedDB, with in-memory fallback)
+// Storage — server API, IndexedDB, or in-memory for this session
 // =========================================================================
 
 function storeSave(id, parsed, fileName, buffer) {
-    if (!state.noDb) return saveTunePackage(id, parsed, fileName, buffer);
+    if (state.backend === 'browser') return saveTunePackage(id, parsed, fileName, buffer);
     if (state.memory[id]) return Promise.resolve({ record: state.memory[id], duplicate: true });
     var pkg = tuneDbSummary(id, parsed, fileName, buffer.byteLength);
     pkg.items = parsed.items;
@@ -86,19 +86,57 @@ function storeSave(id, parsed, fileName, buffer) {
 }
 
 function storeList() {
-    if (!state.noDb) return listTunePackages();
+    if (state.backend === 'server') return apiListPackages();
+    if (state.backend === 'browser') return listTunePackages();
     return Promise.resolve(sortTunePackages(Object.keys(state.memory).map(function (k) { return state.memory[k]; })));
 }
 
 function storeLoad(id) {
-    if (!state.noDb) return loadTunePackage(id);
+    if (state.backend === 'server') return apiLoadPackage(id);
+    if (state.backend === 'browser') return loadTunePackage(id);
     return state.memory[id] ? Promise.resolve(state.memory[id]) : Promise.reject(new Error('Package not found'));
 }
 
 function storeDelete(id) {
-    if (!state.noDb) return deleteTunePackage(id);
+    if (state.backend === 'server') return apiDeletePackage(id);
+    if (state.backend === 'browser') return deleteTunePackage(id);
     delete state.memory[id];
     return Promise.resolve();
+}
+
+function storeResourceNames() {
+    if (state.backend === 'server') return apiListResourceNames();
+    if (state.backend === 'browser') return listResourceNames();
+    return Promise.resolve(state.resourceNames);
+}
+
+function storeSaveResourceName(key, name) {
+    if (state.backend === 'server') return apiSaveResourceName(key, name);
+    if (state.backend === 'browser') return saveResourceName(key, name);
+    return Promise.resolve();
+}
+
+function storeExport() {
+    return state.backend === 'server' ? apiExportBackup() : exportTuneDb();
+}
+
+function storeImportBackup(backup) {
+    return state.backend === 'server' ? apiImportBackup(backup) : importTuneDb(backup);
+}
+
+/** Upload (server) or parse locally and save. Resolves { record, duplicate }. */
+function importOne(file, of) {
+    if (state.backend === 'server') {
+        setStatus('Uploading ' + file.name + of + '…');
+        return apiImportFile(file);
+    }
+    setStatus('Reading ' + file.name + of + '…');
+    return file.arrayBuffer().then(function (buffer) {
+        return tuneDbFileId(buffer).then(function (id) {
+            setStatus('Parsing ' + file.name + of + '…');
+            return parsePackage(buffer).then(function (parsed) { return storeSave(id, parsed, file.name, buffer); });
+        });
+    });
 }
 
 // =========================================================================
@@ -148,17 +186,9 @@ function importFiles(files) {
     return files.reduce(function (chain, file, i) {
         return chain.then(function () {
             var of = files.length > 1 ? ' (' + (i + 1) + ' of ' + files.length + ')' : '';
-            setStatus('Reading ' + file.name + of + '…');
-            return file.arrayBuffer().then(function (buffer) {
-                return tuneDbFileId(buffer).then(function (id) {
-                    setStatus('Parsing ' + file.name + of + '…');
-                    return parsePackage(buffer).then(function (parsed) {
-                        return storeSave(id, parsed, file.name, buffer);
-                    }).then(function (r) {
-                        lastId = id;
-                        if (r.duplicate) duplicates++; else added++;
-                    });
-                });
+            return importOne(file, of).then(function (r) {
+                lastId = r.record.id;
+                if (r.duplicate) duplicates++; else added++;
             }).catch(function (err) {
                 failed.push(file.name + ': ' + (err && err.message ? err.message : err));
             });
@@ -167,7 +197,7 @@ function importFiles(files) {
         var parts = [];
         if (added) parts.push('Imported ' + added + ' package' + (added > 1 ? 's' : '') + '.');
         if (duplicates) parts.push(duplicates + ' already imported.');
-        if (state.noDb && added) parts.push('Browser storage is unavailable, so imports last only for this session.');
+        if (state.backend === 'memory' && added) parts.push('Browser storage is unavailable, so imports last only for this session.');
         setStatus(parts.join(' '));
         if (failed.length) showError('Could not import ' + failed.join('; '));
         return refreshHistory().then(function () { if (lastId) return viewPackage(lastId); });
@@ -176,7 +206,7 @@ function importFiles(files) {
 
 /** Re-parse stored packages that were imported with an older parser version. */
 function reparseStale() {
-    if (state.noDb) return Promise.resolve();
+    if (state.backend !== 'browser') return Promise.resolve();   // the server re-parses on startup
     var stale = state.packages.filter(function (p) { return (p.parserVersion || 0) < M1PKG_PARSER_VERSION; });
     if (!stale.length) return Promise.resolve();
     return stale.reduce(function (chain, p, i) {
@@ -236,7 +266,7 @@ function renderHistory() {
     if (from) cmpFrom.value = from;
     if (to) cmpTo.value = to;
     cmpBtn.disabled = state.packages.length < 2;
-    exportBtn.disabled = state.noDb;
+    exportBtn.disabled = state.backend === 'memory';
 }
 
 function previousPackageId(id) {
@@ -513,7 +543,7 @@ historyBody.addEventListener('click', function (e) {
 });
 
 exportBtn.addEventListener('click', function () {
-    exportTuneDb().then(function (backup) {
+    storeExport().then(function (backup) {
         var blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
         var a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -530,11 +560,12 @@ backupInput.addEventListener('change', function () {
     backupInput.value = '';
     if (!file) return;
     hideError();
-    if (state.noDb) { showError('Browser storage is unavailable, so backups cannot be restored here.'); return; }
-    file.text().then(function (text) { return importTuneDb(JSON.parse(text)); })
+    if (state.backend === 'memory') { showError('Browser storage is unavailable, so backups cannot be restored here.'); return; }
+    setStatus('Restoring ' + file.name + '…');
+    file.text().then(function (text) { return storeImportBackup(JSON.parse(text)); })
         .then(function (added) {
             setStatus('Restored ' + added + ' package' + (added === 1 ? '' : 's') + ' from backup.');
-            return listResourceNames().then(function (names) { state.resourceNames = names; }).then(refreshHistory);
+            return storeResourceNames().then(function (names) { state.resourceNames = names; }).then(refreshHistory);
         }).then(function () {
             if (!state.current && state.packages.length) return viewPackage(state.packages[state.packages.length - 1].id);
         }).catch(function (err) { showError('Could not restore backup: ' + err.message); });
@@ -590,8 +621,7 @@ function nameResource(item) {
         current ? current.name : '');
     if (name === null) return;
     name = name.trim();
-    var saved = state.noDb ? Promise.resolve() : saveResourceName(key, name);
-    saved.then(function () {
+    storeSaveResourceName(key, name).then(function () {
         if (name) state.resourceNames[key] = name; else delete state.resourceNames[key];
         renderActiveTab();
     }).catch(function (err) { showError('Could not save the resource name: ' + err.message); });
@@ -601,12 +631,25 @@ function nameResource(item) {
 // Startup
 // =========================================================================
 
-openTuneDb().catch(function () {
-    state.noDb = true;
-    setStatus('Browser storage is unavailable here — imported packages will only be kept until the page is closed.');
-}).then(function () {
-    if (state.noDb) return;
-    return listResourceNames().then(function (names) { state.resourceNames = names; });
+var STORAGE_HINTS = {
+    server: 'Packages are stored on the TunerControl server and shared by every browser that uses it.',
+    browser: 'Packages are stored in this browser only. Import each saved version (e.g. V54, V55) to build up the tune history.',
+    memory: 'Browser storage is unavailable here — imported packages are kept only until the page is closed.'
+};
+
+/** Use the server when this page is served by one; otherwise IndexedDB, or memory as a last resort. */
+function chooseBackend() {
+    return detectTuneServer().then(function (server) {
+        if (server) return 'server';
+        return openTuneDb().then(function () { return 'browser'; }, function () { return 'memory'; });
+    }).then(function (backend) {
+        state.backend = backend;
+        $('storage-hint').textContent = STORAGE_HINTS[backend];
+    });
+}
+
+chooseBackend().then(function () {
+    return storeResourceNames().then(function (names) { state.resourceNames = names; });
 }).then(refreshHistory).then(reparseStale).then(function () {
     if (state.packages.length) return viewPackage(state.packages[state.packages.length - 1].id);
 }).catch(function (err) { showError(err.message || String(err)); });

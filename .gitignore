@@ -6,5 +6,8 @@ Thumbs.db
 files/
 analysis/
 
+# Server database (server/server.js)
+data/
+
 # Misc
 0

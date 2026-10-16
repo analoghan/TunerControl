@@ -1,0 +1,7 @@
+.git
+.DS_Store
+files/
+data/
+analysis/
+tests/
+node_modules/
