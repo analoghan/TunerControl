@@ -100,6 +100,12 @@
       the limits, the most spark advance (from Ignition Timing Main), the cam phaser and the RPM sites, and shows Fuel Timing Primary Main:
       red cells start before the exhaust valve seats. With a log too, each cell shows its longest pulse and latest end of injection —
       orange where the injection reaches the compression stroke, red where it runs past the Primary Limit.</p>
+    <p>The big number in each cell is the tune's start of injection and never changes with the log. The small line
+      <code>X ms → Y</code> comes from the log readings (one every 0.1 s, cylinder 1) whose rpm and MAP are <em>nearest</em> to that cell:
+      <code>X</code> is the 99th-percentile pulse width, <code>Y</code> the latest end of injection — the <em>logged</em> start angle
+      minus the pulse's crank degrees (ms × rpm × 0.006). The logged start can differ from the table (interpolation between sites, trims,
+      the Injection Start Limit). Hover a cell for its reading count and seconds of data, the logged start, the longest pulse and how far
+      the end is from BDC; cells with under 1 s of data are a hint, not a measurement.</p>
 
     <h2>Log check</h2>
     <p>Uses the logged start angle (Fuel Cylinder 1 Primary Output Pulse Angle), pulse width and Ignition Timing for every reading with the

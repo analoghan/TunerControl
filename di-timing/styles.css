@@ -59,6 +59,19 @@ h2 { margin: 20px 0 8px; font-size: 1.1rem; color: #E31837; }
 .grid-table td.warn { background: rgba(255,152,0,0.2); }
 .grid-table td.ok { background: rgba(76,175,80,0.12); }
 .grid-table td small { display: block; color: #999; font-size: 0.72rem; }
+.grid-table td[title] { cursor: help; }
+.table-notes { font-size: 0.82rem; color: #aaa; margin: 8px 0; }
+.table-notes p { margin: 0 0 6px; }
+.table-notes ul { margin: 0 0 6px; padding-left: 20px; }
+.table-notes li { margin-bottom: 3px; }
+.table-notes code { color: #ddd; }
+.table-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { display: inline-block; flex: none; width: 12px; height: 12px; border: 1px solid #555; }
+.swatch.bad { background: rgba(244,67,54,0.25); }
+.swatch.warn { background: rgba(255,152,0,0.2); }
+.swatch.ok { background: rgba(76,175,80,0.12); }
+.swatch.none { background: transparent; }
 .scroll { overflow-x: auto; }
 .advice { padding: 9px 13px; margin-bottom: 8px; border-radius: 4px; border-left: 3px solid; font-size: 0.88rem; }
 .advice.warning { background: rgba(255,152,0,0.1); border-left-color: #ff9800; color: #ffb74d; }

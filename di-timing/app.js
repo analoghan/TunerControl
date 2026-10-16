@@ -232,6 +232,57 @@ function renderSoiTable(rows, inp) {
     };
 }
 
+/** Seconds of log behind a cell: readings are taken every 0.1 s (see worker.js). */
+function tuneCellSeconds(c) { return c ? c.n / 10 : 0; }
+
+/** "How to read this table" notes for the Fuel Timing Primary Main grid. */
+function tuneTableNotes(evc, rec, inp, lr) {
+    var hasLog = !!(lr && lr.cells), limit = inp.primaryLimit;
+    var html = '<div class="table-notes"><p><strong>How to read this table.</strong> Rows are manifold pressure (kPa), columns engine speed ' +
+        '(rpm), both the table\'s own sites. All angles are dBTDC (degrees before firing TDC): a <em>bigger</em> number is <em>earlier</em>. ' +
+        'Exhaust valve seats at ' + Math.round(evc) + ', intake BDC is ' + DI_BDC + ', recommended start ' + rec.dBTDC.toFixed(0) + '.</p><ul>';
+    html += '<li><strong>Big number</strong> — the start of injection the tune asks for in that cell (Fuel Timing Primary Main, as in M1 Tune). ' +
+        'It comes from the tune alone and does not change with the log.</li>';
+    if (hasLog) {
+        html += '<li><strong>Small line, <code>X ms → Y</code></strong> — from the log, for the readings whose rpm and MAP are nearest to this ' +
+            'cell. <code>X</code> = the longest pulse width (99th percentile, cylinder 1); <code>Y</code> = the latest end of injection seen, ' +
+            'worked out as the <em>logged</em> start angle minus the pulse\'s crank degrees (pulse ms × rpm × 0.006). A cell with no small line ' +
+            'had no log readings.</li>';
+        html += '<li><strong>Logged vs table start</strong> — the end of injection uses the start angle the ECU actually used, which can differ ' +
+            'from the big number: the ECU interpolates between sites and applies trims and the Injection Start Limit' +
+            (inp.startLimit !== null ? ' (' + inp.startLimit + ')' : '') + '. Hover a cell to see both.</li>';
+        html += '<li><strong>How much data</strong> — readings are taken every 0.1 s, so a cell can be filled by a moment of transient. ' +
+            'Hover a cell for the time behind it; treat cells with less than 1 s as a hint, not a measurement.</li>';
+    } else {
+        html += '<li>Open a log to add, under each number, the longest logged pulse and the latest end of injection in that cell.</li>';
+    }
+    var key = function (cls, text) { return '<span class="legend-item"><span class="swatch ' + cls + '"></span>' + text + '</span>'; };
+    html += '</ul><div class="table-legend">' +
+        key('bad', 'Starts before the exhaust valve seats (above ' + Math.round(evc) + ')' +
+            (hasLog && limit !== null ? ', or ends past the Primary Limit (' + limit + ') — the ECU cuts that pulse short' : '')) +
+        (hasLog ? key('warn', 'Ends on the compression stroke (below ' + DI_BDC + '): less flow against rising pressure, poorer mixing') +
+            key('ok', 'Logged injection fits on the intake stroke') : '') +
+        key('none', hasLog ? 'No log readings (tune check only)' : 'Starts after the valve seats') + '</div></div>';
+    return html;
+}
+
+/** Hover text for one cell: the table value and, with a log, everything behind the small line. */
+function tuneCellTip(rpm, map, soi, c, evc, inp, hasLog) {
+    var lines = [rpm + ' rpm' + (map === null ? '' : ' / ' + map + ' kPa'), 'Table start: ' + Math.round(soi) + ' dBTDC' +
+        (soi > evc ? ' — ' + Math.round(soi - evc) + '° before the exhaust valve seats (' + Math.round(evc) + ')' : '')];
+    if (!c) return lines.concat(hasLog ? ['No log readings in this cell.'] : []).join('\n');
+    var s = tuneCellSeconds(c);
+    lines.push('Log: ' + c.n + ' reading' + (c.n > 1 ? 's' : '') + ' (' + s.toFixed(1) + ' s)' + (s < 1 ? ' — thin data, treat as a hint' : ''));
+    lines.push('Logged start (median): ' + c.angle + ' dBTDC');
+    lines.push('Pulse width: ' + c.p99Pw + ' ms (99th pct), ' + c.maxPw + ' ms longest');
+    var eoi = 'Latest end of injection: ' + c.worstEoi + ' dBTDC';
+    if (inp.primaryLimit !== null && c.worstEoi < inp.primaryLimit) eoi += ' — past the Primary Limit (' + inp.primaryLimit + ')';
+    else if (c.worstEoi < DI_BDC) eoi += ' — ' + Math.round(DI_BDC - c.worstEoi) + '° into the compression stroke';
+    else eoi += ' — ' + Math.round(c.worstEoi - DI_BDC) + '° before BDC';
+    lines.push(eoi);
+    return lines.join('\n');
+}
+
 function renderTune(check, e6, rec, inp, lr) {
     $('tune-block').hidden = !(diTune && diTune.table);
     if (!diTune || !diTune.table) return;
@@ -252,9 +303,7 @@ function renderTune(check, e6, rec, inp, lr) {
             ' dBTDC, close to BDC: the intake air is slow there, so the fuel mixes poorly (sooting, lost power). Start them earlier unless there is a ' +
             'reason.</div>';
     }
-    html += '<p class="hint">Each cell: the table\'s start of injection' + (lr && lr.cells ? '; below it, from the log, the longest pulse (99th percentile) and the ' +
-        'latest end of injection in that cell' : '') + '. Red = starts before the exhaust valve seats' + (lr ? ' or ends past the Primary Limit' : '') +
-        '; orange = ends on the compression stroke. Recommended start: ' + rec.dBTDC.toFixed(0) + ' dBTDC.</p>';
+    html += tuneTableNotes(evc, rec, inp, lr);
     html += '<div class="scroll"><table class="grid-table"><thead><tr><th>kPa \\ rpm</th>' + t.rpm.map(function (r) { return '<th>' + r + '</th>'; }).join('') + '</tr></thead><tbody>';
     for (var m = t.map.length - 1; m >= 0; m--) {
         html += '<tr><th>' + (t.map[m] === null ? '' : t.map[m]) + '</th>';
@@ -262,10 +311,11 @@ function renderTune(check, e6, rec, inp, lr) {
             var c = lr && lr.cells ? lr.cells[m][r] : null, cls = v > evc ? 'bad' : '';
             if (c && c.worstEoi !== null) {
                 if (inp.primaryLimit !== null && c.worstEoi < inp.primaryLimit) cls = 'bad';
-                else if (c.worstEoi < 180 && !cls) cls = 'warn';
+                else if (c.worstEoi < DI_BDC && !cls) cls = 'warn';
                 else if (!cls) cls = 'ok';
             }
-            html += '<td class="' + cls + '">' + Math.round(v) + (c ? '<small>' + c.p99Pw + ' ms → ' + Math.round(c.worstEoi) + '</small>' : '') + '</td>';
+            html += '<td class="' + cls + '" title="' + esc(tuneCellTip(t.rpm[r], t.map[m], v, c, evc, inp, !!(lr && lr.cells))) + '">' + Math.round(v) +
+                (c ? '<small>' + c.p99Pw + ' ms → ' + Math.round(c.worstEoi) + '</small>' : '') + '</td>';
         });
         html += '</tr>';
     }
