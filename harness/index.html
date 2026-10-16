@@ -44,6 +44,8 @@
           <label for="revision-select">Revision</label>
           <select id="revision-select" aria-label="Revision"></select>
           <button id="delete-revision-btn" class="btn btn-danger btn-small">Delete revision</button>
+          <label for="system-select">System</label>
+          <select id="system-select" aria-label="Harness system"></select>
           <span id="dirty-flag" class="dirty-flag" hidden>Unsaved changes</span>
           <span class="spacer"></span>
           <button id="save-btn" class="btn">Save</button>
@@ -57,6 +59,7 @@
         <button class="tab active" role="tab" aria-selected="true" data-tab="connectors">Connectors <span class="count" id="count-connectors"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="splices">Splices <span class="count" id="count-splices"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="diagram">Diagram</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="system">System <span class="count" id="count-system"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="checks">Checks <span class="count" id="count-checks"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="tune">Tune comparison</button>
       </div>
@@ -94,6 +97,12 @@
         <div id="diagram" class="diagram-wrap" aria-label="Wiring diagram"></div>
       </div>
 
+      <div id="panel-system" class="panel" role="tabpanel" hidden>
+        <h2>System</h2>
+        <p class="panel-desc">Harnesses that plug into each other. Connectors with the same name in two harnesses whose part numbers mate (one's connector is the other's mate connector) are joined automatically, cavity to cavity; circuits, diagrams and the tune comparison then follow wires across the joins.</p>
+        <div id="system"></div>
+      </div>
+
       <div id="panel-checks" class="panel" role="tabpanel" hidden>
         <h2>Checks</h2>
         <p class="panel-desc">Every remote connection is followed to the other end: references that point nowhere, ends that disagree, splices that don't list their wires, and wire part numbers that differ between ends.</p>
@@ -106,6 +115,10 @@
         <div class="compare-row">
           <label for="tune-select">Tune</label>
           <select id="tune-select" aria-label="Tune"></select>
+          <select id="tune-scope" aria-label="Compare with" hidden>
+            <option value="system">Whole system</option>
+            <option value="harness">This harness only</option>
+          </select>
           <div class="filter-group" role="group" aria-label="Show">
             <button class="filter-btn active" data-show="problems">Problems</button>
             <button class="filter-btn" data-show="all">All pins</button>
@@ -137,6 +150,7 @@
   <script src="harness-model.js"></script>
   <script src="harness-tune.js"></script>
   <script src="harness-diagram.js"></script>
+  <script src="harness-system.js"></script>
   <script src="harness-store.js"></script>
   <script src="app.js"></script>
 </body>

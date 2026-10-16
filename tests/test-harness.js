@@ -355,3 +355,85 @@ describe('Harness — wiring diagrams', function () {
     assert.ok(harnessBlockDiagram(m, 'NOPE').svg.indexOf('No connector or splice named NOPE') >= 0);
   });
 });
+
+describe('Harness — systems of harnesses', function () {
+  function conn(id, part, mate, pins) {
+    return { id: id, title: id, sheet: 's', connector: part, mateConn: mate, columns: [], images: [],
+      pins: pins.map(function (p) { return { cavity: p[0], terminal: '', wirePn: p[1] ? 'W' : '', wire: p[1] ? '22 AWG White' : '',
+        function: p[2] || '', note: '', remote: p[3] || '', status: '' }; }) };
+  }
+  // Engine: ECU pin C14 → bulkhead A. Chassis: bulkhead A → pedal, B wired only on this side, C function differs.
+  var engine = { name: 'Engine', sheets: [], splices: [], connectors: [
+    conn('M142.C', 'Superseal', '', [['14', true, 'APP Signal', 'BULK.A']]),
+    conn('BULK', 'MS-95S', 'MS-95P', [['A', true, 'APP Signal', 'M142.C.14'], ['B', false, 'Spare', ''], ['C', true, 'Brake Switch', 'M142.C.14']])
+  ] };
+  var chassis = { name: 'Chassis', sheets: [], splices: [], connectors: [
+    conn('BULK', 'MS-95P', 'MS-95S', [['A', true, 'APP Signal 1', 'PEDAL.1'], ['B', true, 'Fan Relay', 'FAN.1'], ['C', true, 'AC Request', 'AC.1']]),
+    conn('PEDAL', 'DTM', '', [['1', true, 'APP', 'BULK.A']]),
+    conn('OTHER', 'X', 'Y', [])
+  ] };
+  var members = [{ id: 'e', name: 'Engine', model: engine }, { id: 'c', name: 'Chassis', model: chassis }];
+
+  it('maps MoTeC expander titles and treats Unused as no connection', function () {
+    assert.equal(harnessConnectorId('MoTeC E888 B - 26 Way'), 'E888.B');
+    assert.equal(harnessConnectorId('MoTeC M142 A - 34 Way'), 'M142.A');
+    assert.equal(harnessResolve(harnessIndex(engine), 'Unused').kind, 'none');
+  });
+
+  it('splits a sheet that holds the other half of a mating pair into its own harness', function () {
+    var model = { name: 'C', sheets: [{ name: 'Main', kind: 'connectors' }, { name: 'Sub', kind: 'connectors' }], splices: [], connectors: [
+      Object.assign(conn('TRANS', 'DTM06', 'DTM04', []), { sheet: 'Main' }), Object.assign(conn('A', '', '', []), { sheet: 'Main' }),
+      Object.assign(conn('TRANS', 'DTM04', 'DTM06', []), { sheet: 'Sub' }), Object.assign(conn('VSS', '', '', []), { sheet: 'Sub' })] };
+    assert.deepEqual(harnessSplitCandidates(model), [{ sheet: 'Sub', shared: ['TRANS'] }]);
+    var sp = harnessSplitSheet(model, 'Sub', 'C - Sub');
+    assert.deepEqual(sp.main.connectors.map(function (c) { return c.id; }), ['TRANS', 'A']);
+    assert.deepEqual(sp.sub.connectors.map(function (c) { return c.id; }), ['TRANS', 'VSS']);
+    assert.equal(sp.sub.name, 'C - Sub');
+  });
+
+  it('joins same-name connectors whose part numbers mate, and honours rejected and manual links', function () {
+    var m = harnessMates(members, {});
+    assert.equal(m.mates.length, 1);
+    assert.deepEqual([m.mates[0].a.connector, m.mates[0].source, m.mates[0].parts], ['BULK', 'auto', 'mate']);
+    var link = { a: { harness: 'e', connector: 'BULK' }, b: { harness: 'c', connector: 'BULK' } };
+    var off = harnessMates(members, { rejected: [link] });
+    assert.equal(off.mates.length, 0);
+    assert.equal(off.suggestions[0].source, 'rejected');
+    var manual = harnessMates(members, { manual: [{ a: { harness: 'e', connector: 'M142.C' }, b: { harness: 'c', connector: 'OTHER' } }] });
+    assert.equal(manual.mates.length, 2);
+    assert.equal(manual.mates[1].source, 'manual');
+    assert.equal(hsysPartsMate({ connector: 'A', mateConn: 'B' }, { connector: 'C', mateConn: 'D' }), 'conflict');
+    assert.equal(hsysPartsMate({ connector: '', mateConn: '' }, { connector: 'C', mateConn: '' }), 'unknown');
+  });
+
+  it('checks both sides of every joined cavity', function () {
+    var issues = harnessSystemChecks(members, harnessMates(members, {}).mates);
+    assert.equal(issues.length, 2);
+    assert.ok(/B has a wire on the Chassis BULK side but none on the Engine BULK side/.test(issues[0].message), issues[0].message);
+    assert.ok(/"Brake Switch" in Engine but "AC Request" in Chassis/.test(issues[1].message), issues[1].message);
+    assert.deepEqual(issues[0].other, { harness: 'c', where: 'BULK.B' });
+  });
+
+  it('traces a circuit across the join and draws it', function () {
+    var g = harnessSystemGraph(members, harnessMates(members, {}).mates);
+    var t = harnessTrace(g, 'e|M142.C.14');
+    assert.deepEqual(t.nodes.map(function (n) { return n.key + ':' + n.depth; }).sort(),
+      ['c|BULK.A:2', 'c|BULK.C:2', 'c|PEDAL.1:3', 'c|?AC.1:3', 'e|BULK.A:1', 'e|BULK.C:1', 'e|M142.C.14:0'].sort(), 'AC.1 is outside the chassis harness');
+    assert.equal(t.edges.filter(function (e) { return e.kind === 'mate'; }).length, 2);
+    assert.equal(harnessTrace(g, 'e|NOPE.1'), null);
+    var d = harnessTraceDiagram(t);
+    assert.ok(d.svg.indexOf('data-trace="c|PEDAL.1"') >= 0);
+    assert.ok(d.svg.indexOf('⇄ mated') >= 0);
+    assert.ok(harnessSystemDiagram(members, harnessMates(members, {}).mates).svg.indexOf('data-harness="c"') >= 0);
+  });
+
+  it('compares a tune against every harness in a system', function () {
+    var e888 = { name: 'Chassis', sheets: [], splices: [], connectors: [conn('E888.A', 'S', '', [['32', true, 'Throttle Pedal Main', 'PEDAL.1']])] };
+    var pkg = { items: [{ name: 'Throttle.Pedal.Sensor Main Resource', type: 'io_resource', value: ['0x0000', '0x0000', '0x654c', '0x0000', '0x0000'] }] };
+    var one = harnessTuneCompare(engine, pkg, 'M142', {});
+    assert.equal(one.rows[0].status, 'no-connector');
+    var both = harnessTuneCompare([{ name: 'Engine', model: engine }, { name: 'Chassis', model: e888 }], pkg, 'M142', {});
+    var row = both.rows.filter(function (r) { return r.pin === 'E888 A32'; })[0];
+    assert.deepEqual([row.status, row.harnessName], ['ok', 'Chassis']);
+  });
+});

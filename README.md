@@ -57,6 +57,7 @@ Design and check wiring harnesses built around the M1 ECU.
 - Compares the ECU (M142) and E888 pins against the I/O assignments in a tune from the M1 Config Viewer, and harness pin labels against the M142 datasheet pinout
 - Connector and splice images: pictures placed beside each block in the spreadsheet are imported, can be added/removed/captioned, viewed full size, and are written back on export
 - Wiring diagrams drawn from the harness: per connector or splice (every wire in its real colour/gauge to the pins it reaches, through splices to their far ends, with the connector's pictures) and an overview of all connectors and splices with wire counts; click through to the editor, download as SVG
+- Harness systems: harnesses that plug into each other (e.g. engine + chassis + transmission sub-harness) are grouped; connectors with the same name and mating part numbers are joined cavity to cavity automatically (or linked by hand), with checks across each join, circuit tracing through every harness, a system overview diagram and a whole-system tune comparison. Importing a workbook offers to split a sheet that holds the other half of a mating pair into its own harness, and to join a system with harnesses it plugs into
 - Every save is a revision (server or browser storage); export back to `.xlsx` in the same layout, pictures included
 
 ### Calculators
@@ -127,7 +128,7 @@ m1-config/                  — M1 Config Viewer (.m1pkg import, tune history, c
   index.html, app.js, format.js, resource-names.js, tune-db.js, tune-api.js, worker.js, styles.css
 
 harness/                    — Harness Builder (.xlsx import/export, editor, checks, tune comparison)
-  index.html, app.js, harness-model.js, harness-tune.js, harness-diagram.js, harness-store.js, styles.css
+  index.html, app.js, harness-model.js, harness-tune.js, harness-diagram.js, harness-system.js, harness-store.js, styles.css
 
 lib/                        — Vendored libraries (Chart.js, zoom plugin, Hammer.js) and shared parsers
                               (ld-parser.js, m1pkg-parser.js, xz-decoder.js, xlsx.js)

@@ -32,7 +32,7 @@ var HARNESS_HEADER_FIELDS = { CONNECTOR: 'connector', SPLICE: 'type', BOOT: 'boo
     'MATE PIN': 'matePin', NOTES: 'notes' };
 
 /** Remote values that mean "no connection". */
-var HARNESS_NO_REMOTE = /^(|n\/a|na|none|empty|-)$/i;
+var HARNESS_NO_REMOTE = /^(|n\/a|na|none|empty|-|unused|not used|unterminated|open)$/i;
 /** Wire values that mean "no wire in this cavity". */
 var HARNESS_NO_WIRE = /^(|n\/a|na|none|empty|-|sealing pin|seal|plug)$/i;
 
@@ -40,9 +40,12 @@ function harnessText(v) {
     return v === null || v === undefined ? '' : String(v).trim();
 }
 
-/** Connector id used in remote references: "MoTeC M142 A - 34 Way" → "M142.A"; otherwise the title. */
+/**
+ * Connector id used in remote references: "MoTeC M142 A - 34 Way" → "M142.A", "MoTeC E888 B - 26 Way" →
+ * "E888.B"; otherwise the title.
+ */
 function harnessConnectorId(title) {
-    var m = title.match(/^motec\s+(m1\d\d)\s+([a-d])\b/i);
+    var m = title.match(/^motec\s+([a-z]?\d{3,4})\s+([a-d])\b/i);
     return m ? m[1].toUpperCase() + '.' + m[2].toUpperCase() : title;
 }
 
@@ -353,11 +356,49 @@ function harnessCheck(model) {
     return issues;
 }
 
+// ---------------------------------------------------------------------------
+// Sub-harness sheets
+// ---------------------------------------------------------------------------
+
+/**
+ * Sheets that look like separate harnesses: a sheet holding a connector whose name is also used on
+ * another sheet (the two halves of a mating pair, e.g. a sub-harness's TRANS plug and the main harness's
+ * TRANS socket). Returns [{ sheet, shared: [ids] }] for the sheet with fewer blocks of each such pair.
+ */
+function harnessSplitCandidates(model) {
+    var bySheet = {}, sheetsOf = {};
+    model.connectors.concat(model.splices).forEach(function (b) {
+        bySheet[b.sheet] = (bySheet[b.sheet] || 0) + 1;
+        (sheetsOf[b.id] = sheetsOf[b.id] || []).push(b.sheet);
+    });
+    var out = {};
+    Object.keys(sheetsOf).forEach(function (id) {
+        var sheets = sheetsOf[id].filter(function (s, i, a) { return a.indexOf(s) === i; });
+        if (sheets.length < 2) return;
+        sheets.sort(function (a, b) { return bySheet[b] - bySheet[a]; });
+        sheets.slice(1).forEach(function (s) { (out[s] = out[s] || []).push(id); });
+    });
+    return Object.keys(out).map(function (s) { return { sheet: s, shared: out[s] }; });
+}
+
+/** Move the blocks on `sheet` into a model of their own. Returns { main, sub }. */
+function harnessSplitSheet(model, sheet, subName) {
+    function on(b) { return b.sheet === sheet; }
+    function off(b) { return b.sheet !== sheet; }
+    return {
+        main: Object.assign({}, model, { sheets: model.sheets.filter(function (s) { return s.name !== sheet; }),
+            connectors: model.connectors.filter(off), splices: model.splices.filter(off) }),
+        sub: { name: subName || sheet, sheets: model.sheets.filter(function (s) { return s.name === sheet; }),
+            connectors: model.connectors.filter(on), splices: model.splices.filter(on) }
+    };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         harnessFromWorkbook: harnessFromWorkbook, harnessToWorkbook: harnessToWorkbook, harnessIndex: harnessIndex,
         harnessResolve: harnessResolve, harnessCheck: harnessCheck, harnessConnectorId: harnessConnectorId,
         harnessHasWire: harnessHasWire, harnessEndpointName: harnessEndpointName, harnessText: harnessText,
+        harnessSplitCandidates: harnessSplitCandidates, harnessSplitSheet: harnessSplitSheet,
         HARNESS_PIN_FIELDS: HARNESS_PIN_FIELDS, HARNESS_WIRE_FIELDS: HARNESS_WIRE_FIELDS
     };
 }

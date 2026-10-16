@@ -90,6 +90,19 @@ tr.issue-row li.issue-warning .issue-text { color: #ffb74d; }
 .diagram-wrap { background: #fff; border: 1px solid #333; border-radius: 8px; overflow: auto; max-height: calc(100vh - 120px); }
 .diagram-wrap svg { display: block; }
 
+/* System */
+.system-section { margin-bottom: 20px; }
+.system-section h3 { font-size: 0.95rem; margin: 0 0 6px; }
+.system-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.system-actions select { background: #222; color: #fff; border: 1px solid #333; border-radius: 4px; padding: 5px 8px; font-family: inherit; max-width: 320px; }
+.system-actions .spacer { flex: 1; }
+.mate-sign { font-size: 1.1rem; color: #ff5a6e; text-align: center; }
+.tag { display: inline-block; border-radius: 3px; padding: 0 6px; font-size: 0.72rem; font-weight: 600; }
+.tag-auto { background: #263238; color: #90caf9; }
+.tag-manual { background: #263238; color: #ffcc80; }
+.tag-bad { background: rgba(244,67,54,0.2); color: #ff8a80; }
+.current-harness td { background: rgba(227,24,55,0.10); }
+
 /* Tune comparison */
 .tune-summary { margin: 12px 0; }
 .summary-stat.status-ok .stat-value { color: #4caf50; }

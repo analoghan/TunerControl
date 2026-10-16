@@ -126,6 +126,47 @@ test('deletes single harness revisions without reusing their numbers', function 
     assert.throws(function () { store.deleteHarnessRevision(id, 4); }, /only revision/);
 });
 
+test('stores harness systems and drops deleted harnesses from them', function () {
+    var store = new TuneStore(':memory:');
+    var model = { name: 'H', sheets: [], connectors: [], splices: [] };
+    var a = store.saveHarness(null, 'Engine', model, '').id, b = store.saveHarness(null, 'Chassis', model, '').id;
+    var link = { a: { harness: a, connector: 'CHAS.A' }, b: { harness: b, connector: 'CHAS.A' } };
+    var sys = store.saveHarnessSystem(null, { name: 'Car', harnesses: [a, b], manual: [link] });
+    assert.deepStrictEqual(store.listHarnessSystems()[0].harnesses, [a, b]);
+    assert.deepStrictEqual(store.listHarnessSystems()[0].manual, [link]);
+    store.deleteHarness(b);
+    assert.deepStrictEqual(store.listHarnessSystems()[0].harnesses, [a]);
+    assert.strictEqual(store.saveHarnessSystem('missing', { name: 'x', harnesses: [] }), null);
+    assert.strictEqual(store.deleteHarnessSystem(sys.id), true);
+    assert.deepStrictEqual(store.listHarnessSystems(), []);
+});
+
+test('HTTP API: harness systems', function () {
+    var server = createServer(new TuneStore(':memory:'));
+    return new Promise(function (resolve) { server.listen(0, '127.0.0.1', resolve); }).then(function () {
+        var base = 'http://127.0.0.1:' + server.address().port + '/api/harness-systems';
+        var headers = { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' }, id;
+        return fetch(base, { method: 'POST', headers: headers, body: JSON.stringify({ name: 'Car', harnesses: ['h1'] }) })
+            .then(function (r) { assert.strictEqual(r.status, 201); return r.json(); })
+            .then(function (s) {
+                id = s.id;
+                assert.deepStrictEqual([s.name, s.harnesses, s.manual, s.rejected], ['Car', ['h1'], [], []]);
+                return fetch(base + '/' + id, { method: 'PUT', headers: headers, body: JSON.stringify({ name: 'Car 2', harnesses: ['h1', 'h2'] }) });
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (s) {
+                assert.deepStrictEqual(s.harnesses, ['h1', 'h2']);
+                return fetch(base, { method: 'POST', headers: headers, body: JSON.stringify({ name: 'Bad' }) });
+            })
+            .then(function (r) {
+                assert.strictEqual(r.status, 400);
+                return fetch(base + '/' + id, { method: 'DELETE', headers: headers });
+            })
+            .then(function (r) { assert.strictEqual(r.status, 204); })
+            .finally(function () { server.close(); });
+    });
+});
+
 test('HTTP API: harness images are stored once by content hash', function () {
     var server = createServer(new TuneStore(':memory:'));
     var png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);

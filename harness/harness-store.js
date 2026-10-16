@@ -7,20 +7,21 @@
  *               (not reused after a delete), latest = newest stored revision
  *   revisions : { harnessId, revision, saved, note, data }   key [harnessId, revision]
  *   images    : { id, mime, data: Blob }   connector/splice pictures, id = hash of the bytes
+ *   systems   : { id, name, updated, harnesses: [ids], manual: [links], rejected: [links] }
  * Tunes for the tune comparison come from the M1 Config Viewer's storage (tune-db.js / tune-api.js).
  */
 
 var HS_DB_NAME = 'tunercontrol-harness';
 var hsBackend = 'memory';          // 'server' | 'browser' | 'memory'
 var hsDbPromise = null;
-var hsMemory = { harnesses: {}, revisions: {}, images: {} };
+var hsMemory = { harnesses: {}, revisions: {}, images: {}, systems: {} };
 var hsImageUrls = {};              // image id → object URL (cached for the page's lifetime)
 
 function hsOpenDb() {
     if (hsDbPromise) return hsDbPromise;
     hsDbPromise = new Promise(function (resolve, reject) {
         if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB is not available')); return; }
-        var req = indexedDB.open(HS_DB_NAME, 2);
+        var req = indexedDB.open(HS_DB_NAME, 3);
         req.onupgradeneeded = function () {
             var db = req.result;
             if (!db.objectStoreNames.contains('harnesses')) db.createObjectStore('harnesses', { keyPath: 'id' });
@@ -28,6 +29,7 @@ function hsOpenDb() {
                 db.createObjectStore('revisions', { keyPath: ['harnessId', 'revision'] }).createIndex('harnessId', 'harnessId');
             }
             if (!db.objectStoreNames.contains('images')) db.createObjectStore('images', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('systems')) db.createObjectStore('systems', { keyPath: 'id' });
         };
         req.onsuccess = function () { resolve(req.result); };
         req.onerror = function () { reject(req.error || new Error('Could not open the harness database')); };
@@ -156,14 +158,55 @@ function hsDeleteRevision(id, revision) {
 
 function hsDelete(id) {
     if (hsBackend === 'server') return tuneApi('DELETE', 'harnesses/' + encodeURIComponent(id));
-    if (hsBackend === 'memory') { delete hsMemory.harnesses[id]; delete hsMemory.revisions[id]; return Promise.resolve(); }
-    return hsTx(['harnesses', 'revisions'], 'readwrite', function (tx) {
+    if (hsBackend === 'memory') {
+        delete hsMemory.harnesses[id]; delete hsMemory.revisions[id];
+        Object.keys(hsMemory.systems).forEach(function (k) {
+            var s = hsMemory.systems[k];
+            s.harnesses = s.harnesses.filter(function (h) { return h !== id; });
+        });
+        return Promise.resolve();
+    }
+    return hsTx(['harnesses', 'revisions', 'systems'], 'readwrite', function (tx) {
         tx.objectStore('harnesses').delete(id);
+        var systems = tx.objectStore('systems');
+        hsReq(systems.getAll()).then(function (list) {
+            list.forEach(function (s) {
+                if (s.harnesses.indexOf(id) < 0) return;
+                s.harnesses = s.harnesses.filter(function (h) { return h !== id; });
+                systems.put(s);
+            });
+        });
         var revs = tx.objectStore('revisions');
         return hsReq(revs.index('harnessId').getAllKeys(id)).then(function (keys) {
             keys.forEach(function (k) { revs.delete(k); });
         });
     });
+}
+
+// ---- Systems (harnesses joined by mating connectors) ----
+
+function hsListSystems() {
+    if (hsBackend === 'server') return tuneApi('GET', 'harness-systems');
+    var list = hsBackend === 'memory' ? Promise.resolve(Object.keys(hsMemory.systems).map(function (k) { return hsMemory.systems[k]; }))
+        : hsTx(['systems'], 'readonly', function (tx) { return hsReq(tx.objectStore('systems').getAll()); });
+    return list.then(function (rows) { return rows.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }); });
+}
+
+/** Create (id null) or update a system { name, harnesses, manual, rejected }. Resolves the stored record. */
+function hsSaveSystem(id, system) {
+    var body = { name: system.name, harnesses: system.harnesses || [], manual: system.manual || [], rejected: system.rejected || [] };
+    if (hsBackend === 'server') {
+        return tuneApi(id ? 'PUT' : 'POST', 'harness-systems' + (id ? '/' + encodeURIComponent(id) : ''), { body: body });
+    }
+    var rec = Object.assign({ id: id || hsUuid(), updated: new Date().toISOString() }, JSON.parse(JSON.stringify(body)));
+    if (hsBackend === 'memory') { hsMemory.systems[rec.id] = rec; return Promise.resolve(rec); }
+    return hsTx(['systems'], 'readwrite', function (tx) { tx.objectStore('systems').put(rec); return rec; });
+}
+
+function hsDeleteSystem(id) {
+    if (hsBackend === 'server') return tuneApi('DELETE', 'harness-systems/' + encodeURIComponent(id));
+    if (hsBackend === 'memory') { delete hsMemory.systems[id]; return Promise.resolve(); }
+    return hsTx(['systems'], 'readwrite', function (tx) { tx.objectStore('systems').delete(id); });
 }
 
 // ---- Images ----

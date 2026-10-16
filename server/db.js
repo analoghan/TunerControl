@@ -13,6 +13,7 @@
  *                  number ever saved (numbers are not reused after a revision is deleted)
  *   harness_revisions every saved version of a harness (full model as JSON), newest = harnesses.revision
  *   harness_images connector/splice pictures, id = SHA-256 of the bytes (shared by all revisions)
+ *   harness_systems harnesses joined by mating connectors: { harnesses: [ids], manual: [links], rejected: [links] }
  * View
  *   cell_values    cells joined with tune and item names — the easiest table for ad-hoc SQL
  */
@@ -24,7 +25,7 @@ var path = require('path');
 var DatabaseSync = require('node:sqlite').DatabaseSync;
 var parser = require('../lib/m1pkg-parser.js');
 
-var SCHEMA_VERSION = 3;
+var SCHEMA_VERSION = 4;
 var SCHEMA = [
     'CREATE TABLE IF NOT EXISTS packages (' +
     '  pk INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, file_name TEXT, file_size INTEGER, imported_at TEXT NOT NULL,' +
@@ -53,6 +54,7 @@ var SCHEMA = [
     '  harness_id TEXT NOT NULL REFERENCES harnesses(id) ON DELETE CASCADE, revision INTEGER NOT NULL,' +
     '  saved TEXT NOT NULL, note TEXT, data_json TEXT NOT NULL, PRIMARY KEY (harness_id, revision))',
     'CREATE TABLE IF NOT EXISTS harness_images (id TEXT PRIMARY KEY, mime TEXT NOT NULL, data BLOB NOT NULL, created TEXT NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS harness_systems (id TEXT PRIMARY KEY, name TEXT NOT NULL, updated TEXT NOT NULL, data_json TEXT NOT NULL)',
     'CREATE VIEW IF NOT EXISTS cell_values AS' +
     '  SELECT p.id AS package_id, p.tune_name, p.modified, n.name AS item_name, c.cell_key, c.value, c.text_value' +
     '  FROM cells c JOIN packages p ON p.pk = c.package_pk JOIN item_names n ON n.id = c.name_id'
@@ -294,6 +296,32 @@ TuneStore.prototype.saveHarness = function (id, name, data, note) {
     });
 };
 
+function systemRecord(r) {
+    return Object.assign({ id: r.id, name: r.name, updated: r.updated }, JSON.parse(r.data_json));
+}
+
+/** Harness systems: [{ id, name, updated, harnesses, manual, rejected }]. */
+TuneStore.prototype.listHarnessSystems = function () {
+    return this.db.prepare('SELECT id, name, updated, data_json FROM harness_systems ORDER BY name').all().map(systemRecord);
+};
+
+/** Create (id null) or replace a system. Returns the stored record, or null when id doesn't exist. */
+TuneStore.prototype.saveHarnessSystem = function (id, system) {
+    var now = new Date().toISOString();
+    var data = JSON.stringify({ harnesses: system.harnesses || [], manual: system.manual || [], rejected: system.rejected || [] });
+    if (id) {
+        if (!this.db.prepare('UPDATE harness_systems SET name = ?, updated = ?, data_json = ? WHERE id = ?').run(system.name, now, data, id).changes) return null;
+    } else {
+        id = require('crypto').randomUUID();
+        this.db.prepare('INSERT INTO harness_systems (id, name, updated, data_json) VALUES (?, ?, ?, ?)').run(id, system.name, now, data);
+    }
+    return systemRecord(this.db.prepare('SELECT id, name, updated, data_json FROM harness_systems WHERE id = ?').get(id));
+};
+
+TuneStore.prototype.deleteHarnessSystem = function (id) {
+    return this.db.prepare('DELETE FROM harness_systems WHERE id = ?').run(id).changes > 0;
+};
+
 /** Store an image (id = SHA-256 hex of the bytes); storing the same bytes again is a no-op. */
 TuneStore.prototype.putHarnessImage = function (id, mime, bytes) {
     this.db.prepare('INSERT INTO harness_images (id, mime, data, created) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING')
@@ -305,8 +333,17 @@ TuneStore.prototype.getHarnessImage = function (id) {
     return r ? { mime: r.mime, data: r.data } : null;
 };
 
+/** Delete a harness with its revisions, and take it out of any system. */
 TuneStore.prototype.deleteHarness = function (id) {
-    return this.db.prepare('DELETE FROM harnesses WHERE id = ?').run(id).changes > 0;
+    var self = this;
+    return this.transaction(function () {
+        self.listHarnessSystems().forEach(function (s) {
+            if (s.harnesses.indexOf(id) < 0) return;
+            s.harnesses = s.harnesses.filter(function (h) { return h !== id; });
+            self.saveHarnessSystem(s.id, s);
+        });
+        return self.db.prepare('DELETE FROM harnesses WHERE id = ?').run(id).changes > 0;
+    });
 };
 
 TuneStore.prototype.exportBackup = function () {

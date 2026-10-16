@@ -5,6 +5,8 @@
  * connector pin ("M142 pin C15"), which is matched to harness connector "M142.C" cavity "15".
  *
  * harnessTuneCompare(model, pkg, hardware, userNames) →
+ *   model may also be a list of harnesses [{ name, model }] (a harness system); rows then say which harness
+ *   each pin is in (harnessName) and connectors are looked up in all of them.
  *   { rows: [{ pin, connectorId, cavity, resource, tune: [names], harness: pin|null, status, note }],
  *     unnamed: [{ ids, tune: [names] }]  — tune assignments whose pin is not known (not named yet),
  *     labelIssues: [{ where, label, expected }], summary: { ok, check, missing, 'not-in-tune', 'no-connector' } }
@@ -92,9 +94,15 @@ function htLabelKey(label) {
 }
 
 function harnessTuneCompare(model, pkg, hardware, userNames) {
-    var index = harnessIndex(model), rows = [], byPin = {}, labelIssues = [], unnamed = {};
-    var connectorsById = {};
-    model.connectors.forEach(function (c) { connectorsById[c.id] = c; });
+    var members = Array.isArray(model) ? model : [{ name: '', model: model }];
+    var rows = [], byPin = {}, labelIssues = [], unnamed = {}, lookup = {};
+    // Connector id → { pins by cavity, harness name }; the first harness listing a connector wins.
+    members.forEach(function (m) {
+        var index = harnessIndex(m.model);
+        Object.keys(index.connectors).forEach(function (id) {
+            if (!lookup[id]) lookup[id] = { pins: index.connectors[id].pins, harnessName: m.name };
+        });
+    });
 
     (pkg.items || []).forEach(function (item) {
         if (item.type !== 'io_resource' || !m1cResourceAssigned(item.value)) return;
@@ -123,9 +131,10 @@ function harnessTuneCompare(model, pkg, hardware, userNames) {
     });
 
     Object.keys(byPin).forEach(function (key) {
-        var r = byPin[key], entry = index.connectors[r.connectorId];
+        var r = byPin[key], entry = lookup[r.connectorId];
         r.harness = entry ? entry.pins[r.cavity] || null : null;
-        if (!entry) { r.status = 'no-connector'; r.note = r.connectorId + ' is not in this harness.'; }
+        r.harnessName = entry ? entry.harnessName : '';
+        if (!entry) { r.status = 'no-connector'; r.note = r.connectorId + ' is not in ' + (members.length > 1 ? 'any harness of this system.' : 'this harness.'); }
         else if (!r.harness || !harnessHasWire(r.harness)) {
             r.status = 'missing'; r.note = 'The tune uses this pin but the harness has no wire on it.';
         } else if (/^(spare|unused)$/i.test(harnessText(r.harness.function))) {
@@ -144,9 +153,9 @@ function harnessTuneCompare(model, pkg, hardware, userNames) {
 
     // ECU cavities (connectors named after the tune hardware) and harness labels.
     var keys = htCavityKeys(hardware);
-    model.connectors.forEach(function (c) {
+    members.forEach(function (member) { member.model.connectors.forEach(function (c) {
         var m = c.id.match(/^(\S+)\.([A-Z])$/);
-        if (!m || m[1] !== hardware) return;
+        if (!m || m[1] !== hardware || lookup[c.id].harnessName !== member.name) return;
         c.pins.forEach(function (p) {
             var cav = String(parseInt(p.cavity, 10));
             if (cav === 'NaN') return;
@@ -157,10 +166,10 @@ function harnessTuneCompare(model, pkg, hardware, userNames) {
             if (byPin[hardware + '.' + m[2] + '.' + cav] || !harnessHasWire(p)) return;
             if (HT_NOT_SIGNAL.test(harnessText(p.function)) || !expected || /^(can|rs232|lin)/.test(expected)) return;
             rows.push({ pin: hardware + ' ' + m[2] + cav.padStart(2, '0'), connectorId: c.id, cavity: cav, resource: null,
-                        tune: [], harness: p, status: 'not-in-tune',
+                        tune: [], harness: p, harnessName: member.name, status: 'not-in-tune',
                         note: 'Wired in the harness, but no named tune assignment uses this pin.' });
         });
-    });
+    }); });
 
     rows.sort(function (a, b) {
         return a.pin.localeCompare(b.pin, undefined, { numeric: true });

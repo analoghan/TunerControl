@@ -28,6 +28,10 @@
  *   PUT    /api/harnesses/:id                body { name, data, note } → new revision { id, revision, saved }
  *   DELETE /api/harnesses/:id
  *   DELETE /api/harnesses/:id/revisions/:n   delete one revision → { latest } (409 if it is the only one)
+ *   GET    /api/harness-systems             [{ id, name, updated, harnesses, manual, rejected }]
+ *   POST   /api/harness-systems             body { name, harnesses, manual, rejected } → system
+ *   PUT    /api/harness-systems/:id         same body → system
+ *   DELETE /api/harness-systems/:id         (the harnesses themselves are kept)
  *   POST   /api/harness-images              body = PNG/JPEG/GIF/WebP bytes (Content-Type image/*) → { id }
  *   GET    /api/harness-images/:id          image bytes (ids are SHA-256 of the content, so cacheable forever)
  */
@@ -202,6 +206,25 @@ function handleApi(req, res, url, store) {
             catch (err) { throw new HttpError(409, err.message); }
             if (!deleted) throw new HttpError(404, 'Revision not found');
             return sendJson(req, res, 200, deleted);
+        }
+    }
+
+    if (parts[0] === 'harness-systems') {
+        if (parts.length === 1 && method === 'GET') return sendJson(req, res, 200, store.listHarnessSystems());
+        var sid = parts[1] || null;
+        if ((parts.length === 1 && method === 'POST') || (parts.length === 2 && method === 'PUT')) {
+            return readJson(req).then(function (body) {
+                if (!body || typeof body.name !== 'string' || !body.name.trim()) throw new HttpError(400, 'name is required');
+                if (!Array.isArray(body.harnesses)) throw new HttpError(400, 'harnesses must be a list');
+                var system = store.saveHarnessSystem(sid, { name: body.name.trim(), harnesses: body.harnesses,
+                    manual: Array.isArray(body.manual) ? body.manual : [], rejected: Array.isArray(body.rejected) ? body.rejected : [] });
+                if (!system) throw new HttpError(404, 'System not found');
+                sendJson(req, res, sid ? 200 : 201, system);
+            });
+        }
+        if (parts.length === 2 && method === 'DELETE') {
+            if (!store.deleteHarnessSystem(sid)) throw new HttpError(404, 'System not found');
+            res.writeHead(204); return res.end();
         }
     }
 

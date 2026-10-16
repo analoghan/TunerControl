@@ -14,7 +14,11 @@ var state = {
     selConnector: null, selSplice: null,
     tunes: [], tunePkg: null, tuneId: '', resourceNames: {}, show: 'problems',
     openIssues: {},       // 'kind|block|index' → true for rows whose problem details are shown
-    diagram: ''           // '' = overview, otherwise the connector/splice id shown in the Diagram tab
+    diagram: '',          // '' = overview, 'system', 'trace:<key>', or a connector/splice id
+    systems: [],          // all harness systems
+    system: null,         // the system this harness belongs to (or null)
+    sysMembers: [],       // other harnesses of that system: [{ id, name, model, revision }]
+    tuneScope: 'system'
 };
 
 function $(id) { return document.getElementById(id); }
@@ -62,6 +66,7 @@ function openHarness(id, revision) {
         state.selSplice = state.model.splices[0] ? state.model.splices[0].id : null;
         setDirty(false);
         showEditor();
+        return loadSystemContext();
     }).catch(function (err) { showError('Could not open the harness: ' + err.message); });
 }
 
@@ -70,31 +75,95 @@ function newHarness() {
     state.model = { name: 'New harness', sheets: [{ name: 'Connectors', kind: 'connectors' }, { name: 'Splices', kind: 'splices' }],
                     connectors: [], splices: [] };
     state.selConnector = null; state.selSplice = null;
+    state.system = null; state.sysMembers = [];
     setDirty(true);
     showEditor();
+    renderSystemSelect();
 }
 
 function importXlsx(file) {
     showError('');
     setStatus('Reading ' + file.name + '…');
+    var name = file.name.replace(/\.xlsx$/i, ''), parts;
     file.arrayBuffer().then(readXlsx).then(function (wb) {
-        var name = file.name.replace(/\.xlsx$/i, '');
         var model = harnessFromWorkbook(wb, name);
-        return hsStoreModelImages(model, function (done, total) {
-            setStatus('Storing images ' + done + ' of ' + total + '…');
-        }).then(function (images) {
-            setStatus('Saving ' + name + '…');
-            return hsSave(null, name, model, 'Imported from ' + file.name).then(function (saved) { saved.images = images; return saved; });
-        }).then(function (saved) {
-            var c = model.connectors.length, s = model.splices.length;
-            setStatus('Imported ' + file.name + ': ' + c + ' connector' + (c === 1 ? '' : 's') + ', ' + s + ' splice' +
-                (s === 1 ? '' : 's') + (saved.images ? ', ' + saved.images + ' image' + (saved.images === 1 ? '' : 's') : '') + '.');
-            return refreshHarnessList(saved.id).then(function () { return openHarness(saved.id); });
+        parts = [{ name: name, model: model }];
+        // Sheets that are their own (sub-)harness: a connector name shared with another sheet = a mating pair.
+        harnessSplitCandidates(model).forEach(function (c) {
+            if (!window.confirm('The sheet "' + c.sheet + '" has its own ' + c.shared.join(', ') + ' connector, which mates with ' +
+                    c.shared.join(', ') + ' on another sheet. Import "' + c.sheet + '" as a separate harness, joined to the main one?')) return;
+            var split = harnessSplitSheet(parts[0].model, c.sheet, name + ' - ' + c.sheet);
+            parts[0].model = split.main;
+            parts.push({ name: split.sub.name, model: split.sub });
         });
+        return parts.reduce(function (p, part) {
+            return p.then(function () {
+                return hsStoreModelImages(part.model, function (done, total) {
+                    setStatus('Storing images for ' + part.name + ': ' + done + ' of ' + total + '…');
+                }).then(function (n) {
+                    part.images = n;
+                    setStatus('Saving ' + part.name + '…');
+                    return hsSave(null, part.name, part.model, 'Imported from ' + file.name);
+                }).then(function (saved) { part.id = saved.id; });
+            });
+        }, Promise.resolve());
+    }).then(function () {
+        return joinImportedToSystem(parts);
+    }).then(function () {
+        var main = parts[0], c = main.model.connectors.length, sp = main.model.splices.length;
+        setStatus('Imported ' + file.name + ': ' + c + ' connector' + (c === 1 ? '' : 's') + ', ' + sp + ' splice' + (sp === 1 ? '' : 's') +
+            (main.images ? ', ' + main.images + ' image' + (main.images === 1 ? '' : 's') : '') +
+            (parts.length > 1 ? ' — plus ' + parts.slice(1).map(function (p) { return '"' + p.name + '"'; }).join(', ') + ' as separate harness' +
+                (parts.length > 2 ? 'es' : '') : '') + '.');
+        return refreshHarnessList(main.id).then(function () { return openHarness(main.id); });
     }).catch(function (err) {
         setStatus('');
         showError('Could not import ' + file.name + ': ' + err.message);
     }).then(function () { $('xlsx-input').value = ''; });
+}
+
+/**
+ * After an import: put split-off sub-harnesses in a system with the main harness, and offer to join a
+ * system with saved harnesses whose connectors mate with the new ones.
+ */
+function joinImportedToSystem(parts) {
+    var newIds = parts.map(function (p) { return p.id; });
+    return Promise.all([hsListSystems(), hsList()]).then(function (r) {
+        var systems = r[0], others = r[1].filter(function (h) { return newIds.indexOf(h.id) < 0; });
+        return Promise.all(others.map(function (h) {
+            return hsLoad(h.id).then(function (x) { return { id: x.id, name: x.name, model: x.data }; }, function () { return null; });
+        })).then(function (loaded) {
+            var partners = [];
+            loaded.filter(Boolean).forEach(function (o) {
+                var joins = harnessMates(parts.map(function (p) { return { id: p.id, name: p.name, model: p.model }; }).concat([o]), {}).mates
+                    .filter(function (l) { return l.a.harness === o.id || l.b.harness === o.id; });
+                if (joins.length) partners.push({ harness: o, connectors: joins.map(function (l) { return l.a.connector; }) });
+            });
+            var target = null, ask = null;
+            partners.some(function (p) {
+                var sys = systems.filter(function (s) { return s.harnesses.indexOf(p.harness.id) >= 0; })[0];
+                if (sys) { target = sys; ask = p; return true; }
+                return false;
+            });
+            if (!target && partners.length) ask = partners[0];
+            var join = null;
+            if (ask) {
+                var q = '"' + parts[0].name + '" plugs into "' + ask.harness.name + '" (' + ask.connectors.join(', ') + ' mate). ' +
+                    (target ? 'Add it to the system "' + target.name + '"?' : 'Create a system with both?');
+                if (window.confirm(q)) join = { system: target, partner: ask.harness };
+            }
+            if (!join && parts.length < 2) return null;
+            var sys = join && join.system ? join.system : null, ids = newIds.slice();
+            if (join && !sys) ids.push(join.partner.id);
+            if (!sys) {
+                var name = window.prompt('Name for the system that joins these harnesses (e.g. the car):', parts[0].name + ' system');
+                if (name === null || !name.trim()) return null;
+                return hsSaveSystem(null, { name: name.trim(), harnesses: ids });
+            }
+            ids.forEach(function (id) { if (sys.harnesses.indexOf(id) < 0) sys.harnesses.push(id); });
+            return hsSaveSystem(sys.id, sys);
+        });
+    });
 }
 
 function saveHarness() {
@@ -206,7 +275,8 @@ function selectTab(tab) {
         t.classList.toggle('active', on);
         t.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    ['connectors', 'splices', 'diagram', 'checks', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
+    ['connectors', 'splices', 'diagram', 'system', 'checks', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
+    if (tab === 'system') renderSystem();
     if (tab === 'checks') renderChecks();
     if (tab === 'diagram') renderDiagram();
     if (tab === 'tune') loadTunes();
@@ -222,6 +292,7 @@ function renderAll() {
     if (state.tab === 'checks') renderChecks();
     if (state.tab === 'tune') renderTune();
     if (state.tab === 'diagram') renderDiagram();
+    if (state.tab === 'system') renderSystem();
 }
 
 // =========================================================================
@@ -462,7 +533,9 @@ function rowsHtml(kind, block, records, fields, columns) {
             }
             html += '<td>' + input + '</td>';
         });
-        html += '<td class="actions"><button class="btn btn-small btn-danger" data-remove-row="' + i + '" aria-label="Remove row ' + (i + 1) +
+        html += '<td class="actions"><button class="btn btn-small btn-secondary" data-trace-row="' + i + '" title="Trace this circuit" ' +
+            'aria-label="Trace the circuit of row ' + (i + 1) + '">&#x2933;</button> ' +
+            '<button class="btn btn-small btn-danger" data-remove-row="' + i + '" aria-label="Remove row ' + (i + 1) +
             '">&times;</button></td></tr>';
         if (open) html += issueDetailHtml(kind, block.id, i, fields.length + 2);
     });
@@ -632,6 +705,11 @@ function wireEditor(containerId, isConnector) {
             return;
         }
         if (t.id === 'show-diagram') { showDiagram(block.id); return; }
+        if (t.hasAttribute('data-trace-row')) {
+            var tr = recs[parseInt(t.getAttribute('data-trace-row'), 10)];
+            showDiagram('trace:' + currentKey() + '|' + (isConnector ? block.id + '.' + tr.cavity : block.id));
+            return;
+        }
         if (t.hasAttribute('data-goto')) {
             var gi = parseInt(t.getAttribute('data-goto'), 10), rec = recs[gi], where = isConnector ? rec.remote : rec.end;
             if (gotoEndpoint(where)) return;
@@ -723,9 +801,19 @@ function renderDiagram() {
             return '<option value="' + esc(b.id) + '">' + esc(b.id) + '</option>';
         }).join('') + '</optgroup>';
     }
-    sel.innerHTML = opts + group('Connectors', state.model.connectors) + group('Splices', state.model.splices);
-    if (state.diagram && !findConnector(state.diagram) && !findSplice(state.diagram)) state.diagram = '';
+    var extra = '';
+    if (state.system) extra += '<option value="system">System overview — ' + esc(state.system.name) + '</option>';
+    if (/^trace:/.test(state.diagram)) {
+        var tp = state.diagram.slice(6).split('|');
+        extra += '<option value="' + esc(state.diagram) + '">Circuit from ' + esc((memberName(tp[0]) ? memberName(tp[0]) + ' · ' : '') +
+            tp.slice(1).join('|')) + '</option>';
+    }
+    sel.innerHTML = opts + extra + group('Connectors', state.model.connectors) + group('Splices', state.model.splices);
+    if (state.diagram === 'system' && !state.system) state.diagram = '';
+    if (state.diagram && state.diagram !== 'system' && !/^trace:/.test(state.diagram) &&
+        !findConnector(state.diagram) && !findSplice(state.diagram)) state.diagram = '';
     sel.value = state.diagram;
+    if (state.diagram === 'system' || /^trace:/.test(state.diagram)) { renderSystemDiagram(); return; }
     var focus = state.diagram ? findConnector(state.diagram) || findSplice(state.diagram) : null;
     $('diagram-hint').textContent = focus
         ? 'Click a pin to edit it, or a connector or splice header to show its diagram.'
@@ -742,6 +830,26 @@ function renderDiagram() {
                       : harnessOverviewDiagram(state.model, { hardware: hardware || undefined });
         $('diagram').innerHTML = d.svg;
     });
+}
+
+/** System overview or circuit trace in the Diagram tab. */
+function renderSystemDiagram() {
+    var members = systemMembers(), d;
+    renderDiagram.seq = (renderDiagram.seq || 0) + 1;
+    if (state.diagram === 'system') {
+        $('diagram-hint').textContent = 'Each box is a harness with its mated connectors. Click a harness to open it.';
+        d = harnessSystemDiagram(members, systemMates().mates);
+    } else {
+        var trace = harnessTrace(harnessSystemGraph(members, systemMates().mates), state.diagram.slice(6));
+        if (!trace) { $('diagram').innerHTML = '<p style="padding:12px;color:#444">That endpoint no longer exists.</p>'; return; }
+        var harnesses = {};
+        trace.nodes.forEach(function (n) { harnesses[n.harness] = true; });
+        var hn = Object.keys(harnesses).length;
+        $('diagram-hint').textContent = trace.nodes.length + ' endpoints in ' + hn + ' harness' + (hn === 1 ? '' : 'es') +
+            '. Click an endpoint to edit it.';
+        d = harnessTraceDiagram(trace);
+    }
+    $('diagram').innerHTML = d.svg;
 }
 
 /** Download the diagram as a standalone SVG, with pictures embedded. */
@@ -790,6 +898,230 @@ function highlightNode(id) {
 }
 
 // =========================================================================
+// Systems
+// =========================================================================
+
+/** Key of the open harness inside system graphs. */
+function currentKey() { return state.id || 'unsaved'; }
+
+function memberName(id) {
+    if (id === currentKey()) return $('name-input').value.trim() || state.name;
+    var m = state.sysMembers.filter(function (x) { return x.id === id; })[0];
+    return m ? m.name : '';
+}
+
+/** Harnesses of the system, with the open one's live (possibly unsaved) model; just this harness otherwise. */
+function systemMembers() {
+    var me = { id: currentKey(), name: $('name-input').value.trim() || state.name, model: state.model };
+    if (!state.system) return [me];
+    return state.system.harnesses.map(function (id) {
+        if (id === state.id) return me;
+        return state.sysMembers.filter(function (m) { return m.id === id; })[0] || null;
+    }).filter(Boolean);
+}
+
+function systemMates() {
+    return harnessMates(systemMembers(), state.system || {});
+}
+
+/** Find this harness's system and load the other members' latest revisions. */
+function loadSystemContext() {
+    return hsListSystems().then(function (list) {
+        state.systems = list;
+        state.system = state.id ? list.filter(function (s) { return s.harnesses.indexOf(state.id) >= 0; })[0] || null : null;
+        var others = state.system ? state.system.harnesses.filter(function (id) { return id !== state.id; }) : [];
+        return Promise.all(others.map(function (id) {
+            return hsLoad(id).then(function (h) { return { id: h.id, name: h.name, model: h.data, revision: h.revision }; },
+                function () { return null; });
+        }));
+    }).then(function (members) {
+        state.sysMembers = members.filter(Boolean);
+        renderSystemSelect();
+        if (state.tab === 'system') renderSystem();
+        if (state.tab === 'diagram') renderDiagram();
+        if (state.tab === 'tune') renderTune();
+    }).catch(function (err) { showError('Could not load harness systems: ' + err.message); });
+}
+
+function renderSystemSelect() {
+    var sel = $('system-select');
+    sel.innerHTML = '<option value="">None</option>' + state.systems.map(function (s) {
+        return '<option value="' + esc(s.id) + '">' + esc(s.name) + '</option>';
+    }).join('') + '<option value="__new">New system…</option>';
+    sel.value = state.system ? state.system.id : '';
+    $('tune-scope').hidden = !state.system;
+    var joins = state.system ? systemMates().mates.length : 0;
+    $('count-system').textContent = state.system ? state.system.harnesses.length + ' harnesses' + (joins ? ', ' + joins + ' joins' : '') : '';
+}
+
+function saveSystem(system) {
+    return hsSaveSystem(system.id || null, system).then(function (saved) {
+        return loadSystemContext().then(function () { return saved; });
+    }).catch(function (err) { showError('Could not save the system: ' + err.message); });
+}
+
+/** Move the open harness into another system (or none). */
+function changeSystem(value) {
+    if (!state.id) {
+        showError('Save the harness before adding it to a system.');
+        renderSystemSelect();
+        return;
+    }
+    var current = state.system, chain = Promise.resolve();
+    if (value === '__new') {
+        var name = window.prompt('Name for the new system (e.g. the car):', state.name + ' system');
+        if (name === null || !name.trim()) { renderSystemSelect(); return; }
+        chain = hsSaveSystem(null, { name: name.trim(), harnesses: [] }).then(function (s) { value = s.id; state.systems.push(s); });
+    }
+    chain.then(function () {
+        if (current && current.id === value) return null;
+        var steps = [];
+        if (current) {
+            current.harnesses = current.harnesses.filter(function (h) { return h !== state.id; });
+            steps.push(hsSaveSystem(current.id, current));
+        }
+        var target = state.systems.filter(function (s) { return s.id === value; })[0];
+        if (target && target.harnesses.indexOf(state.id) < 0) {
+            target.harnesses.push(state.id);
+            steps.push(hsSaveSystem(target.id, target));
+        }
+        return Promise.all(steps);
+    }).then(loadSystemContext).catch(function (err) { showError('Could not change the system: ' + err.message); });
+}
+
+function endHtml(end) {
+    var mem = systemMembers().filter(function (m) { return m.id === end.harness; })[0];
+    var conn = mem ? mem.model.connectors.filter(function (k) { return k.id === end.connector; })[0] : null;
+    return '<td>' + esc(memberName(end.harness)) + '</td><td class="param-name">' + esc(end.connector) + '</td><td class="hint">' +
+        esc(conn ? conn.connector || '' : '') + '</td>';
+}
+
+function renderSystem() {
+    var el = $('system');
+    if (!state.system) {
+        el.innerHTML = '<p class="muted">This harness is not part of a system. Choose one in the <strong>System</strong> list above ' +
+            '(or <strong>New system…</strong>) to join it to the harnesses it plugs into.</p>' +
+            (state.id ? '' : '<p class="muted">Save the harness first.</p>');
+        return;
+    }
+    var members = systemMembers(), m = systemMates(), checks = harnessSystemChecks(members, m.mates);
+    var html = '<section class="system-section"><h3>Harnesses in ' + esc(state.system.name) + '</h3>' +
+        '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Harness</th><th>Connectors</th><th>Splices</th>' +
+        '<th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
+        members.map(function (x) {
+            var me = x.id === currentKey();
+            return '<tr' + (me ? ' class="current-harness"' : '') + '><td>' + esc(x.name) + (me ? ' (open)' : '') + '</td><td>' +
+                x.model.connectors.length + '</td><td>' + x.model.splices.length + '</td><td class="actions">' +
+                (me ? '' : '<button class="btn btn-small btn-secondary" data-open-harness="' + esc(x.id) + '">Open</button> ') +
+                '<button class="btn btn-small btn-danger" data-remove-member="' + esc(x.id) + '">Remove</button></td></tr>';
+        }).join('') + '</tbody></table></div><div class="system-actions"><select id="add-member-select" aria-label="Harness to add"></select>' +
+        '<button class="btn btn-small btn-secondary" id="add-member-btn">Add to system</button><span class="spacer"></span>' +
+        '<button class="btn btn-small btn-secondary" id="rename-system-btn">Rename system</button>' +
+        '<button class="btn btn-small btn-danger" id="delete-system-btn">Delete system</button></div></section>';
+
+    html += '<section class="system-section"><h3>Mated connectors</h3>' + (m.mates.length
+        ? '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Harness</th><th>Connector</th><th>Part</th><th></th>' +
+          '<th>Harness</th><th>Connector</th><th>Part</th><th>Joined</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
+          m.mates.map(function (l, i) {
+              var tag = l.parts === 'conflict' ? '<span class="tag tag-bad">parts don\'t mate</span>' :
+                  l.source === 'manual' ? '<span class="tag tag-manual">manual</span>' : '<span class="tag tag-auto">automatic</span>';
+              return '<tr>' + endHtml(l.a) + '<td class="mate-sign">⇄</td>' + endHtml(l.b) + '<td>' + tag + '</td>' +
+                  '<td class="actions"><button class="btn btn-small btn-danger" data-unlink="' + i + '">Unlink</button></td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<p class="muted">No connectors are joined yet. Connectors join automatically when they have the same name and mating part numbers, or link them below.</p>');
+    if (m.suggestions.length) {
+        html += '<p class="hint">Same name, not joined:</p><ul class="plain-list">' + m.suggestions.map(function (l, i) {
+            return '<li>' + esc(memberName(l.a.harness) + ' ' + l.a.connector + ' ⇄ ' + memberName(l.b.harness) + ' ' + l.b.connector) +
+                ' — ' + (l.source === 'rejected' ? 'unlinked by you' : 'part numbers don\'t mate') +
+                ' <button class="btn btn-small btn-secondary" data-relink="' + i + '">Link</button></li>';
+        }).join('') + '</ul>';
+    }
+    var options = [];
+    members.forEach(function (x) {
+        x.model.connectors.forEach(function (c) {
+            options.push('<option value="' + esc(JSON.stringify([x.id, c.id])) + '">' + esc(x.name + ' — ' + c.id) + '</option>');
+        });
+    });
+    html += '<div class="system-actions"><span class="hint">Link manually:</span><select id="link-a" aria-label="First connector">' + options.join('') +
+        '</select><span class="mate-sign">⇄</span><select id="link-b" aria-label="Second connector">' + options.join('') +
+        '</select><button class="btn btn-small btn-secondary" id="link-btn">Link</button></div></section>';
+
+    html += '<section class="system-section"><h3>Checks across joins</h3>' + (checks.length
+        ? '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th></th><th>Where</th><th>Problem</th></tr></thead><tbody>' +
+          checks.map(function (c) {
+              return '<tr><td>' + markerHtml([c]) + '</td><td class="param-name"><button class="link-btn" data-goto-sys="' +
+                  esc(c.harness + '|' + c.where) + '">' + esc(memberName(c.harness) + ' · ' + c.where) + '</button></td><td>' + esc(c.message) + '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : (m.mates.length ? '<p class="ok-banner">Every joined cavity matches on both sides.</p>' : '')) + '</section>';
+    el.innerHTML = html;
+
+    hsList().then(function (list) {
+        var sel = $('add-member-select');
+        if (!sel || !state.system) return;
+        var avail = list.filter(function (h) { return state.system.harnesses.indexOf(h.id) < 0; });
+        sel.innerHTML = avail.length ? avail.map(function (h) { return '<option value="' + esc(h.id) + '">' + esc(h.name) + '</option>'; }).join('')
+            : '<option value="">No other saved harnesses</option>';
+        $('add-member-btn').disabled = !avail.length;
+    });
+}
+
+/** Go to an endpoint anywhere in the system ("harnessId|ENDPOINT"), opening that harness if needed. */
+function gotoSystemEndpoint(key) {
+    var i = key.indexOf('|'), hid = key.slice(0, i), ep = key.slice(i + 1);
+    if (ep.charAt(0) === '?') return;
+    function go() { if (findSplice(ep)) gotoRow('splices', ep, null); else gotoEndpoint(ep); }
+    if (hid === currentKey()) { go(); return; }
+    if (!confirmDiscard()) return;
+    openHarness(hid).then(go);
+}
+
+$('system').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b || !state.system) return;
+    var sys = state.system, m = systemMates();
+    if (b.hasAttribute('data-open-harness')) {
+        if (confirmDiscard()) openHarness(b.getAttribute('data-open-harness'));
+    } else if (b.hasAttribute('data-remove-member')) {
+        var rid = b.getAttribute('data-remove-member');
+        if (!window.confirm('Remove ' + memberName(rid) + ' from ' + sys.name + '? The harness itself is kept.')) return;
+        sys.harnesses = sys.harnesses.filter(function (h) { return h !== rid; });
+        saveSystem(sys);
+    } else if (b.id === 'add-member-btn') {
+        var aid = $('add-member-select').value;
+        if (aid) { sys.harnesses.push(aid); saveSystem(sys); }
+    } else if (b.id === 'rename-system-btn') {
+        var name = window.prompt('System name:', sys.name);
+        if (name && name.trim()) { sys.name = name.trim(); saveSystem(sys); }
+    } else if (b.id === 'delete-system-btn') {
+        if (!window.confirm('Delete the system "' + sys.name + '"? Its harnesses are kept.')) return;
+        hsDeleteSystem(sys.id).then(loadSystemContext);
+    } else if (b.hasAttribute('data-unlink')) {
+        var l = m.mates[parseInt(b.getAttribute('data-unlink'), 10)], key = hsysLinkKey(l);
+        sys.manual = (sys.manual || []).filter(function (x) { return hsysLinkKey(x) !== key; });
+        if (l.source === 'auto') (sys.rejected = sys.rejected || []).push({ a: l.a, b: l.b });
+        saveSystem(sys);
+    } else if (b.hasAttribute('data-relink')) {
+        var sg = m.suggestions[parseInt(b.getAttribute('data-relink'), 10)], k2 = hsysLinkKey(sg);
+        sys.rejected = (sys.rejected || []).filter(function (x) { return hsysLinkKey(x) !== k2; });
+        if (sg.parts === 'conflict') (sys.manual = sys.manual || []).push({ a: sg.a, b: sg.b });
+        saveSystem(sys);
+    } else if (b.id === 'link-btn') {
+        var a = JSON.parse($('link-a').value), c = JSON.parse($('link-b').value);
+        if (a[0] === c[0]) { showError('Pick connectors in two different harnesses.'); return; }
+        var link = { a: { harness: a[0], connector: a[1] }, b: { harness: c[0], connector: c[1] } };
+        sys.rejected = (sys.rejected || []).filter(function (x) { return hsysLinkKey(x) !== hsysLinkKey(link); });
+        (sys.manual = sys.manual || []).push(link);
+        showError('');
+        saveSystem(sys);
+    } else if (b.hasAttribute('data-goto-sys')) {
+        gotoSystemEndpoint(b.getAttribute('data-goto-sys'));
+    }
+});
+
+$('system-select').addEventListener('change', function () { changeSystem(this.value); });
+$('tune-scope').addEventListener('change', function () { state.tuneScope = this.value; renderTune(); });
+
+// =========================================================================
 // Tune comparison
 // =========================================================================
 
@@ -832,7 +1164,8 @@ function renderTune() {
         el.innerHTML = '<p class="muted">No pinout is known for ' + esc(hardware || 'this ECU') + ', so its pins cannot be compared.</p>';
         return;
     }
-    var r = harnessTuneCompare(state.model, pkg, hardware, state.resourceNames), s = r.summary;
+    var useSystem = !!state.system && state.tuneScope === 'system';
+    var r = harnessTuneCompare(useSystem ? systemMembers() : state.model, pkg, hardware, state.resourceNames), s = r.summary;
     var html = '<div class="summary-grid tune-summary">' +
         [['ok', 'Match'], ['check', 'Check'], ['missing', 'No wire'], ['not-in-tune', 'Not matched'], ['no-connector', 'Not in harness']]
             .map(function (k) {
@@ -843,13 +1176,14 @@ function renderTune() {
     if (state.show !== 'all') {
         rows.sort(function (a, b) { return STATUS_ORDER[a.status] - STATUS_ORDER[b.status]; });   // stable: pin order within a status
     }
-    html += '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Pin</th><th>Tune uses it for</th>' +
+    html += '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Pin</th>' + (useSystem ? '<th>Harness</th>' : '') +
+        '<th>Tune uses it for</th>' +
         '<th>Resource</th><th>Harness function</th><th>Harness label</th><th>Status</th></tr></thead><tbody>';
     rows.forEach(function (x) {
         var hasConn = !!findConnector(x.connectorId);
         html += '<tr class="status-row-' + x.status + '"><td class="param-pin">' +
             (hasConn ? '<button class="link-btn" data-goto-pin="' + esc(x.connectorId + '.' + x.cavity) + '">' + esc(x.pin) + '</button>' : esc(x.pin)) +
-            '</td><td class="param-name">' + esc(x.tune.join(', ') || '—') + '</td><td>' + esc(x.resource || '—') + '</td><td>' +
+            '</td>' + (useSystem ? '<td>' + esc(x.harnessName || '—') + '</td>' : '') + '<td class="param-name">' + esc(x.tune.join(', ') || '—') + '</td><td>' + esc(x.resource || '—') + '</td><td>' +
             esc(x.harness ? x.harness.function : '—') + '</td><td>' + esc(x.harness ? x.harness.note : '') + '</td>' +
             '<td class="status-cell status-' + x.status + '" title="' + esc(x.note || '') + '">' + esc(STATUS_LABELS[x.status]) +
             (x.note ? '<span class="status-note">' + esc(x.note) + '</span>' : '') + '</td></tr>';
@@ -929,6 +1263,13 @@ $('diagram-select').addEventListener('change', function () { state.diagram = thi
 $('diagram-download').addEventListener('click', downloadDiagram);
 $('diagram').addEventListener('click', function (e) {
     var row = e.target.closest('[data-endpoint]'), node = e.target.closest('[data-node]');
+    var traced = e.target.closest('[data-trace]'), harnessBox = e.target.closest('[data-harness]');
+    if (traced) { gotoSystemEndpoint(traced.getAttribute('data-trace')); return; }
+    if (harnessBox) {
+        var hid = harnessBox.getAttribute('data-harness');
+        if (hid !== currentKey() && confirmDiscard()) openHarness(hid);
+        return;
+    }
     if (row) {
         var ep = row.getAttribute('data-endpoint');
         if (findSplice(ep)) gotoRow('splices', ep, null); else gotoEndpoint(ep);
