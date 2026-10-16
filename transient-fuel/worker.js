@@ -5,9 +5,10 @@
  * and measures lambda excursions to diagnose fuel film calibration.
  *
  * Key metrics per event:
- *   - Lean spike depth (% below target) — fuel film primary too low
- *   - Rich overshoot (% above target) — time constants too aggressive
- *   - Recovery time (ms to return within 2% of target)
+ *   - Lean spike (% leaner than where lambda settles afterwards) — fuel film primary too low
+ *   - Rich overshoot (% richer than where lambda settles) — compensation too late/long or too large
+ *   - Recovery time (ms from event start until lambda is back within 2%)
+ *   Events overlapping overrun or a fuel cut are skipped.
  *   - MAP transition zone (from → to kPa)
  */
 
@@ -25,6 +26,8 @@ var TRANSIENT_CHANNELS = {
     LAMBDA_TARGET: 'fuel mixture aim',
     TPS: 'throttle position',
     COOLANT: 'coolant temperature',
+    OVERRUN: 'engine overrun state',     // optional: non-zero during overrun fuel cut
+    FUEL_CUT: 'fuel output cut count',   // optional: changes when a fuel cut happens (8-bit, wraps)
 };
 
 // ---------------------------------------------------------------------------
@@ -61,6 +64,8 @@ function parseTransientLog(text, onProgress) {
     var ltIdx = colNames.indexOf(TRANSIENT_CHANNELS.LAMBDA_TARGET);
     var tpsIdx = colNames.indexOf(TRANSIENT_CHANNELS.TPS);
     var coolIdx = colNames.indexOf(TRANSIENT_CHANNELS.COOLANT);
+    var overrunIdx = colNames.indexOf(TRANSIENT_CHANNELS.OVERRUN);
+    var cutIdx = colNames.indexOf(TRANSIENT_CHANNELS.FUEL_CUT);
 
     if (timeIdx === -1) throw new Error('Channel "Time" not found.');
     if (mapIdx === -1) throw new Error('Channel "Inlet Manifold Pressure" not found.');
@@ -98,6 +103,8 @@ function parseTransientLog(text, onProgress) {
             rpm: rpmIdx >= 0 ? parseFloat(fields[rpmIdx]) : NaN,
             tps: tpsIdx >= 0 ? parseFloat(fields[tpsIdx]) : NaN,
             coolant: coolIdx >= 0 ? parseFloat(fields[coolIdx]) : NaN,
+            overrunState: overrunIdx >= 0 ? parseFloat(fields[overrunIdx]) : NaN,
+            fuelCutCount: cutIdx >= 0 ? parseFloat(fields[cutIdx]) : NaN,
         });
 
         if ((i - dataStart) % 5000 === 0 && onProgress) {
@@ -118,6 +125,7 @@ function detectTransientEvents(samples, settings) {
     var defaultTarget = settings.lambdaTarget || 1.0;
 
     var events = [];
+    var skippedFuelCut = 0;
     var i = 0;
     var lastEventEndIdx = -20; // prevent overlapping detections
 
@@ -186,9 +194,10 @@ function detectTransientEvents(samples, settings) {
             var maxChange = Math.max(peakMap - mapAtStart, mapAtStart - troughMap);
             if (maxChange > totalMapChange) totalMapChange = maxChange;
 
-            if (totalMapChange >= minMapChange) {
+            var excursion = totalMapChange >= minMapChange ? measureLambdaExcursion(samples, i, j, isTipIn, defaultTarget) : null;
+            if (totalMapChange >= minMapChange && !excursion) skippedFuelCut++;
+            if (excursion) {
                 var target = !isNaN(samples[j].lambdaTarget) && samples[j].lambdaTarget > 0.5 ? samples[j].lambdaTarget : defaultTarget;
-                var excursion = measureLambdaExcursion(samples, j, target, isTipIn);
 
                 events.push({
                     type: isTipIn ? 'tip-in' : 'tip-out',
@@ -201,6 +210,7 @@ function detectTransientEvents(samples, settings) {
                     lambdaTarget: target,
                     leanSpike: excursion.leanSpike,
                     richOvershoot: excursion.richOvershoot,
+                    leanAfter: excursion.leanAfter,
                     recoveryTime: excursion.recoveryTime,
                     peakError: excursion.peakError,
                 });
@@ -214,62 +224,82 @@ function detectTransientEvents(samples, settings) {
         }
     }
 
+    events.skippedFuelCut = skippedFuelCut;
     return events;
 }
 
-function measureLambdaExcursion(samples, transientEndIdx, target, isTipIn) {
-    // Look at lambda for 1.5 seconds after the transient ends
-    var windowMs = 1500;
-    var startTime = samples[transientEndIdx].time;
-    var endTime = startTime + windowMs / 1000;
+/** Lambda above this is a fuel cut / free-air reading, not combustion. */
+var TF_CUT_LAMBDA = 1.5;
+/** Seconds before an event checked for overrun / fuel cut (lambda still reads the cut afterwards). */
+var TF_CUT_HOLDOFF_S = 1.0;
+/** Seconds at the end of the window used as the settled lambda (the reference for the excursion). */
+var TF_SETTLE_S = 0.5;
+/** Seconds after the MAP change ends that lambda is followed. */
+var TF_WINDOW_S = 1.5;
+/** Lambda within this fraction of the baseline counts as recovered. */
+var TF_SETTLED = 0.02;
 
-    var minLambda = Infinity;
-    var maxLambda = -Infinity;
-    var recoveryTime = null;
-    var settled = false;
+function tfRatio(s, defaultTarget) {
+    var target = !isNaN(s.lambdaTarget) && s.lambdaTarget > 0.5 ? s.lambdaTarget : defaultTarget;
+    return !isNaN(s.lambda) && s.lambda > 0 ? s.lambda / target : NaN;
+}
 
-    for (var k = transientEndIdx; k < samples.length; k++) {
-        if (samples[k].time > endTime) break;
-        var lam = samples[k].lambda;
-        if (isNaN(lam) || lam <= 0) continue;
+function tfCutAt(samples, k) {
+    var s = samples[k], p = k > 0 ? samples[k - 1] : null;
+    return (!isNaN(s.overrunState) && s.overrunState !== 0) ||
+        (p && !isNaN(s.fuelCutCount) && !isNaN(p.fuelCutCount) && s.fuelCutCount !== p.fuelCutCount) ||   // 8-bit counter: may wrap
+        (!isNaN(s.lambda) && s.lambda > TF_CUT_LAMBDA);
+}
 
-        if (lam < minLambda) minLambda = lam;
-        if (lam > maxLambda) maxLambda = lam;
+/**
+ * Measures the lambda excursion of one transient, from its start until TF_WINDOW_S after MAP settles.
+ * Lambda is used as measured / target (so a changing target, e.g. into boost, is accounted for) and compared
+ * with where it settles at the end of the window — the steady-state error at the destination load is a VE
+ * matter, not fuel film. Returns null when overrun or a fuel cut overlaps the event (its lambda is not
+ * combustion).
+ */
+function measureLambdaExcursion(samples, startIdx, endIdx, isTipIn, defaultTarget) {
+    var t0 = samples[startIdx].time, tEnd = samples[endIdx].time + TF_WINDOW_S, k;
+    for (k = startIdx; k >= 0 && samples[k].time >= t0 - TF_CUT_HOLDOFF_S; k--) if (tfCutAt(samples, k)) return null;
+    for (k = startIdx; k < samples.length && samples[k].time <= tEnd; k++) if (tfCutAt(samples, k)) return null;
 
-        // Check if lambda has recovered (within 2% of target)
-        if (!settled && Math.abs(lam - target) / target < 0.02) {
-            recoveryTime = Math.round((samples[k].time - startTime) * 1000);
-            settled = true;
-        }
+    var raw = [];
+    for (k = startIdx; k < samples.length && samples[k].time <= tEnd; k++) {
+        var r = tfRatio(samples[k], defaultTarget);
+        if (!isNaN(r)) raw.push({ t: samples[k].time, r: r });
     }
+    var settled = raw.filter(function (p) { return p.t >= tEnd - TF_SETTLE_S; }).map(function (p) { return p.r; }).sort(function (a, b) { return a - b; });
+    var base = settled.length ? settled[Math.floor(settled.length / 2)] : 1;
+    var pts = raw.map(function (p) { return { t: p.t, r: p.r / base }; });
+    if (!pts.length) return { leanSpike: 0, richOvershoot: 0, leanAfter: 0, recoveryTime: Math.round((tEnd - t0) * 1000), peakError: 0, baseline: base };
 
-    // Lean spike: how far below target (as % error)
-    var leanSpike = target > 0 && minLambda < Infinity ? Math.max(0, ((minLambda - target) / target) * 100) : 0;
-    // For tip-in, lean spike is positive lambda (leaner than target)
+    var iMax = 0, iMin = 0;
+    pts.forEach(function (p, i) { if (p.r > pts[iMax].r) iMax = i; if (p.r < pts[iMin].r) iMin = i; });
+    var lean = Math.max(0, (pts[iMax].r - 1) * 100), rich, leanAfter = 0;
     if (isTipIn) {
-        leanSpike = minLambda < Infinity ? Math.max(0, ((minLambda - target) / target) * -100) : 0;
-        // Actually: lean = lambda > target for tip-in... no.
-        // Lean spike on tip-in: lambda goes ABOVE target momentarily (not enough fuel)
-        leanSpike = maxLambda > target ? ((maxLambda - target) / target) * 100 : 0;
+        // Rich overshoot = going rich after the lean peak (compensation arriving late and staying too long).
+        var minAfter = Infinity;
+        for (k = iMax + 1; k < pts.length; k++) if (pts[k].r < minAfter) minAfter = pts[k].r;
+        rich = minAfter < Infinity ? Math.max(0, (1 - minAfter) * 100) : 0;
+    } else {
+        rich = Math.max(0, (1 - pts[iMin].r) * 100);
+        for (k = iMin + 1; k < pts.length; k++) leanAfter = Math.max(leanAfter, (pts[k].r - 1) * 100);
     }
-
-    // Rich overshoot: how far above target (as % error) — for tip-in, lambda goes below target after initial lean
-    var richOvershoot = 0;
-    if (isTipIn && minLambda < target) {
-        richOvershoot = ((target - minLambda) / target) * 100;
+    // Recovery: from the event start until lambda is back within TF_SETTLED after its largest deviation.
+    var iDev = 0;
+    pts.forEach(function (p, i) { if (Math.abs(p.r - 1) > Math.abs(pts[iDev].r - 1)) iDev = i; });
+    var recovery = Math.abs(pts[iDev].r - 1) < TF_SETTLED ? 0 : null;
+    for (k = iDev; recovery === null && k < pts.length; k++) {
+        if (Math.abs(pts[k].r - 1) < TF_SETTLED) recovery = Math.round((pts[k].t - t0) * 1000);
     }
-    if (!isTipIn && minLambda < target) {
-        // Tip-out: engine goes rich (lambda drops below target)
-        richOvershoot = ((target - minLambda) / target) * 100;
-    }
-
-    var peakError = isTipIn ? leanSpike : richOvershoot;
-
+    function r1(v) { return Math.round(v * 10) / 10; }
     return {
-        leanSpike: Math.round(leanSpike * 10) / 10,
-        richOvershoot: Math.round(richOvershoot * 10) / 10,
-        recoveryTime: recoveryTime || (windowMs),
-        peakError: Math.round(peakError * 10) / 10,
+        leanSpike: r1(isTipIn ? lean : 0),
+        richOvershoot: r1(rich),
+        leanAfter: r1(leanAfter),
+        recoveryTime: recovery !== null ? recovery : Math.round((tEnd - t0) * 1000),
+        peakError: r1(isTipIn ? lean : rich),
+        baseline: base
     };
 }
 
@@ -279,121 +309,89 @@ function measureLambdaExcursion(samples, transientEndIdx, target, isTipIn) {
 
 function generateRecommendations(events, settings) {
     var recs = [];
-    var tipIns = events.filter(function(e) { return e.type === 'tip-in'; });
-    var tipOuts = events.filter(function(e) { return e.type === 'tip-out'; });
+    var tipIns = events.filter(function (e) { return e.type === 'tip-in'; });
+    var tipOuts = events.filter(function (e) { return e.type === 'tip-out'; });
+    function avg(list, f) { return list.length ? list.reduce(function (a, e) { return a + f(e); }, 0) / list.length : 0; }
 
-    // Analyze tip-in lean spikes by MAP zone
-    var leanByZone = {};
-    tipIns.forEach(function(e) {
-        var zone = Math.floor(e.mapTo / 20) * 20; // group by 20 kPa bands
-        if (!leanByZone[zone]) leanByZone[zone] = [];
-        leanByZone[zone].push(e.leanSpike);
+    // Tip-in error by destination MAP zone (20 kPa bands).
+    var zones = {};
+    tipIns.forEach(function (e) {
+        var z = Math.floor(e.mapTo / 20) * 20;
+        (zones[z] = zones[z] || []).push(e);
+    });
+    var leanZones = [], richZones = [];
+    Object.keys(zones).forEach(function (z) {
+        var list = zones[z], lean = avg(list, function (e) { return e.leanSpike; }), rich = avg(list, function (e) { return e.richOvershoot; });
+        if (lean > 5 && rich <= 3) leanZones.push({ zone: +z, avg: lean, count: list.length });
+        if (rich > 5 && lean <= 3) richZones.push({ zone: +z, avg: rich, count: list.length });
+    });
+    leanZones.sort(function (a, b) { return b.avg - a.avg; }).forEach(function (z) {
+        recs.push({ severity: z.avg > 10 ? 'critical' : 'warning',
+            text: 'Fuel Film Primary too low at ' + z.zone + '-' + (z.zone + 20) + ' kPa: tip-ins into this range run lean by ' + z.avg.toFixed(1) +
+                '% on average (' + z.count + ' events) without going rich afterwards. Increase the fuel film primary values in this MAP range.' });
+    });
+    richZones.sort(function (a, b) { return b.avg - a.avg; }).forEach(function (z) {
+        recs.push({ severity: 'warning',
+            text: 'Fuel Film Primary too high at ' + z.zone + '-' + (z.zone + 20) + ' kPa: tip-ins into this range run rich by ' + z.avg.toFixed(1) +
+                '% on average (' + z.count + ' events) without a lean spike first. Reduce the fuel film primary values in this MAP range.' });
     });
 
-    var severeZones = [];
-    Object.keys(leanByZone).forEach(function(zone) {
-        var spikes = leanByZone[zone];
-        var avg = spikes.reduce(function(a, b) { return a + b; }, 0) / spikes.length;
-        if (avg > 5) severeZones.push({ zone: parseInt(zone), avg: avg, count: spikes.length });
-    });
+    var avgLean = avg(tipIns, function (e) { return e.leanSpike; });
+    var avgRichTipIn = avg(tipIns, function (e) { return e.richOvershoot; });
+    var avgRecovery = avg(tipIns, function (e) { return e.recoveryTime; });
+    var tipOutRich = avg(tipOuts, function (e) { return e.richOvershoot; });
+    var tipOutLean = avg(tipOuts, function (e) { return e.leanAfter || 0; });
+    var mismatch = tipIns.length > 3 && avgLean > 3 && avgRichTipIn > 3;
 
-    if (severeZones.length > 0) {
-        severeZones.sort(function(a, b) { return b.avg - a.avg; });
-        severeZones.forEach(function(z) {
-            var severity = z.avg > 10 ? 'critical' : 'warning';
-            recs.push({
-                severity: severity,
-                text: 'Fuel Film Primary too low at ' + z.zone + '-' + (z.zone + 20) + ' kPa: avg lean spike ' + z.avg.toFixed(1) + '% across ' + z.count + ' events. Increase fuel film primary values in this MAP range.'
-            });
-        });
+    if (mismatch) {
+        recs.unshift({ severity: avgLean > 8 && avgRichTipIn > 8 ? 'critical' : 'warning',
+            text: 'TIMING MISMATCH: tip-ins run lean (' + avgLean.toFixed(1) + '%) and then rich (' + avgRichTipIn.toFixed(1) + '%). The amount of ' +
+                'compensation is about right but it arrives too late and lasts too long, so raising the table or scale would make the rich side worse. ' +
+                'Shorten the Increase time constants (Fast and Slow) and/or raise the Fast Percentage so more of the compensation is delivered at once. ' +
+                'On a tip-in the film is growing, so only the Increase constants act; the Decrease constants act on tip-out.' });
     }
-
-    // Analyze rich overshoot
-    var avgRichTipIn = 0;
-    if (tipIns.length > 0) {
-        avgRichTipIn = tipIns.reduce(function(a, e) { return a + e.richOvershoot; }, 0) / tipIns.length;
+    if (tipOuts.length && tipOutRich > 5) {
+        recs.push({ severity: 'warning',
+            text: 'Rich on tip-out: ' + tipOutRich.toFixed(1) + '% on average. As the throttle closes, fuel leaving the port walls is not being taken ' +
+                'out quickly enough. Shorten the Decrease time constants (Fast and Slow).' });
     }
-    if (avgRichTipIn > 5) {
-        recs.push({
-            severity: 'warning',
-            text: 'Rich overshoot after tip-in: avg ' + avgRichTipIn.toFixed(1) + '%. After the initial lean spike corrects, fueling goes too rich before settling. This means the fuel film compensation is being applied too aggressively or held too long. Suggested fix: reduce the Fast Decrease Time Constant (controls how quickly the initial burst of compensation is removed).'
-        });
+    if (tipOuts.length && tipOutLean > 5) {
+        recs.push({ severity: 'warning',
+            text: 'Lean after tip-out: ' + tipOutLean.toFixed(1) + '% on average. The compensation removes fuel faster than the wall film actually ' +
+                'releases it. Lengthen the Decrease time constants, or check that the fuel film primary values are not too high.' });
     }
-
-    // Analyze tip-out rich
-    if (tipOuts.length > 0) {
-        var avgRichTipOut = tipOuts.reduce(function(a, e) { return a + e.richOvershoot; }, 0) / tipOuts.length;
-        if (avgRichTipOut > 5) {
-            recs.push({
-                severity: 'warning',
-                text: 'Rich on tip-out: avg ' + avgRichTipOut.toFixed(1) + '%. When throttle closes, the engine goes rich because fuel film is evaporating off the walls but the compensation is not removing fuel quickly enough. Suggested fix: reduce the Slow Decrease Time Constant (controls how quickly the sustained compensation is removed when MAP drops).'
-            });
-        }
+    if (tipIns.length && avgRecovery > 500 && avgLean > 3) {
+        recs.push({ severity: 'info',
+            text: 'Slow recovery: lambda takes ' + Math.round(avgRecovery) + 'ms on average to settle within 2% after tip-ins. If the lean ' +
+                'spikes last, the compensation is building too slowly — shorten the Slow Increase time constant.' });
     }
 
-    // Recovery time analysis
-    var avgRecovery = 0;
-    if (tipIns.length > 0) {
-        avgRecovery = tipIns.reduce(function(a, e) { return a + e.recoveryTime; }, 0) / tipIns.length;
-    }
-    if (avgRecovery > 500) {
-        recs.push({
-            severity: 'info',
-            text: 'Slow lambda recovery: averaging ' + Math.round(avgRecovery) + 'ms to settle within 2% of target after throttle transients. This means the fuel film model is taking too long to reach the correct compensation level. Suggested fix: reduce the Slow Increase Time Constant (controls how quickly the sustained compensation ramps up to its full value after a tip-in).'
-        });
-    }
-
-    // Suggested time constant values based on measured behavior AND current values
+    // Suggested time constants: only change the ones the data points to.
     if (tipIns.length > 3) {
         var tc = settings.currentTimeConstants || {};
-        var curFastInc = tc.fastIncrease || 0.2;
-        var curFastDec = tc.fastDecrease || 0.3;
-        var curSlowInc = tc.slowIncrease || 0.5;
-        var curSlowDec = tc.slowDecrease || 0.3;
-        var curFastPct = tc.fastPct || 30;
-
-        var tipOutRich = tipOuts.length > 0 ? tipOuts.reduce(function(a,e){return a+e.richOvershoot;},0)/tipOuts.length : 0;
-
-        var sugFastIncrease = Math.max(0.05, curFastInc * 0.5);
-        var sugFastDecrease = avgRichTipIn > 5 ? Math.max(0.05, curFastDec * 0.5) : curFastDec;
-        var sugSlowIncrease = avgRecovery > 800 ? Math.max(0.1, curSlowInc * 0.5) : avgRecovery > 500 ? Math.max(0.1, curSlowInc * 0.7) : curSlowInc;
-        var sugSlowDecrease = tipOutRich > 5 ? Math.max(0.05, curSlowDec * 0.5) : curSlowDec;
-        var sugFastPct = avgRichTipIn > 8 ? Math.max(10, curFastPct - 10) : avgRichTipIn > 3 ? curFastPct : Math.min(50, curFastPct + 5);
-
-        var tcText = 'Suggested time constants (current → suggested): ';
-        tcText += 'Fast Increase: ' + curFastInc + 's → ' + sugFastIncrease.toFixed(2) + 's, ';
-        tcText += 'Fast Decrease: ' + curFastDec + 's → ' + sugFastDecrease.toFixed(2) + 's, ';
-        tcText += 'Slow Increase: ' + curSlowInc + 's → ' + sugSlowIncrease.toFixed(2) + 's, ';
-        tcText += 'Slow Decrease: ' + curSlowDec + 's → ' + sugSlowDecrease.toFixed(2) + 's, ';
-        tcText += 'Fast Percentage: ' + curFastPct + '% → ' + sugFastPct + '%. ';
-        tcText += 'Apply changes incrementally and re-log to verify.';
-
-        recs.push({ severity: 'info', text: tcText });
-    }
-
-    // Detect timing mismatch pattern: both lean spikes AND rich overshoot are significant
-    // This indicates the compensation magnitude may be correct but the timing (time constants)
-    // don't match the actual fuel film dynamics. Increasing scale/table values makes BOTH worse.
-    if (tipIns.length > 3) {
-        var avgLeanSpike = tipIns.reduce(function(a, e) { return a + e.leanSpike; }, 0) / tipIns.length;
-        if (avgLeanSpike > 3 && avgRichTipIn > 3) {
-            // Both directions are off — this is a timing problem, not a magnitude problem
-            var severity = (avgLeanSpike > 8 && avgRichTipIn > 8) ? 'critical' : 'warning';
-            recs.unshift({
-                severity: severity,
-                text: 'TIMING MISMATCH DETECTED: Both lean spikes (' + avgLeanSpike.toFixed(1) + '%) AND rich overshoot (' + avgRichTipIn.toFixed(1) + '%) are present on tip-in events. This pattern means the fuel film compensation is arriving too late and then hanging too long — increasing the table values or scale will make BOTH directions worse. Do NOT increase the primary table or scale. Instead: (1) Reduce the Slow Increase Time Constant so compensation arrives sooner and catches the lean spike earlier. (2) Reduce the Slow Decrease Time Constant so compensation is removed faster, preventing the rich overshoot. (3) For DI engines, time constants should be very short (0.1–0.2s) since fuel film effects are much faster than port injection.'
-            });
+        var cur = { fastInc: tc.fastIncrease || 0.2, fastDec: tc.fastDecrease || 0.3, slowInc: tc.slowIncrease || 0.5,
+                    slowDec: tc.slowDecrease || 0.3, fastPct: tc.fastPct || 30 };
+        var sug = Object.assign({}, cur);
+        if (mismatch) { sug.fastInc = cur.fastInc * 0.7; sug.slowInc = cur.slowInc * 0.7; sug.fastPct = Math.min(60, cur.fastPct + 10); }
+        if (avgLean > 3 && avgRecovery > 800) sug.slowInc = Math.min(sug.slowInc, cur.slowInc * 0.5);
+        else if (avgLean > 3 && avgRecovery > 500) sug.slowInc = Math.min(sug.slowInc, cur.slowInc * 0.7);
+        if (tipOuts.length && tipOutRich > 5) { sug.fastDec = cur.fastDec * 0.7; sug.slowDec = cur.slowDec * 0.7; }
+        else if (tipOuts.length && tipOutLean > 5) { sug.fastDec = cur.fastDec * 1.3; sug.slowDec = cur.slowDec * 1.3; }
+        var names = { fastInc: 'Fast Increase', fastDec: 'Fast Decrease', slowInc: 'Slow Increase', slowDec: 'Slow Decrease', fastPct: 'Fast Percentage' };
+        var changes = Object.keys(names).filter(function (k) { return Math.abs(sug[k] - cur[k]) > 1e-9; }).map(function (k) {
+            return k === 'fastPct' ? names[k] + ': ' + cur[k] + '% → ' + sug[k] + '%'
+                : names[k] + ': ' + cur[k] + 's → ' + Math.max(0.02, sug[k]).toFixed(2) + 's';
+        });
+        if (changes.length) {
+            recs.push({ severity: 'info', text: 'Suggested time constants (current → suggested): ' + changes.join(', ') +
+                '. Others unchanged. Apply changes in small steps and re-log to verify.' });
         }
     }
 
-    // Good state
     if (recs.length === 0) {
-        recs.push({
-            severity: 'good',
-            text: 'Transient fueling looks well-calibrated. Lean spikes and rich overshoot are within acceptable limits across all MAP zones.'
-        });
+        recs.push({ severity: 'good',
+            text: 'Transient fueling looks well-calibrated. Lean spikes and rich overshoot are within acceptable limits across all MAP zones.' });
     }
-
     return recs;
 }
 
@@ -432,6 +430,8 @@ function analyzeTransientsLd(buffer, settings) {
     var rpmIdx = colLower.indexOf('engine speed');
     var tpsIdx = colLower.indexOf('throttle position');
     var coolIdx = colLower.indexOf('coolant temperature');
+    var overrunIdx = colLower.indexOf('engine overrun state');
+    var cutIdx = colLower.indexOf('fuel output cut count');
 
     if (timeIdx === -1) throw new Error('.ld file: "Time" channel not found.');
     if (mapIdx === -1) throw new Error('.ld file: "Inlet Manifold Pressure" channel not found.');
@@ -462,6 +462,8 @@ function analyzeTransientsLd(buffer, settings) {
             rpm: rpmIdx >= 0 ? row[rpmIdx] : NaN,
             tps: tpsIdx >= 0 ? row[tpsIdx] : NaN,
             coolant: coolIdx >= 0 ? row[coolIdx] : NaN,
+            overrunState: overrunIdx >= 0 ? row[overrunIdx] : NaN,
+            fuelCutCount: cutIdx >= 0 ? row[cutIdx] : NaN,
         });
     }
 
@@ -478,8 +480,9 @@ function analyzeTransientsLd(buffer, settings) {
 function analyzeTransientSamples(samples, settings) {
 
     // Filter: only warm engine
+    var minCoolant = typeof settings.minCoolant === 'number' && !isNaN(settings.minCoolant) ? settings.minCoolant : 60;
     var warmSamples = samples.filter(function(s) {
-        return isNaN(s.coolant) || s.coolant > 60;
+        return isNaN(s.coolant) || s.coolant > minCoolant;
     });
 
     var events = detectTransientEvents(warmSamples, settings);
@@ -492,6 +495,7 @@ function analyzeTransientSamples(samples, settings) {
         totalSamples: samples.length,
         warmSamples: warmSamples.length,
         totalEvents: events.length,
+        skippedFuelCut: events.skippedFuelCut || 0,
         tipInCount: tipIns.length,
         tipOutCount: tipOuts.length,
         avgLeanSpike: tipIns.length > 0 ? tipIns.reduce(function(a, e) { return a + e.leanSpike; }, 0) / tipIns.length : 0,

@@ -183,7 +183,7 @@
     <p>Discards all samples from the first N seconds of the log. This filters out cold-start enrichment and initial sensor stabilization.</p>
 
     <h3>Min Change Amount (default: 0 = disabled)</h3>
-    <p>If a cell's average correction is smaller than this absolute value, it gets zeroed out. Useful for ignoring noise — if you set this to 1.0, any cell recommending less than ±1% change will be left alone.</p>
+    <p>If a cell's average correction is smaller than this absolute value, it gets zeroed out. Useful for ignoring noise — if you set this to 1.0, any cell recommending less than ±1% change will be left alone. It is applied last, after scaling and smoothing.</p>
     <div class="example-box">
       <p><strong>Example:</strong> Set to <code>2.0</code> — a cell with a correction of +1.5% becomes 0 (no change). A cell with +3.2% is kept as-is.</p>
     </div>
@@ -192,13 +192,20 @@
     <h2 id="correction-logic">How Corrections Work</h2>
     <p>For each valid log sample, the tool computes:</p>
     <div class="example-box">
-      <p><code>correction = ((lambda_target / lambda_actual) - 1) × 100 + CL_trim_avg</code></p>
+      <p><code>correction = ((1 + CL_trim_avg / 100) × (lambda_actual / lambda_target) − 1) × 100</code></p>
+      <p>≈ lambda error % + closed-loop trim %</p>
     </div>
     <ul>
-      <li><strong>Positive correction</strong> → engine is running lean → VE table needs to be increased (add fuel)</li>
-      <li><strong>Negative correction</strong> → engine is running rich → VE table needs to be decreased (remove fuel)</li>
+      <li><strong>Positive correction</strong> → engine is running lean (lambda above target) or closed loop is adding fuel → VE table needs to be increased (add fuel)</li>
+      <li><strong>Negative correction</strong> → engine is running rich or closed loop is removing fuel → VE table needs to be decreased (remove fuel)</li>
     </ul>
-    <p>Each sample is binned to the nearest RPM/MAP cell in your VE table. The final correction for each cell is the average of all samples that landed in it.</p>
+    <div class="example-box">
+      <p><strong>Example:</strong> target λ 0.865, measured λ 0.850 (1.7% rich) while closed loop is trimming −8%:
+        (0.92 × 0.850 / 0.865 − 1) × 100 = <strong>−9.6%</strong>. Both signals say the table has too much fuel.</p>
+    </div>
+    <p>A sample between breakpoints is shared between the surrounding cells in proportion to how close it is — the same
+      interpolation M1 uses to read the table — so a sample halfway between two RPM sites counts half in each. The final
+      correction for each cell is the weighted average of its samples, and its hit count is the total weight.</p>
 
     <div class="warning">
       <strong>Important:</strong> The closed-loop trim (CL_trim) is included in the calculation. This accounts for corrections the ECU has already made, giving you the <em>total</em> error including what closed-loop is compensating for.
@@ -248,7 +255,7 @@
     <!-- Smoothing -->
     <h2 id="smoothing">Correction Smoothing</h2>
     <p>Default: <code>0</code> (disabled).</p>
-    <p>Applies a Gaussian spatial smoothing filter to the correction grid after all other processing is complete. Each cell's correction is blended with its neighbors using distance-weighted averaging. This produces a smoother correction map that avoids abrupt cell-to-cell jumps.</p>
+    <p>Applies a Gaussian spatial smoothing filter to the correction grid after scaling and before the Min Change Amount cut-off. Each cell's correction is blended with its neighbors using distance-weighted averaging. This produces a smoother correction map that avoids abrupt cell-to-cell jumps.</p>
     <p>The value controls the Gaussian sigma (blur radius):</p>
     <ul>
       <li><strong>0</strong> — disabled (no smoothing)</li>
@@ -267,6 +274,25 @@
     </div>
 
     <!-- Decel/Overrun Filter -->
+    <h2 id="fuel-cut">Overrun, Fuel Cut and Implausible Lambda</h2>
+    <p>Always on. When the log contains <strong>Engine Overrun State</strong> or <strong>Fuel Output Cut Count</strong>, samples
+      during overrun or a fuel cut — and for 1 second afterwards, while the sensor still reads the cut — are skipped. Any sample
+      whose measured lambda is outside 0.6–1.4 is also skipped: those are free-air, fuel-cut or sensor readings, not
+      combustion, and a single one can swing a cell by tens of percent. Both counts appear in the results summary.</p>
+
+    <h2 id="steady-state">Steady-State Window</h2>
+    <p>Default: <code>300 ms</code> (0 = disabled).</p>
+    <p>Uses only samples where, over the preceding window, MAP stayed within 10 kPa and throttle within 10%. During faster
+      MAP or throttle changes the mixture is set by transient (wall-wetting) fuelling, which belongs to the
+      <a href="../transient-fuel/index.html">Transient Fuel Analyzer</a>, not the VE table. Engine speed is not limited: a
+      full-throttle pull sweeps RPM quickly but fuels steadily.</p>
+
+    <h2 id="lambda-delay">Lambda Delay</h2>
+    <p>Default: <code>0 ms</code>.</p>
+    <p>Exhaust takes time to reach the sensor, so the lambda logged at a moment reflects fuelling slightly earlier. With a delay
+      set, each sample is paired with the lambda reading that many milliseconds later. Typical values are 50–200 ms (longer at
+      low RPM and with sensors far down the exhaust); the steady-state filter already removes most of the error this causes.</p>
+
     <h2 id="decel">Decel/Overrun Filter</h2>
     <p>Default: <code>Enabled</code>.</p>
     <p>Automatically rejects samples captured during deceleration and engine overrun conditions. During decel, the throttle is closed, MAP is falling rapidly, and the lambda reading is unreliable due to:</p>

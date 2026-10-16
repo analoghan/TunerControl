@@ -106,7 +106,7 @@ function createAccumulatorGrid(mapBreakpoints, rpmBreakpoints) {
     for (let mapIdx = 0; mapIdx < mapBreakpoints.length; mapIdx++) {
         const row = [];
         for (let rpmIdx = 0; rpmIdx < rpmBreakpoints.length; rpmIdx++) {
-            row.push({ count: 0, correctionSum: 0, clTrimSum: 0 });
+            row.push({ count: 0, correctionSum: 0, clTrimSum: 0, lambdaErrSum: 0 });
         }
         cells.push(row);
     }
@@ -116,18 +116,21 @@ function createAccumulatorGrid(mapBreakpoints, rpmBreakpoints) {
 /**
  * Accumulates one valid sample into the grid cell at [mapIdx][rpmIdx].
  *
- * Increments the cell's count by 1 and adds `correction` to its correctionSum.
+ * Adds `weight` (default 1) to the cell's count and the weighted correction to its correctionSum. A sample
+ * between breakpoints is shared between neighbouring cells by interpolation weight (see axisWeights).
  *
  * @param {{ cells: Array<Array<{count: number, correctionSum: number}>> }} grid
  * @param {number} mapIdx    — row index
  * @param {number} rpmIdx    — column index
  * @param {number} correction — per-sample correction value to accumulate
  */
-function accumulateSample(grid, mapIdx, rpmIdx, correction, clTrimAvg) {
+function accumulateSample(grid, mapIdx, rpmIdx, correction, clTrimAvg, weight, lambdaError) {
+    const w = weight === undefined ? 1 : weight;
     const cell = grid.cells[mapIdx][rpmIdx];
-    cell.count += 1;
-    cell.correctionSum += correction;
-    cell.clTrimSum += (clTrimAvg || 0);
+    cell.count += w;
+    cell.correctionSum += correction * w;
+    cell.clTrimSum += (clTrimAvg || 0) * w;
+    cell.lambdaErrSum += (lambdaError || 0) * w;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +288,8 @@ const CHANNEL_NAMES = {
     CL_TRIM_B2:    'fuel closed loop control bank 2 trim',
     COOLANT_TEMP:  'coolant temperature',
     THROTTLE_POS:  'throttle position',
+    OVERRUN_STATE: 'engine overrun state',      // optional: non-zero during overrun fuel cut
+    FUEL_CUT_COUNT:'fuel output cut count',     // optional: counts fuel cuts (changes when one happens; wraps at 255)
 };
 
 /**
@@ -331,6 +336,8 @@ function resolveChannels(columnNames) {
     const clTrimB2Idx     = find(CHANNEL_NAMES.CL_TRIM_B2);
     const coolantTempIdx  = find(CHANNEL_NAMES.COOLANT_TEMP);
     const throttlePosIdx  = find(CHANNEL_NAMES.THROTTLE_POS);
+    const overrunStateIdx = find(CHANNEL_NAMES.OVERRUN_STATE);
+    const fuelCutCountIdx = find(CHANNEL_NAMES.FUEL_CUT_COUNT);
 
     // Lambda_Avg is only used when BOTH bank channels are absent.
     const hasBankLambda = lambdaB1Idx !== -1 || lambdaB2Idx !== -1;
@@ -394,6 +401,8 @@ function resolveChannels(columnNames) {
         clTrimB2Idx,
         coolantTempIdx,
         throttlePosIdx,
+        overrunStateIdx,
+        fuelCutCountIdx,
         warnings,
     };
 }
@@ -482,6 +491,8 @@ function parseLog(text, onProgress) {
         clTrimB2Idx,
         coolantTempIdx,
         throttlePosIdx,
+        overrunStateIdx,
+        fuelCutCountIdx,
     } = channelIndices;
 
     // --- Step 8 & 9: Process data lines in batches ---
@@ -532,6 +543,8 @@ function parseLog(text, onProgress) {
                 clTrimB2:     readNum(fields, clTrimB2Idx),
                 coolantTemp:  readNum(fields, coolantTempIdx),
                 throttlePos:  readNum(fields, throttlePosIdx),
+                overrunState: readNum(fields, overrunStateIdx),
+                fuelCutCount: readNum(fields, fuelCutCountIdx),
             };
 
             samples.push(sample);
@@ -568,8 +581,9 @@ function parseLog(text, onProgress) {
  *   lambdaActual must be non-NaN and non-zero.
  *   lambdaTarget must be non-NaN and non-zero.
  *
- * Correction formula (Requirement 6.7):
- *   ((lambdaTarget / lambdaActual) - 1) * 100 + clTrimAvg
+ * Correction formula (% change to the VE table, positive = add fuel):
+ *   ((1 + clTrimAvg / 100) * (lambdaActual / lambdaTarget) - 1) * 100
+ *   ≈ lambda error % + closed-loop trim %.  lambdaError = (lambdaActual / lambdaTarget - 1) * 100.
  *
  * @param {{
  *   lambdaB1:     number,
@@ -630,11 +644,14 @@ function computeSampleCorrection(sample) {
     const isValid = lambdaActualValid && lambdaTargetValid;
 
     // --- Correction formula ---
+    // Fuel needed scales with actual / target lambda (lean = lambda above target = more fuel). The closed-loop
+    // trim was already applied to the fuel that produced this lambda, so the base table needs both.
+    const lambdaError = isValid ? ((lambdaActual / lambdaTarget) - 1) * 100 : NaN;
     const correction = isValid
-        ? ((lambdaTarget / lambdaActual) - 1) * 100 + clTrimAvg
+        ? ((1 + clTrimAvg / 100) * (lambdaActual / lambdaTarget) - 1) * 100
         : NaN;
 
-    return { lambdaActual, clTrimAvg, correction, isValid };
+    return { lambdaActual, clTrimAvg, lambdaError, correction, isValid };
 }
 
 // ---------------------------------------------------------------------------
@@ -942,7 +959,8 @@ function parseLdLog(buffer, onProgress) {
     const channelIndices = resolveChannels(columnNames);
     const channelWarnings = channelIndices.warnings;
 
-    const { rpmIdx, mapIdx, lambdaB1Idx, lambdaB2Idx, lambdaAvgIdx, lambdaTargetIdx, clTrimB1Idx, clTrimB2Idx, coolantTempIdx, throttlePosIdx } = channelIndices;
+    const { rpmIdx, mapIdx, lambdaB1Idx, lambdaB2Idx, lambdaAvgIdx, lambdaTargetIdx, clTrimB1Idx, clTrimB2Idx, coolantTempIdx, throttlePosIdx,
+            overrunStateIdx, fuelCutCountIdx } = channelIndices;
 
     // Build samples from channel data arrays
     // channelData[0] is the Time array (generated during parseLdFile)
@@ -965,6 +983,8 @@ function parseLdLog(buffer, onProgress) {
                 clTrimB2:     clTrimB2Idx !== -1 ? channelData[clTrimB2Idx][i] : NaN,
                 coolantTemp:  coolantTempIdx !== -1 ? channelData[coolantTempIdx][i] : NaN,
                 throttlePos:  throttlePosIdx !== -1 ? channelData[throttlePosIdx][i] : NaN,
+                overrunState: overrunStateIdx !== -1 ? channelData[overrunStateIdx][i] : NaN,
+                fuelCutCount: fuelCutCountIdx !== -1 ? channelData[fuelCutCountIdx][i] : NaN,
             };
             samples.push(sample);
         }
@@ -975,6 +995,231 @@ function parseLdLog(buffer, onProgress) {
     }
 
     return { samples, channelWarnings };
+}
+
+// ---------------------------------------------------------------------------
+// VE analysis pipeline
+// ---------------------------------------------------------------------------
+
+/** Plausible measured lambda; readings outside this (free air, fuel cut, sensor faults) are ignored. */
+const LAMBDA_MIN_VALID = 0.6;
+const LAMBDA_MAX_VALID = 1.4;
+/** Seconds after overrun or a fuel cut during which lambda still reads the cut (sensor transport delay). */
+const FUEL_CUT_HOLDOFF_S = 1.0;
+/**
+ * Steady-state limits over the steady-state window: total MAP and throttle variation allowed. RPM is not
+ * limited — a full-throttle pull sweeps RPM quickly but fuels steadily; MAP and throttle changes are what
+ * bring in transient (wall-wetting) fuelling.
+ */
+const STEADY_MAP_SPAN_KPA = 10;
+const STEADY_TPS_SPAN = 10;
+
+/**
+ * Prepares an axis for interpolation weights: breakpoints in ascending order with their original indices
+ * (M1 exports MAP highest first).
+ */
+function makeAxis(breakpoints) {
+    const order = breakpoints.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]);
+    return { values: order.map(o => o[0]), index: order.map(o => o[1]) };
+}
+
+/**
+ * Interpolation weights of a value on an axis, the way M1 reads a table: the two surrounding breakpoints
+ * share the sample in proportion to how close it is (outside the axis the end breakpoint takes it all).
+ * Returns [[breakpointIndex, weight], ...] or null for NaN.
+ */
+function axisWeights(value, axis) {
+    if (Number.isNaN(value)) return null;
+    const v = axis.values, n = v.length;
+    if (n === 1 || value <= v[0]) return [[axis.index[0], 1]];
+    if (value >= v[n - 1]) return [[axis.index[n - 1], 1]];
+    let k = 0;
+    while (k < n - 2 && value >= v[k + 1]) k++;
+    const f = (value - v[k]) / (v[k + 1] - v[k]);
+    const out = [];
+    if (f < 1) out.push([axis.index[k], 1 - f]);
+    if (f > 0) out.push([axis.index[k + 1], f]);
+    return out;
+}
+
+/**
+ * Runs the VE correction analysis on parsed log samples.
+ *
+ * settings: { hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev,
+ *             maxTpsRate, smoothing, minMapForCorrection, decelFilterEnabled, steadyWindowMs, lambdaDelayMs }
+ * Returns { correctionGrid, newValuesGrid, totalSamples, cellsAboveThreshold, filteredBy… }.
+ */
+function analyzeVE(samples, veTable, settings) {
+    settings = settings || {};
+    const num = (v, ok, dflt) => (typeof v === 'number' && ok(v) ? v : dflt);
+    const threshold = num(settings.hitThreshold, v => v >= 1, HIT_THRESHOLD);
+    const coolantThreshold = num(settings.minCoolantTemp, () => true, 55);
+    const runTimeThreshold = num(settings.minRunTime, () => true, 60);
+    const changeThreshold = num(settings.minChangeAmount, v => v >= 0, 0);
+    const scalePct = num(settings.scalingFactor, v => v > 0 && v <= 100, 100) / 100;
+    const outlierSigma = num(settings.outlierStddev, v => v > 0, 0);
+    const tpsRateLimit = num(settings.maxTpsRate, v => v > 0, 0);
+    const smoothingSigma = num(settings.smoothing, v => v > 0, 0);
+    const minMapFilter = num(settings.minMapForCorrection, v => v > 0, 0);
+    const decelFilter = settings.decelFilterEnabled !== false;
+    const steadyWindow = num(settings.steadyWindowMs, v => v >= 0, 300) / 1000;
+    const lambdaDelay = num(settings.lambdaDelayMs, v => v >= 0, 0) / 1000;
+
+    const n = samples.length;
+    const filtered = { time: 0, coolant: 0, fuelCut: 0, decel: 0, tps: 0, steady: 0, minMap: 0, lambda: 0, outlier: 0 };
+
+    // Measured lambda lags the fuelling that caused it: pair each sample with lambda read lambdaDelay later.
+    const lambdaAt = new Array(n);
+    for (let i = 0, j = 0; i < n; i++) {
+        if (lambdaDelay > 0) {
+            if (j < i) j = i;
+            while (j < n - 1 && samples[j].time < samples[i].time + lambdaDelay) j++;
+            lambdaAt[i] = samples[j].time >= samples[i].time + lambdaDelay - 1e-9 ? samples[j] : null;
+        } else {
+            lambdaAt[i] = samples[i];
+        }
+    }
+
+    // Time of the most recent overrun / fuel cut: Engine Overrun State ≠ 0, or Fuel Output Cut Count changing
+    // (an 8-bit counter, so it can wrap; M1 logs it slowly, so overrun state and the lambda check do most of the work).
+    const lastCut = new Float64Array(n).fill(-Infinity);
+    for (let i = 0; i < n; i++) {
+        const s = samples[i], prev = i > 0 ? samples[i - 1] : null;
+        const cut = (!Number.isNaN(s.overrunState) && s.overrunState !== 0) ||
+            (prev && !Number.isNaN(s.fuelCutCount) && !Number.isNaN(prev.fuelCutCount) && s.fuelCutCount !== prev.fuelCutCount);
+        lastCut[i] = cut ? s.time : (i > 0 ? lastCut[i - 1] : -Infinity);
+    }
+
+    const mapAxis = makeAxis(veTable.mapBreakpoints), rpmAxis = makeAxis(veTable.rpmBreakpoints);
+    const grid = createAccumulatorGrid(veTable.mapBreakpoints, veTable.rpmBreakpoints);
+    const binned = [];   // { mapIdx, rpmIdx, w, correction, clTrimAvg, lambdaError }
+
+    for (let i = 0; i < n; i++) {
+        const s = samples[i], prev = i > 0 ? samples[i - 1] : null;
+        const dt = prev ? s.time - prev.time : 0;
+
+        if (!Number.isNaN(s.time) && s.time < runTimeThreshold) { filtered.time++; continue; }
+        if (!Number.isNaN(s.coolantTemp) && s.coolantTemp < coolantThreshold) { filtered.coolant++; continue; }
+        if (s.time - lastCut[i] < FUEL_CUT_HOLDOFF_S) { filtered.fuelCut++; continue; }
+
+        if (decelFilter) {
+            const mapRate = dt > 0 && !Number.isNaN(s.map - prev.map) ? (s.map - prev.map) / dt : 0;
+            const tps = s.throttlePos;
+            if (!Number.isNaN(tps) && ((tps < 1 && mapRate < -50) || (tps < 0.5 && !Number.isNaN(s.map) && s.map < 40))) {
+                filtered.decel++; continue;
+            }
+        }
+        if (tpsRateLimit > 0 && dt > 0 && !Number.isNaN(s.throttlePos - prev.throttlePos) &&
+            Math.abs((s.throttlePos - prev.throttlePos) / dt) > tpsRateLimit) { filtered.tps++; continue; }
+
+        // Steady state: MAP and RPM roughly constant over the preceding window.
+        if (steadyWindow > 0) {
+            let minMap = s.map, maxMap = s.map, minTps = s.throttlePos, maxTps = s.throttlePos, k = i - 1;
+            for (; k >= 0 && s.time - samples[k].time <= steadyWindow; k--) {
+                const o = samples[k];
+                if (o.map < minMap) minMap = o.map;
+                if (o.map > maxMap) maxMap = o.map;
+                if (o.throttlePos < minTps) minTps = o.throttlePos;
+                if (o.throttlePos > maxTps) maxTps = o.throttlePos;
+            }
+            if (s.time - samples[0].time < steadyWindow) { filtered.steady++; continue; }   // not enough history yet
+            if (maxMap - minMap > STEADY_MAP_SPAN_KPA || maxTps - minTps > STEADY_TPS_SPAN) { filtered.steady++; continue; }
+        }
+
+        if (minMapFilter > 0 && !Number.isNaN(s.map) && s.map < minMapFilter) { filtered.minMap++; continue; }
+
+        const lam = lambdaAt[i];
+        if (!lam) { filtered.lambda++; continue; }
+        const result = computeSampleCorrection(Object.assign({}, s, {
+            lambdaB1: lam.lambdaB1, lambdaB2: lam.lambdaB2, lambdaAvg: lam.lambdaAvg
+        }));
+        if (!result.isValid) continue;
+        if (result.lambdaActual < LAMBDA_MIN_VALID || result.lambdaActual > LAMBDA_MAX_VALID) { filtered.lambda++; continue; }
+
+        const mw = axisWeights(s.map, mapAxis), rw = axisWeights(s.rpm, rpmAxis);
+        if (!mw || !rw) continue;
+        mw.forEach(([mapIdx, wm]) => rw.forEach(([rpmIdx, wr]) => {
+            const w = wm * wr;
+            accumulateSample(grid, mapIdx, rpmIdx, result.correction, result.clTrimAvg, w, result.lambdaError);
+            binned.push({ mapIdx, rpmIdx, w, correction: result.correction, clTrimAvg: result.clTrimAvg, lambdaError: result.lambdaError });
+        }));
+    }
+
+    // Weighted mean and standard deviation per cell.
+    function cellStats(g, entries) {
+        const means = g.cells.map(row => row.map(c => (c.count > 0 ? c.correctionSum / c.count : 0)));
+        const varSum = g.cells.map(row => row.map(() => 0));
+        entries.forEach(e => { const d = e.correction - means[e.mapIdx][e.rpmIdx]; varSum[e.mapIdx][e.rpmIdx] += e.w * d * d; });
+        const sd = g.cells.map((row, m) => row.map((c, r) => (c.count > 0 ? Math.sqrt(varSum[m][r] / c.count) : 0)));
+        return { means, sd };
+    }
+
+    // Outlier filtering (optional): drop contributions beyond N σ of their cell's mean.
+    let finalGrid = grid, kept = binned;
+    if (outlierSigma > 0 && binned.length) {
+        const st = cellStats(grid, binned);
+        finalGrid = createAccumulatorGrid(veTable.mapBreakpoints, veTable.rpmBreakpoints);
+        kept = [];
+        let removedWeight = 0;
+        binned.forEach(e => {
+            const sd = st.sd[e.mapIdx][e.rpmIdx];
+            if (sd > 0 && Math.abs(e.correction - st.means[e.mapIdx][e.rpmIdx]) > outlierSigma * sd) { removedWeight += e.w; return; }
+            accumulateSample(finalGrid, e.mapIdx, e.rpmIdx, e.correction, e.clTrimAvg, e.w, e.lambdaError);
+            kept.push(e);
+        });
+        filtered.outlier = Math.round(removedWeight);
+    }
+    const final = cellStats(finalGrid, kept);
+
+    // Per-cell results: scaled mean correction for cells with enough (weighted) samples.
+    let cellsAboveThreshold = 0;
+    const finalCells = finalGrid.cells.map((row, m) => row.map((cell, r) => {
+        if (cell.count > threshold) {
+            cellsAboveThreshold++;
+            return { count: Math.round(cell.count), correction: (cell.correctionSum / cell.count) * scalePct,
+                     stddev: final.sd[m][r], clTrimAvg: cell.clTrimSum / cell.count, lambdaError: cell.lambdaErrSum / cell.count };
+        }
+        return { count: Math.round(cell.count), correction: null, stddev: null, clTrimAvg: null, lambdaError: null };
+    }));
+
+    // Smoothing (optional) across cells that have corrections, before the minimum-change cut-off.
+    if (smoothingSigma > 0 && cellsAboveThreshold > 0) {
+        const radius = Math.ceil(smoothingSigma * 2), rows = finalCells.length, cols = finalCells[0].length;
+        const smoothed = finalCells.map((row, m) => row.map((c, r) => {
+            if (c.correction === null) return null;
+            let sum = 0, wsum = 0;
+            for (let dy = -radius; dy <= radius; dy++) {
+                for (let dx = -radius; dx <= radius; dx++) {
+                    const nm = m + dy, nr = r + dx;
+                    if (nm < 0 || nm >= rows || nr < 0 || nr >= cols || finalCells[nm][nr].correction === null) continue;
+                    const w = Math.exp(-(dx * dx + dy * dy) / (2 * smoothingSigma * smoothingSigma));
+                    sum += finalCells[nm][nr].correction * w; wsum += w;
+                }
+            }
+            return wsum > 0 ? sum / wsum : c.correction;
+        }));
+        finalCells.forEach((row, m) => row.forEach((c, r) => { if (smoothed[m][r] !== null) c.correction = smoothed[m][r]; }));
+    }
+    if (changeThreshold > 0) {
+        finalCells.forEach(row => row.forEach(c => {
+            if (c.correction !== null && Math.abs(c.correction) < changeThreshold) c.correction = 0;
+        }));
+    }
+
+    const totalSamples = Math.round(kept.reduce((s, e) => s + e.w, 0));
+    const newValuesGrid = veTable.mapBreakpoints.map((_, m) => veTable.rpmBreakpoints.map((__, r) => {
+        const c = finalCells[m][r], ve = veTable.values[m][r];
+        return c.correction !== null && c.correction !== 0 ? ve * (1 + c.correction / 100) : ve;
+    }));
+
+    return {
+        correctionGrid: { mapBreakpoints: veTable.mapBreakpoints, rpmBreakpoints: veTable.rpmBreakpoints, cells: finalCells,
+                          totalSamples, cellsAboveThreshold },
+        newValuesGrid, totalSamples, cellsAboveThreshold,
+        filteredByTime: filtered.time, filteredByCoolant: filtered.coolant, filteredByFuelCut: filtered.fuelCut,
+        filteredByDecel: filtered.decel, filteredByTps: filtered.tps, filteredBySteady: filtered.steady,
+        filteredByMinMap: filtered.minMap, filteredByLambda: filtered.lambda, filteredByOutlier: filtered.outlier,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -1000,18 +1245,7 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
         if (!msg || (msg.type !== 'process' && msg.type !== 'process_ld')) return;
 
         try {
-            const { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing, minMapForCorrection, decelFilterEnabled } = msg;
-            const threshold = (typeof hitThreshold === 'number' && hitThreshold >= 1) ? hitThreshold : HIT_THRESHOLD;
-            const coolantThreshold = (typeof minCoolantTemp === 'number') ? minCoolantTemp : 55;
-            const runTimeThreshold = (typeof minRunTime === 'number') ? minRunTime : 60;
-            const changeThreshold = (typeof minChangeAmount === 'number' && minChangeAmount >= 0) ? minChangeAmount : 0;
-            const scalePct = (typeof scalingFactor === 'number' && scalingFactor > 0 && scalingFactor <= 100) ? scalingFactor / 100 : 1.0;
-            const outlierSigma = (typeof outlierStddev === 'number' && outlierStddev > 0) ? outlierStddev : 0;
-            const tpsRateLimit = (typeof maxTpsRate === 'number' && maxTpsRate > 0) ? maxTpsRate : 0;
-            const smoothingSigma = (typeof smoothing === 'number' && smoothing > 0) ? smoothing : 0;
-            const minMapFilter = (typeof minMapForCorrection === 'number' && minMapForCorrection > 0) ? minMapForCorrection : 0;
-            const decelFilter = (decelFilterEnabled !== false); // enabled by default
-
+            const { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing, minMapForCorrection, decelFilterEnabled, steadyWindowMs, lambdaDelayMs } = msg;
             // 1. Parse VE table
             const veTable = parseVETable(veText);
 
@@ -1038,401 +1272,18 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
                 self.postMessage({ type: 'warning', message: channelWarnings[i] });
             }
 
-            // 4. Create accumulator grid
-            const grid = createAccumulatorGrid(veTable.mapBreakpoints, veTable.rpmBreakpoints);
-
-            // 4b. Compute TPS rate of change for each sample (if TPS channel available and filter enabled)
-            let tpsRates = null;
-            if (tpsRateLimit > 0) {
-                tpsRates = new Float64Array(samples.length);
-                tpsRates[0] = 0; // First sample has no previous to compare
-                for (let i = 1; i < samples.length; i++) {
-                    const dt = samples[i].time - samples[i - 1].time;
-                    const dTps = samples[i].throttlePos - samples[i - 1].throttlePos;
-                    if (dt > 0 && !Number.isNaN(dTps)) {
-                        tpsRates[i] = Math.abs(dTps / dt);
-                    } else {
-                        tpsRates[i] = 0;
-                    }
-                }
-            }
-
-            // 4c. Compute MAP rate of change for decel detection
-            let mapRates = null;
-            if (decelFilter) {
-                mapRates = new Float64Array(samples.length);
-                mapRates[0] = 0;
-                for (let i = 1; i < samples.length; i++) {
-                    const dt = samples[i].time - samples[i - 1].time;
-                    const dMap = samples[i].map - samples[i - 1].map;
-                    if (dt > 0 && !Number.isNaN(dMap)) {
-                        mapRates[i] = dMap / dt; // negative = MAP falling = decel
-                    } else {
-                        mapRates[i] = 0;
-                    }
-                }
-            }
-
-            // 5. First pass: compute corrections, apply basic filters, bin into grid
-            //    Also store per-sample binning info for potential second pass (outlier filtering)
-            let totalSamples = 0;
-            let filteredByTime = 0;
-            let filteredByCoolant = 0;
-            let filteredByTps = 0;
-            let filteredByOutlier = 0;
-            let filteredByDecel = 0;
-            let filteredByMinMap = 0;
-
-            // Store binned samples for outlier filtering second pass
-            const binnedSamples = []; // { mapIdx, rpmIdx, correction }
-
-            for (let i = 0; i < samples.length; i++) {
-                const sample = samples[i];
-
-                // Filter: discard samples before minimum run time
-                if (!Number.isNaN(sample.time) && sample.time < runTimeThreshold) {
-                    filteredByTime++;
-                    continue;
-                }
-
-                // Filter: discard samples below minimum coolant temperature
-                if (!Number.isNaN(sample.coolantTemp) && sample.coolantTemp < coolantThreshold) {
-                    filteredByCoolant++;
-                    continue;
-                }
-
-                // Filter: discard samples where TPS is changing too fast
-                if (tpsRateLimit > 0 && tpsRates !== null && tpsRates[i] > tpsRateLimit) {
-                    filteredByTps++;
-                    continue;
-                }
-
-                // Filter: decel detection — discard samples where TPS is near-zero AND MAP is falling
-                // This catches overrun/decel conditions where lambda is unreliable
-                if (decelFilter && mapRates !== null) {
-                    const tps = sample.throttlePos;
-                    const mapRate = mapRates[i];
-                    // TPS < 1% and MAP falling faster than -50 kPa/s = decel/overrun
-                    if (!Number.isNaN(tps) && tps < 1 && mapRate < -50) {
-                        filteredByDecel++;
-                        continue;
-                    }
-                    // Also catch: TPS = 0 at low MAP (closed throttle coasting)
-                    if (!Number.isNaN(tps) && tps < 0.5 && !Number.isNaN(sample.map) && sample.map < 40) {
-                        filteredByDecel++;
-                        continue;
-                    }
-                }
-
-                // Filter: minimum MAP for corrections
-                if (minMapFilter > 0 && !Number.isNaN(sample.map) && sample.map < minMapFilter) {
-                    filteredByMinMap++;
-                    continue;
-                }
-
-                const result = computeSampleCorrection(sample);
-
-                // Skip invalid samples
-                if (!result.isValid) continue;
-
-                // Find nearest breakpoints for RPM and MAP
-                const rpmIdx = findNearestBreakpoint(sample.rpm, veTable.rpmBreakpoints);
-                const mapIdx = findNearestBreakpoint(sample.map, veTable.mapBreakpoints);
-
-                // Skip if either breakpoint lookup fails
-                if (rpmIdx === -1 || mapIdx === -1) continue;
-
-                // Accumulate the sample (first pass)
-                accumulateSample(grid, mapIdx, rpmIdx, result.correction, result.clTrimAvg);
-                binnedSamples.push({ mapIdx, rpmIdx, correction: result.correction, clTrimAvg: result.clTrimAvg });
-                totalSamples++;
-            }
-
-            // 5b. Second pass: outlier filtering (if enabled)
-            //     Recompute grid after removing samples beyond N sigma from cell mean
-            let finalGrid = grid;
-            if (outlierSigma > 0 && totalSamples > 0) {
-                // Compute per-cell mean and stddev from first pass
-                const cellMeans = [];
-                const cellStddevs = [];
-                for (let mapIdx = 0; mapIdx < grid.cells.length; mapIdx++) {
-                    const meanRow = [];
-                    const stdRow = [];
-                    for (let rpmIdx = 0; rpmIdx < grid.cells[mapIdx].length; rpmIdx++) {
-                        const cell = grid.cells[mapIdx][rpmIdx];
-                        if (cell.count > 0) {
-                            meanRow.push(cell.correctionSum / cell.count);
-                        } else {
-                            meanRow.push(0);
-                        }
-                        stdRow.push(0); // Will compute below
-                    }
-                    cellMeans.push(meanRow);
-                    cellStddevs.push(stdRow);
-                }
-
-                // Compute variance per cell
-                const cellVarianceSums = [];
-                for (let mapIdx = 0; mapIdx < grid.cells.length; mapIdx++) {
-                    const row = [];
-                    for (let rpmIdx = 0; rpmIdx < grid.cells[mapIdx].length; rpmIdx++) {
-                        row.push(0);
-                    }
-                    cellVarianceSums.push(row);
-                }
-
-                for (let i = 0; i < binnedSamples.length; i++) {
-                    const s = binnedSamples[i];
-                    const diff = s.correction - cellMeans[s.mapIdx][s.rpmIdx];
-                    cellVarianceSums[s.mapIdx][s.rpmIdx] += diff * diff;
-                }
-
-                for (let mapIdx = 0; mapIdx < grid.cells.length; mapIdx++) {
-                    for (let rpmIdx = 0; rpmIdx < grid.cells[mapIdx].length; rpmIdx++) {
-                        const cell = grid.cells[mapIdx][rpmIdx];
-                        if (cell.count > 1) {
-                            cellStddevs[mapIdx][rpmIdx] = Math.sqrt(cellVarianceSums[mapIdx][rpmIdx] / cell.count);
-                        }
-                    }
-                }
-
-                // Second pass: rebuild grid excluding outliers
-                finalGrid = createAccumulatorGrid(veTable.mapBreakpoints, veTable.rpmBreakpoints);
-                totalSamples = 0;
-                filteredByOutlier = 0;
-
-                for (let i = 0; i < binnedSamples.length; i++) {
-                    const s = binnedSamples[i];
-                    const mean = cellMeans[s.mapIdx][s.rpmIdx];
-                    const std = cellStddevs[s.mapIdx][s.rpmIdx];
-
-                    if (std > 0 && Math.abs(s.correction - mean) > outlierSigma * std) {
-                        filteredByOutlier++;
-                        continue;
-                    }
-
-                    accumulateSample(finalGrid, s.mapIdx, s.rpmIdx, s.correction, s.clTrimAvg);
-                    totalSamples++;
-                }
-            }
-
-            // 6. Finalise CorrectionGrid from accumulator — compute mean, stddev, apply scaling & min change
-            let cellsAboveThreshold = 0;
-            const finalCells = [];
-
-            // First compute per-cell variance for stddev display (on the final grid)
-            // We need per-cell sum of squares, so let's compute from binnedSamples against final means
-            const finalMeans = [];
-            for (let mapIdx = 0; mapIdx < finalGrid.cells.length; mapIdx++) {
-                const row = [];
-                for (let rpmIdx = 0; rpmIdx < finalGrid.cells[mapIdx].length; rpmIdx++) {
-                    const cell = finalGrid.cells[mapIdx][rpmIdx];
-                    row.push(cell.count > 0 ? cell.correctionSum / cell.count : 0);
-                }
-                finalMeans.push(row);
-            }
-
-            // Compute variance sums against final grid
-            const finalVarianceSums = [];
-            for (let mapIdx = 0; mapIdx < finalGrid.cells.length; mapIdx++) {
-                const row = [];
-                for (let rpmIdx = 0; rpmIdx < finalGrid.cells[mapIdx].length; rpmIdx++) {
-                    row.push(0);
-                }
-                finalVarianceSums.push(row);
-            }
-
-            // Iterate the binned samples that survived outlier filtering
-            if (outlierSigma > 0 && totalSamples > 0) {
-                // Re-iterate binnedSamples, only counting those that weren't filtered
-                const cellMeansForOutlier = [];
-                const cellStddevsForOutlier = [];
-                for (let mapIdx = 0; mapIdx < grid.cells.length; mapIdx++) {
-                    const meanRow = [];
-                    const stdRow = [];
-                    for (let rpmIdx = 0; rpmIdx < grid.cells[mapIdx].length; rpmIdx++) {
-                        const cell = grid.cells[mapIdx][rpmIdx];
-                        meanRow.push(cell.count > 0 ? cell.correctionSum / cell.count : 0);
-                        stdRow.push(0);
-                    }
-                    cellMeansForOutlier.push(meanRow);
-                    cellStddevsForOutlier.push(stdRow);
-                }
-                // Recompute stddevs from first pass for outlier check
-                for (let i = 0; i < binnedSamples.length; i++) {
-                    const s = binnedSamples[i];
-                    const diff = s.correction - cellMeansForOutlier[s.mapIdx][s.rpmIdx];
-                    cellStddevsForOutlier[s.mapIdx][s.rpmIdx] += diff * diff;
-                }
-                for (let mapIdx = 0; mapIdx < grid.cells.length; mapIdx++) {
-                    for (let rpmIdx = 0; rpmIdx < grid.cells[mapIdx].length; rpmIdx++) {
-                        const cell = grid.cells[mapIdx][rpmIdx];
-                        if (cell.count > 1) {
-                            cellStddevsForOutlier[mapIdx][rpmIdx] = Math.sqrt(cellStddevsForOutlier[mapIdx][rpmIdx] / cell.count);
-                        }
-                    }
-                }
-
-                for (let i = 0; i < binnedSamples.length; i++) {
-                    const s = binnedSamples[i];
-                    const mean = cellMeansForOutlier[s.mapIdx][s.rpmIdx];
-                    const std = cellStddevsForOutlier[s.mapIdx][s.rpmIdx];
-                    // Only include samples that survived outlier filter
-                    if (std > 0 && Math.abs(s.correction - mean) > outlierSigma * std) {
-                        continue;
-                    }
-                    const diff = s.correction - finalMeans[s.mapIdx][s.rpmIdx];
-                    finalVarianceSums[s.mapIdx][s.rpmIdx] += diff * diff;
-                }
-            } else {
-                // No outlier filtering — use all binned samples
-                for (let i = 0; i < binnedSamples.length; i++) {
-                    const s = binnedSamples[i];
-                    const diff = s.correction - finalMeans[s.mapIdx][s.rpmIdx];
-                    finalVarianceSums[s.mapIdx][s.rpmIdx] += diff * diff;
-                }
-            }
-
-            for (let mapIdx = 0; mapIdx < finalGrid.cells.length; mapIdx++) {
-                const row = [];
-                for (let rpmIdx = 0; rpmIdx < finalGrid.cells[mapIdx].length; rpmIdx++) {
-                    const cell = finalGrid.cells[mapIdx][rpmIdx];
-                    if (cell.count > threshold) {
-                        // Strictly more than threshold samples required
-                        let avgCorrection = cell.correctionSum / cell.count;
-                        const avgClTrim = cell.clTrimSum / cell.count;
-                        const lambdaError = avgCorrection - avgClTrim;
-
-                        // Apply scaling factor
-                        avgCorrection = avgCorrection * scalePct;
-
-                        // Compute standard deviation
-                        const stddev = cell.count > 1
-                            ? Math.sqrt(finalVarianceSums[mapIdx][rpmIdx] / cell.count)
-                            : 0;
-
-                        // Apply minimum change amount filter
-                        if (changeThreshold > 0 && Math.abs(avgCorrection) < changeThreshold) {
-                            row.push({ count: cell.count, correction: 0, stddev, clTrimAvg: avgClTrim, lambdaError: lambdaError });
-                        } else {
-                            row.push({ count: cell.count, correction: avgCorrection, stddev, clTrimAvg: avgClTrim, lambdaError: lambdaError });
-                        }
-                        cellsAboveThreshold++;
-                    } else {
-                        row.push({ count: cell.count, correction: null, stddev: null, clTrimAvg: null, lambdaError: null });
-                    }
-                }
-                finalCells.push(row);
-            }
-
-            // 6c. Apply Gaussian smoothing to corrections (if enabled)
-            if (smoothingSigma > 0 && cellsAboveThreshold > 0) {
-                // Build a kernel radius based on sigma (cover 3σ in each direction)
-                const radius = Math.ceil(smoothingSigma * 2);
-                const numRows = finalCells.length;
-                const numCols = finalCells[0] ? finalCells[0].length : 0;
-
-                // Pre-compute Gaussian weights for the kernel
-                const kernelSize = radius * 2 + 1;
-                const kernel = [];
-                for (let dy = -radius; dy <= radius; dy++) {
-                    const kRow = [];
-                    for (let dx = -radius; dx <= radius; dx++) {
-                        const dist2 = dx * dx + dy * dy;
-                        kRow.push(Math.exp(-dist2 / (2 * smoothingSigma * smoothingSigma)));
-                    }
-                    kernel.push(kRow);
-                }
-
-                // Apply smoothing: only smooth cells that are above threshold,
-                // only sample from neighbors that are above threshold
-                const smoothedCorrections = [];
-                for (let m = 0; m < numRows; m++) {
-                    const row = [];
-                    for (let r = 0; r < numCols; r++) {
-                        if (finalCells[m][r].correction === null) {
-                            row.push(null);
-                            continue;
-                        }
-
-                        let weightedSum = 0;
-                        let weightTotal = 0;
-
-                        for (let dy = -radius; dy <= radius; dy++) {
-                            for (let dx = -radius; dx <= radius; dx++) {
-                                const nm = m + dy;
-                                const nr = r + dx;
-                                if (nm < 0 || nm >= numRows || nr < 0 || nr >= numCols) continue;
-                                if (finalCells[nm][nr].correction === null) continue;
-
-                                const w = kernel[dy + radius][dx + radius];
-                                weightedSum += finalCells[nm][nr].correction * w;
-                                weightTotal += w;
-                            }
-                        }
-
-                        if (weightTotal > 0) {
-                            row.push(weightedSum / weightTotal);
-                        } else {
-                            row.push(finalCells[m][r].correction);
-                        }
-                    }
-                    smoothedCorrections.push(row);
-                }
-
-                // Write smoothed values back into finalCells
-                for (let m = 0; m < numRows; m++) {
-                    for (let r = 0; r < numCols; r++) {
-                        if (smoothedCorrections[m][r] !== null) {
-                            finalCells[m][r].correction = smoothedCorrections[m][r];
-                        }
-                    }
-                }
-            }
-
-            const correctionGrid = {
-                mapBreakpoints: veTable.mapBreakpoints,
-                rpmBreakpoints: veTable.rpmBreakpoints,
-                cells: finalCells,
-                totalSamples,
-                cellsAboveThreshold,
-            };
-
-            // 6b. Build newValuesGrid for display (original VE * (1 + correction/100))
-            const newValuesGrid = [];
-            for (let mapIdx = 0; mapIdx < veTable.mapBreakpoints.length; mapIdx++) {
-                const row = [];
-                for (let rpmIdx = 0; rpmIdx < veTable.rpmBreakpoints.length; rpmIdx++) {
-                    const cell = finalCells[mapIdx][rpmIdx];
-                    const originalVE = veTable.values[mapIdx][rpmIdx];
-                    if (cell.correction !== null && cell.correction !== 0) {
-                        row.push(originalVE * (1 + cell.correction / 100));
-                    } else {
-                        row.push(originalVE);
-                    }
-                }
-                newValuesGrid.push(row);
-            }
+            // 4. Analyse
+            const analysis = analyzeVE(samples, veTable, {
+                hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate,
+                smoothing, minMapForCorrection, decelFilterEnabled, steadyWindowMs, lambdaDelayMs
+            });
+            const correctionGrid = analysis.correctionGrid;
 
             // 7. Build output CSVs
             const { diffCsv, newValuesCsv } = buildOutputs(correctionGrid, veTable);
 
             // 8. Post final result
-            self.postMessage({
-                type: 'result',
-                correctionGrid,
-                diffCsv,
-                newValuesCsv,
-                totalSamples,
-                cellsAboveThreshold,
-                filteredByTime,
-                filteredByCoolant,
-                filteredByTps,
-                filteredByOutlier,
-                filteredByDecel,
-                filteredByMinMap,
-                newValuesGrid,
-            });
+            self.postMessage(Object.assign({ type: 'result', diffCsv, newValuesCsv }, analysis));
 
         } catch (err) {
             self.postMessage({ type: 'error', message: err.message || String(err) });
@@ -1455,5 +1306,8 @@ if (typeof module !== 'undefined') {
         parseLdLog,
         computeSampleCorrection,
         buildOutputs,
+        analyzeVE,
+        axisWeights,
+        makeAxis,
     };
 }

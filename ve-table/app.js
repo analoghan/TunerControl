@@ -418,7 +418,10 @@ processBtn.addEventListener('click', async () => {
     const smoothing = parseFloat(smoothingAmountInput.value) || 0;
     const minMapForCorrection = parseFloat(document.getElementById('min-map-correction').value) || 0;
     const decelFilterEnabled = document.getElementById('decel-filter').value === 'on';
-    const payload = { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing, minMapForCorrection, decelFilterEnabled };
+    const steadyWindowRaw = parseFloat(document.getElementById('steady-window').value);
+    const steadyWindowMs = Number.isNaN(steadyWindowRaw) ? 300 : steadyWindowRaw;
+    const lambdaDelayMs = parseFloat(document.getElementById('lambda-delay').value) || 0;
+    const payload = { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing, minMapForCorrection, decelFilterEnabled, steadyWindowMs, lambdaDelayMs };
     if (isLd) {
         worker.postMessage(Object.assign({ type: 'process_ld', logBuffer: logData }, payload));
     } else {
@@ -461,7 +464,8 @@ function renderResults(msg) {
     const tableToggle = document.getElementById('table-toggle');
     const tableLabel = document.getElementById('table-label');
 
-    const { correctionGrid, diffCsv, newValuesCsv, totalSamples, cellsAboveThreshold, filteredByTime, filteredByCoolant, filteredByTps, filteredByOutlier, filteredByDecel, filteredByMinMap } = msg;
+    const { correctionGrid, diffCsv, newValuesCsv, totalSamples, cellsAboveThreshold, filteredByTime, filteredByCoolant, filteredByTps, filteredByOutlier, filteredByDecel, filteredByMinMap,
+            filteredByFuelCut = 0, filteredBySteady = 0, filteredByLambda = 0 } = msg;
 
     // Clear previous table content
     tableContainer.innerHTML = '';
@@ -469,12 +473,16 @@ function renderResults(msg) {
     // Show stats line
     const threshold = parseInt(hitThresholdInput.value, 10) || 50;
     let statsText = `Processed ${totalSamples.toLocaleString()} valid samples \u00B7 ${cellsAboveThreshold} cells above threshold (>${threshold} hits)`;
-    if (filteredByTime > 0 || filteredByCoolant > 0 || filteredByTps > 0 || filteredByOutlier > 0 || filteredByDecel > 0 || filteredByMinMap > 0) {
+    if (filteredByTime > 0 || filteredByCoolant > 0 || filteredByTps > 0 || filteredByOutlier > 0 || filteredByDecel > 0 || filteredByMinMap > 0 ||
+        filteredByFuelCut > 0 || filteredBySteady > 0 || filteredByLambda > 0) {
         const parts = [];
         if (filteredByTime > 0) parts.push(`${filteredByTime.toLocaleString()} by run time`);
         if (filteredByCoolant > 0) parts.push(`${filteredByCoolant.toLocaleString()} by coolant temp`);
         if (filteredByTps > 0) parts.push(`${filteredByTps.toLocaleString()} by TPS rate`);
+        if (filteredByFuelCut > 0) parts.push(`${filteredByFuelCut.toLocaleString()} by overrun/fuel cut`);
         if (filteredByDecel > 0) parts.push(`${filteredByDecel.toLocaleString()} by decel/overrun`);
+        if (filteredBySteady > 0) parts.push(`${filteredBySteady.toLocaleString()} as not steady-state`);
+        if (filteredByLambda > 0) parts.push(`${filteredByLambda.toLocaleString()} by implausible lambda`);
         if (filteredByMinMap > 0) parts.push(`${filteredByMinMap.toLocaleString()} by min MAP`);
         if (filteredByOutlier > 0) parts.push(`${filteredByOutlier.toLocaleString()} as outliers`);
         statsText += ` \u00B7 Filtered: ${parts.join(', ')}`;

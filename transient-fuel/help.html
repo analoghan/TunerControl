@@ -102,17 +102,30 @@
     <h3>Min MAP Change (default: 15 kPa)</h3>
     <p>The minimum total MAP change for an event to be counted. Filters out small throttle adjustments that don't meaningfully exercise the fuel film model.</p>
 
+    <h3>Min Coolant Temp (default: 60°C)</h3>
+    <p>Data from a colder engine is ignored — wall wetting is much larger when the ports are cold, which the fuel film
+      temperature trim handles separately.</p>
+
     <h3>Lambda Target (default: 1.0)</h3>
     <p>Fallback target lambda if the "Fuel Mixture Aim" channel is not present in the log. If the channel exists, the tool uses the logged target value instead.</p>
 
     <h2>Understanding the Results</h2>
 
+    <h3>How each event is measured</h3>
+    <p>Lambda is followed from the moment MAP starts to change until 1.5 s after it settles, as measured ÷ target lambda (so
+      a target that changes during the event, e.g. into boost, is accounted for). Excursions are measured against where lambda
+      <strong>settles</strong> at the end of that window: any steady error at the new load is a VE-table matter, so it is not
+      blamed on the fuel film.</p>
+    <p>Events overlapping overrun or a fuel cut — <strong>Engine Overrun State</strong> or <strong>Fuel Output Cut Count</strong>
+      within the second before or during the event, or lambda above 1.5 — are skipped, because the sensor is reading the cut,
+      not combustion. A tip-in straight out of a coast therefore can't be measured. The summary shows how many were skipped.</p>
+
     <h3>Tip-In Events (Lean Spikes)</h3>
     <p>Each row represents a detected throttle-opening event. Key columns:</p>
     <ul>
-      <li><strong>Lean Spike %</strong> — How far lambda went above target (lean) during the transient. This is the primary indicator that fuel film primary values are too low.</li>
-      <li><strong>Rich Overshoot %</strong> — How far lambda went below target (rich) after the initial lean spike. Indicates the compensation overshot — time constants may be too aggressive.</li>
-      <li><strong>Recovery Time</strong> — Milliseconds until lambda settles within 2% of target. Long recovery = time constants need adjustment.</li>
+      <li><strong>Lean Spike %</strong> — How far lambda went lean of its settled value during the transient. This is the primary indicator that fuel film primary values are too low.</li>
+      <li><strong>Rich Overshoot %</strong> — How far lambda went rich of its settled value after the lean peak. Lean then rich means the compensation arrived late and lasted too long; rich without a lean spike means too much film.</li>
+      <li><strong>Recovery Time</strong> — Milliseconds from the start of the event until lambda is back within 2% of its settled value after its largest deviation.</li>
       <li><strong>MAP Change</strong> — The transition zone (e.g., 40→80 kPa). Maps directly to which cells in the fuel film primary table need adjustment.</li>
     </ul>
 
@@ -124,21 +137,35 @@
     </ul>
 
     <h3>Tip-Out Events (Rich Overshoot)</h3>
-    <p>Throttle-closing events. Rich overshoot on tip-out indicates the fuel film model isn't removing compensation quickly enough when MAP drops.</p>
+    <p>Throttle-closing events. Rich overshoot on tip-out indicates the fuel film model isn't removing fuel quickly enough when
+      MAP drops; going lean afterwards means it removes fuel faster than the walls actually release it.</p>
 
     <h2>Interpreting Recommendations</h2>
 
+    <p>On a tip-in the wall film is growing, so only the <strong>Increase</strong> time constants act; on a tip-out it is
+      shrinking, so only the <strong>Decrease</strong> constants act. Suggested time constants only change the ones the data
+      points to.</p>
+
     <h3>"Fuel Film Primary too low at X-Y kPa"</h3>
-    <p>The fuel film primary table needs higher values in the specified MAP range. The suggested percentage increase is approximate — apply it, re-log, and re-analyze.</p>
+    <p>Tip-ins into that MAP range run lean without going rich afterwards: the table needs higher values there. The corrected
+      table raises the film actually used (table × scale + offset) in proportion to the lean spike — at most 25% per event,
+      applied at 75%, and never more than +50% of a cell in one step — and converts that back to table units by dividing by
+      the scale. Apply, re-log and re-analyze.</p>
 
-    <h3>"Fast decrease time constant too slow"</h3>
-    <p>After the initial burst of compensation, the fast phase is hanging too long, causing rich overshoot. Reduce the fast decrease time constant (e.g., 0.5 → 0.2).</p>
+    <h3>"Fuel Film Primary too high at X-Y kPa"</h3>
+    <p>Tip-ins into that range go rich without a lean spike first: there is more film compensation than the engine needs.
+      Reduce the table there.</p>
 
-    <h3>"Slow decrease time constant too high"</h3>
-    <p>On tip-out, the slow compensation isn't being removed quickly enough. Reduce the slow decrease time constant.</p>
+    <h3>"TIMING MISMATCH"</h3>
+    <p>Tip-ins go lean and then rich: the amount of compensation is about right but it arrives too late and lasts too long.
+      Shorten the Increase time constants and/or raise the Fast Percentage. Raising the table would make the rich side worse.</p>
 
-    <h3>"Average recovery time &gt;500ms"</h3>
-    <p>Lambda takes too long to settle after transients. The slow increase time constant may need to be reduced so compensation builds faster.</p>
+    <h3>"Rich on tip-out" / "Lean after tip-out"</h3>
+    <p>Rich: shorten the Decrease time constants so the compensation comes off faster. Lean: lengthen them, or check the table
+      is not too high.</p>
+
+    <h3>"Slow recovery"</h3>
+    <p>Lean spikes take a long time to settle: the compensation builds too slowly. Shorten the Slow Increase time constant.</p>
 
     <h2>Recommended Workflow</h2>
     <ol>
@@ -170,7 +197,9 @@
     <p>Lower the MAP Rate Threshold (try 100-150 kPa/s) or the Min MAP Change (try 10 kPa). Your driving may not have included aggressive enough throttle changes.</p>
 
     <h3>All events show large lean spikes</h3>
-    <p>If every event is severely lean regardless of MAP zone, check that your VE table is actually calibrated at steady-state. A globally lean VE table will show as transient lean spikes.</p>
+    <p>Lambda is measured against where it settles after each event, so a steady VE error alone no longer shows as lean spikes.
+      If every event is still severely lean, check the lambda channels and the fuel film scale/offset, and that the log isn't
+      dominated by tip-ins right after overrun (those are skipped — see the summary).</p>
 
     <h3>Events detected but lambda data is NaN</h3>
     <p>The wideband sensor may not be logging at a high enough rate, or there's a gap in the lambda data during transients. Ensure your log rate is at least 50Hz for lambda channels.</p>
