@@ -70,6 +70,19 @@ function m1pkgFuelFilm(pkg) {
         slowDecrease: scalar('Slow.Decrease Time Constant', 's', M1FILM_WARM_COOLANT_C, M1FILM_WARM_COOLANT_C + ' °C', 1)
     };
     out.timeConstants = tc;
+
+    // Settings the recommendations check against the firmware's guidance.
+    var trim = m1filmFind(pkg, 'Fuel.Film.Primary.Trim.Engine Speed.Value');
+    var minVol = m1filmFind(pkg, 'Fuel.Injector.Primary.Minimum Volume');
+    var minHyst = m1filmFind(pkg, 'Fuel.Injector.Primary.Minimum Volume Hysteresis.Value');
+    var clMode = m1filmFind(pkg, 'Fuel.Closed Loop.Mode');
+    out.tuneChecks = {
+        refSpeedRpm: refSpeed ? Math.round(refSpeed.value / 6) : null,
+        speedTrimAtRefPct: trim && trim.kind === 'Table' && trim.unit === 'ratio' && refSpeed ? (m1filmLookup(trim, refSpeed.value) - 1) * 100 : null,
+        minVolume: minVol && minVol.unit === 'm3' ? +(minVol.value * 1e9).toFixed(2) : null,
+        minVolumeHysteresis: minHyst && minHyst.unit === 'm3' ? +(minHyst.value * 1e9).toFixed(2) : null,
+        closedLoopMode: clMode ? clMode.label || null : null
+    };
     return out;
 }
 

@@ -8,7 +8,8 @@
  *   - Lean spike (% leaner than where lambda settles afterwards) — fuel film primary too low
  *   - Rich overshoot (% richer than where lambda settles) — compensation too late/long or too large
  *   - Recovery time (ms from event start until lambda is back within 2%)
- *   Events overlapping overrun or a fuel cut are skipped.
+ *   Events overlapping a fuel cut are skipped: the overrun cut (Engine Overrun State Enabled), the injectors switched
+ *   off without it (pulse width 0 — on an M1 usually Minimum Volume), a fuel cut count change or lambda reading air.
  *   - MAP transition zone (from → to kPa)
  */
 
@@ -28,6 +29,9 @@ var TRANSIENT_CHANNELS = {
     COOLANT: 'coolant temperature',
     OVERRUN: 'engine overrun state',     // optional: non-zero during overrun fuel cut
     FUEL_CUT: 'fuel output cut count',   // optional: changes when a fuel cut happens (8-bit, wraps)
+    PW: 'fuel cylinder 1 primary output pulse width 1',   // optional: 0 while the injectors are switched off
+    CL_B1: 'fuel closed loop control bank 1 trim',        // optional: closed-loop activity during events
+    CL_B2: 'fuel closed loop control bank 2 trim',
 };
 
 // ---------------------------------------------------------------------------
@@ -66,6 +70,8 @@ function parseTransientLog(text, onProgress) {
     var coolIdx = colNames.indexOf(TRANSIENT_CHANNELS.COOLANT);
     var overrunIdx = colNames.indexOf(TRANSIENT_CHANNELS.OVERRUN);
     var cutIdx = colNames.indexOf(TRANSIENT_CHANNELS.FUEL_CUT);
+    var pwIdx = colNames.indexOf(TRANSIENT_CHANNELS.PW);
+    var cl1Idx = colNames.indexOf(TRANSIENT_CHANNELS.CL_B1), cl2Idx = colNames.indexOf(TRANSIENT_CHANNELS.CL_B2);
 
     if (timeIdx === -1) throw new Error('Channel "Time" not found.');
     if (mapIdx === -1) throw new Error('Channel "Inlet Manifold Pressure" not found.');
@@ -105,6 +111,8 @@ function parseTransientLog(text, onProgress) {
             coolant: coolIdx >= 0 ? parseFloat(fields[coolIdx]) : NaN,
             overrunState: overrunIdx >= 0 ? parseFloat(fields[overrunIdx]) : NaN,
             fuelCutCount: cutIdx >= 0 ? parseFloat(fields[cutIdx]) : NaN,
+            pw: pwIdx >= 0 ? parseFloat(fields[pwIdx]) : NaN,
+            clTrim: tfClTrim(cl1Idx >= 0 ? parseFloat(fields[cl1Idx]) : NaN, cl2Idx >= 0 ? parseFloat(fields[cl2Idx]) : NaN),
         });
 
         if ((i - dataStart) % 5000 === 0 && onProgress) {
@@ -197,10 +205,17 @@ function detectTransientEvents(samples, settings) {
             var excursion = totalMapChange >= minMapChange ? measureLambdaExcursion(samples, i, j, isTipIn, defaultTarget) : null;
             if (totalMapChange >= minMapChange && !excursion) {
                 skippedFuelCut++;
-                skipped.push({ type: isTipIn ? 'tip-in' : 'tip-out', time: timeAtStart, endTime: samples[j].time });
+                skipped.push({ type: isTipIn ? 'tip-in' : 'tip-out', time: timeAtStart, endTime: samples[j].time,
+                    rpm: !isNaN(s.rpm) ? Math.round(s.rpm) : null, mapFrom: Math.round(mapAtStart), mapTo: Math.round(mapAtEnd),
+                    reason: tfCutReasonBetween(samples, timeAtStart - TF_CUT_HOLDOFF_S, samples[j].time + TF_WINDOW_S) });
             }
             if (excursion) {
                 var target = !isNaN(samples[j].lambdaTarget) && samples[j].lambdaTarget > 0.5 ? samples[j].lambdaTarget : defaultTarget;
+                // How far the closed-loop trim moved during the event (null when not logged).
+                var clLo = Infinity, clHi = -Infinity;
+                for (var q = i; q < samples.length && samples[q].time <= excursion.windowEnd; q++) {
+                    if (!isNaN(samples[q].clTrim)) { clLo = Math.min(clLo, samples[q].clTrim); clHi = Math.max(clHi, samples[q].clTrim); }
+                }
 
                 events.push({
                     type: isTipIn ? 'tip-in' : 'tip-out',
@@ -222,6 +237,8 @@ function detectTransientEvents(samples, settings) {
                     endTime: samples[j].time,
                     windowEnd: excursion.windowEnd,
                     baseline: excursion.baseline,
+                    clRange: clHi >= clLo ? Math.round((clHi - clLo) * 10) / 10 : null,
+                    nearIdle: !isNaN(s.rpm) && s.rpm < TF_NEAR_IDLE_RPM,
                 });
 
                 lastEventEndIdx = j + 5;
@@ -240,6 +257,12 @@ function detectTransientEvents(samples, settings) {
 
 /** Lambda above this is a fuel cut / free-air reading, not combustion. */
 var TF_CUT_LAMBDA = 1.5;
+/** Engine Overrun State value for the overrun fuel cut (0 Disabled, 1 Retard Ignition, 2 Enabled, 3 Advance Ignition). */
+var TF_OVERRUN_ENABLED = 2;
+/** Below this engine speed the lambda sensor is too slow to read film effects (MoTeC: calibrate film at 1500-2000 rpm). */
+var TF_NEAR_IDLE_RPM = 1300;
+/** A closed-loop trim moving more than this (%) during an event means closed loop was correcting it. */
+var TF_CL_ACTIVE_PCT = 2;
 /** Seconds before an event checked for overrun / fuel cut (lambda still reads the cut afterwards). */
 var TF_CUT_HOLDOFF_S = 1.0;
 /** Seconds at the end of the window used as the settled lambda (the reference for the excursion). */
@@ -256,11 +279,38 @@ function tfRatio(s, defaultTarget) {
     return !isNaN(s.lambda) && s.lambda > 0 ? s.lambda / target : NaN;
 }
 
-function tfCutAt(samples, k) {
+/** Mean of the closed-loop trims that are logged (NaN when neither is). */
+function tfClTrim(a, b) {
+    if (!isNaN(a) && !isNaN(b)) return (a + b) / 2;
+    return !isNaN(a) ? a : b;
+}
+
+/**
+ * Why sample k is a fuel cut, or null: 'overrun' (Engine Overrun State Enabled — Retard/Advance Ignition only move the
+ * timing), 'injection-off' (pulse width 0 with the engine running and no overrun cut — on an M1 usually Minimum Volume),
+ * 'cut-count' (Fuel Output Cut Count changed) or 'air' (lambda reading air).
+ */
+function tfCutReason(samples, k) {
     var s = samples[k], p = k > 0 ? samples[k - 1] : null;
-    return (!isNaN(s.overrunState) && s.overrunState !== 0) ||
-        (p && !isNaN(s.fuelCutCount) && !isNaN(p.fuelCutCount) && s.fuelCutCount !== p.fuelCutCount) ||   // 8-bit counter: may wrap
-        (!isNaN(s.lambda) && s.lambda > TF_CUT_LAMBDA);
+    if (!isNaN(s.overrunState) && Math.round(s.overrunState) === TF_OVERRUN_ENABLED) return 'overrun';
+    if (!isNaN(s.pw) && s.pw <= 0.05 && !(s.rpm < 400)) return 'injection-off';
+    if (p && !isNaN(s.fuelCutCount) && !isNaN(p.fuelCutCount) && s.fuelCutCount !== p.fuelCutCount) return 'cut-count';   // 8-bit counter: may wrap
+    if (!isNaN(s.lambda) && s.lambda > TF_CUT_LAMBDA) return 'air';
+    return null;
+}
+
+function tfCutAt(samples, k) { return tfCutReason(samples, k) !== null; }
+
+/** The strongest cut reason between times t0 and t1 (overrun > injection-off > cut-count > air), or null. */
+function tfCutReasonBetween(samples, t0, t1) {
+    var rank = { overrun: 4, 'injection-off': 3, 'cut-count': 2, air: 1 }, best = null;
+    for (var k = 0; k < samples.length; k++) {
+        if (samples[k].time < t0) continue;
+        if (samples[k].time > t1) break;
+        var r = tfCutReason(samples, k);
+        if (r && (!best || rank[r] > rank[best])) best = r;
+    }
+    return best;
 }
 
 /**
@@ -349,9 +399,72 @@ function mapOvershoot(e) { return e.mapPeak !== undefined ? Math.max(0, e.mapPea
 
 function generateRecommendations(events, settings) {
     var recs = [];
-    var tipIns = events.filter(function (e) { return e.type === 'tip-in'; });
-    var tipOuts = events.filter(function (e) { return e.type === 'tip-out'; });
+    var allTipIns = events.filter(function (e) { return e.type === 'tip-in'; });
+    var allTipOuts = events.filter(function (e) { return e.type === 'tip-out'; });
+    // Events near idle are reported but left out of the advice: the lambda sensor is too slow there to read film effects.
+    var tipIns = allTipIns.filter(function (e) { return !e.nearIdle; });
+    var tipOuts = allTipOuts.filter(function (e) { return !e.nearIdle; });
     function avg(list, f) { return list.length ? list.reduce(function (a, e) { return a + f(e); }, 0) / list.length : 0; }
+    function median(list) { var v = list.slice().sort(function (a, b) { return a - b; }); return v.length ? v[Math.floor(v.length / 2)] : 0; }
+    var tune = settings.tuneFilm || null;
+
+    // Injection cuts without the overrun cut (Minimum Volume): these events are skipped, but they are the off-throttle
+    // "lean spikes" and the film decrease often causes them.
+    var offCuts = (events.skipped || []).filter(function (e) { return e.reason === 'injection-off'; });
+    if (offCuts.length >= 3) {
+        var rpms = offCuts.map(function (e) { return e.rpm; }).filter(function (v) { return v !== null; });
+        recs.push({ severity: 'warning',
+            text: 'INJECTORS SWITCHED OFF on ' + offCuts.length + ' transients (mostly tip-outs' + (rpms.length ? ', around ' + median(rpms) + ' rpm' : '') +
+                ') without the overrun fuel cut: the injector pulse width went to 0, so lambda read air. On an M1 this is Fuel Injector ' +
+                'Primary Minimum Volume' + (tune && tune.minVolume ? ' (' + tune.minVolume + ' µl, hysteresis ' + tune.minVolumeHysteresis + ' µl)' : '') +
+                ': when any cylinder\'s request falls below it, all injectors stop until every cylinder is above Minimum Volume + Hysteresis. ' +
+                'The film model takes fuel out as MAP falls, which can push the request below the minimum — longer Decrease time constants ' +
+                'spread that over more cycles; set Minimum Volume from the injector data and raise the Hysteresis to stop on/off cycling. ' +
+                'These events are left out of the analysis (Skipped).' });
+    }
+
+    // Closed loop working during the events makes the bounce partly the lambda control's own.
+    var withCl = allTipIns.concat(allTipOuts).filter(function (e) { return e.clRange !== null && e.clRange !== undefined; });
+    var clActive = withCl.filter(function (e) { return e.clRange > TF_CL_ACTIVE_PCT; });
+    if (withCl.length >= 5 && clActive.length >= withCl.length / 3) {
+        recs.push({ severity: 'info',
+            text: 'Closed loop was correcting during ' + clActive.length + ' of ' + withCl.length + ' events (trim moved more than ' + TF_CL_ACTIVE_PCT +
+                '%). Part of a rich-then-lean bounce can be the lambda control chasing the transient, and it hides the film error. ' +
+                'MoTeC calibrates the fuel film with closed loop disabled — log the film tests with Fuel Closed Loop Mode off.' });
+    }
+
+    var nearIdle = allTipIns.concat(allTipOuts).filter(function (e) { return e.nearIdle; });
+    if (nearIdle.length) {
+        recs.push({ severity: 'info',
+            text: nearIdle.length + ' events start below ' + TF_NEAR_IDLE_RPM + ' rpm and are left out of the advice and table corrections: near idle ' +
+                'the lambda sensor responds too slowly to read film effects (MoTeC calibrates the film at a steady 1500-2000 rpm).' });
+    }
+
+    // Tune settings against the firmware's typical ranges.
+    var tcIn = settings.currentTimeConstants || {}, tc = {};
+    Object.keys(tcIn).forEach(function (k) { tc[k] = typeof tcIn[k] === 'number' ? +tcIn[k].toFixed(3) : tcIn[k]; });
+    var clMostly = withCl.length >= 5 && clActive.length >= withCl.length / 2;
+    var outOfRange = [];
+    [['Fast Increase', tc.fastIncrease, 0.1, 1], ['Fast Decrease', tc.fastDecrease, 0.1, 1],
+     ['Slow Increase', tc.slowIncrease, 0.5, 3], ['Slow Decrease', tc.slowDecrease, 0.5, 3]].forEach(function (c) {
+        if (typeof c[1] === 'number' && (c[1] < c[2] - 1e-9 || c[1] > c[3] + 1e-9)) outOfRange.push(c[0] + ' ' + c[1] + ' s (typical ' + c[2] + '–' + c[3] + ' s)');
+    });
+    if (outOfRange.length) {
+        recs.push({ severity: 'info',
+            text: 'Time constants outside the firmware\'s typical range at a 2000 rpm reference: ' + outOfRange.join(', ') +
+                '. Shorter constants put more of the compensation into the first cycles, which makes a rich-then-lean bounce more likely.' });
+    }
+    if (typeof tc.slowDecrease === 'number' && typeof tc.fastDecrease === 'number' && tc.slowDecrease < tc.fastDecrease) {
+        recs.push({ severity: 'info',
+            text: 'Slow Decrease (' + tc.slowDecrease + ' s) is shorter than Fast Decrease (' + tc.fastDecrease + ' s), so on tip-out the "slow" part ' +
+                'of the film leaves first. Make the slow constants the longer ones.' });
+    }
+    if (tune && tune.refSpeedRpm && tune.speedTrimAtRefPct !== null && Math.abs(tune.speedTrimAtRefPct) > 1) {
+        recs.push({ severity: 'info',
+            text: 'Reference Engine Speed is ' + tune.refSpeedRpm + ' rpm but Trim Engine Speed is ' + (tune.speedTrimAtRefPct > 0 ? '+' : '') +
+                tune.speedTrimAtRefPct.toFixed(1) + '% there. Main is calibrated at the reference speed, where the speed trim should be 0 (100 %); ' +
+                'make the reference speed the one you test at and zero the trim there.' });
+    }
 
     // Tip-ins that go rich before their lean peak: the lean spike follows too much fuel up front (or a MAP
     // overshoot), so they say nothing about the film being too low and are left out of the zone and table advice.
@@ -407,13 +520,15 @@ function generateRecommendations(events, settings) {
         recs.unshift({ severity: avgLean > 8 && avgRichTipIn > 8 ? 'critical' : 'warning',
             text: 'TIMING MISMATCH: tip-ins run lean (' + avgLean.toFixed(1) + '%) and then rich (' + avgRichTipIn.toFixed(1) + '%). The amount of ' +
                 'compensation is about right but it arrives too late and lasts too long, so raising the table or scale would make the rich side worse. ' +
+                (clMostly ? 'Closed loop was correcting during most events, so part of this may be the lambda control — confirm with closed loop off first. ' : '') +
                 'Shorten the Increase time constants (Fast and Slow) and/or raise the Fast Percentage so more of the compensation is delivered at once. ' +
                 'On a tip-in the film is growing, so only the Increase constants act; the Decrease constants act on tip-out.' });
     }
     if (tipOuts.length && tipOutRich > 5) {
         recs.push({ severity: 'warning',
-            text: 'Rich on tip-out: ' + tipOutRich.toFixed(1) + '% on average. As the throttle closes, fuel leaving the port walls is not being taken ' +
-                'out quickly enough. Shorten the Decrease time constants (Fast and Slow).' });
+            text: 'Rich on tip-out: ' + tipOutRich.toFixed(1) + '% on average. As the throttle closes, fuel coming off the walls (piston and ' +
+                'cylinder on direct injection, ports on port injection) is not being taken out quickly enough. Shorten the Decrease time ' +
+                'constants (Fast and Slow), or check the Main values between the starting and ending MAP.' });
     }
     if (tipOuts.length && tipOutLean > 5) {
         recs.push({ severity: 'warning',
@@ -423,25 +538,29 @@ function generateRecommendations(events, settings) {
     if (tipIns.length && avgRecovery > 500 && avgLean > 3) {
         recs.push({ severity: 'info',
             text: 'Slow recovery: lambda takes ' + Math.round(avgRecovery) + 'ms on average to settle within 2% after tip-ins' +
-                (unsettled ? ' (' + unsettled + ' of ' + tipIns.length + ' never settled and are counted at the window length)' : '') + '. If the lean ' +
-                'spikes last, the compensation is building too slowly — shorten the Slow Increase time constant.' });
+                (unsettled ? ' (' + unsettled + ' of ' + tipIns.length + ' never settled and are counted at the window length)' : '') + '. ' +
+                (clMostly ? 'Closed loop was correcting during most events, so this is largely the lambda control settling — judge recovery with closed loop off.'
+                    : 'If the lean spikes last, the compensation is building too slowly — shorten the Slow Increase time constant.') });
     }
 
     // Suggested time constants: only change the ones the data points to.
-    if (tipIns.length > 3) {
-        var tc = settings.currentTimeConstants || {};
+    // Not while closed loop was correcting most events: the lambda trace is then partly the lambda control's.
+    if (tipIns.length > 3 && !clMostly) {
         var cur = { fastInc: tc.fastIncrease || 0.2, fastDec: tc.fastDecrease || 0.3, slowInc: tc.slowIncrease || 0.5,
                     slowDec: tc.slowDecrease || 0.3, fastPct: tc.fastPct || 30 };
         var sug = Object.assign({}, cur);
         if (mismatch) { sug.fastInc = cur.fastInc * 0.7; sug.slowInc = cur.slowInc * 0.7; sug.fastPct = Math.min(60, cur.fastPct + 10); }
         if (tooStrongFirst) { sug.fastInc = cur.fastInc * 1.3; sug.fastPct = Math.max(0, cur.fastPct - 10); }
-        if (avgLean > 3 && avgRecovery > 800) sug.slowInc = Math.min(sug.slowInc, cur.slowInc * 0.5);
-        else if (avgLean > 3 && avgRecovery > 500) sug.slowInc = Math.min(sug.slowInc, cur.slowInc * 0.7);
+        if (!clMostly && avgLean > 3 && avgRecovery > 800) sug.slowInc = Math.min(sug.slowInc, cur.slowInc * 0.5);
+        else if (!clMostly && avgLean > 3 && avgRecovery > 500) sug.slowInc = Math.min(sug.slowInc, cur.slowInc * 0.7);
         if (tipOuts.length && tipOutRich > 5) { sug.fastDec = cur.fastDec * 0.7; sug.slowDec = cur.slowDec * 0.7; }
         else if (tipOuts.length && tipOutLean > 5) { sug.fastDec = cur.fastDec * 1.3; sug.slowDec = cur.slowDec * 1.3; }
+        // Never suggest shortening a constant that is already at or below the firmware's typical minimum.
+        var minimum = { fastInc: 0.1, fastDec: 0.1, slowInc: 0.5, slowDec: 0.5 };
+        Object.keys(minimum).forEach(function (k) { if (sug[k] < cur[k] && cur[k] <= minimum[k] + 1e-9) sug[k] = cur[k]; });
         var names = { fastInc: 'Fast Increase', fastDec: 'Fast Decrease', slowInc: 'Slow Increase', slowDec: 'Slow Decrease', fastPct: 'Fast Percentage' };
         var changes = Object.keys(names).filter(function (k) { return Math.abs(sug[k] - cur[k]) > 1e-9; }).map(function (k) {
-            return k === 'fastPct' ? names[k] + ': ' + cur[k] + '% → ' + sug[k] + '%'
+            return k === 'fastPct' ? names[k] + ': ' + +cur[k].toFixed(1) + '% → ' + +sug[k].toFixed(1) + '%'
                 : names[k] + ': ' + cur[k] + 's → ' + Math.max(0.02, sug[k]).toFixed(2) + 's';
         });
         if (changes.length) {
@@ -494,6 +613,8 @@ function analyzeTransientsLd(buffer, settings) {
     var coolIdx = colLower.indexOf('coolant temperature');
     var overrunIdx = colLower.indexOf('engine overrun state');
     var cutIdx = colLower.indexOf('fuel output cut count');
+    var pwIdx = colLower.indexOf(TRANSIENT_CHANNELS.PW);
+    var cl1Idx = colLower.indexOf(TRANSIENT_CHANNELS.CL_B1), cl2Idx = colLower.indexOf(TRANSIENT_CHANNELS.CL_B2);
 
     if (timeIdx === -1) throw new Error('.ld file: "Time" channel not found.');
     if (mapIdx === -1) throw new Error('.ld file: "Inlet Manifold Pressure" channel not found.');
@@ -526,6 +647,8 @@ function analyzeTransientsLd(buffer, settings) {
             coolant: coolIdx >= 0 ? row[coolIdx] : NaN,
             overrunState: overrunIdx >= 0 ? row[overrunIdx] : NaN,
             fuelCutCount: cutIdx >= 0 ? row[cutIdx] : NaN,
+            pw: pwIdx >= 0 ? row[pwIdx] : NaN,
+            clTrim: tfClTrim(cl1Idx >= 0 ? row[cl1Idx] : NaN, cl2Idx >= 0 ? row[cl2Idx] : NaN),
         });
     }
 
@@ -559,6 +682,8 @@ function analyzeTransientSamples(samples, settings) {
         totalEvents: events.length,
         skippedFuelCut: events.skippedFuelCut || 0,
         skipped: events.skipped || [],
+        skippedByReason: (events.skipped || []).reduce(function (acc, e) { var r = e.reason || 'other'; acc[r] = (acc[r] || 0) + 1; return acc; }, {}),
+        nearIdleEvents: events.filter(function (e) { return e.nearIdle; }).length,
         unsettledTipIns: tipIns.filter(function(e) { return e.settled === false; }).length,
         richFirstTipIns: tipIns.filter(isRichFirst).length,
         tipInCount: tipIns.length,

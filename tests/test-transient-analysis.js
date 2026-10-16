@@ -61,14 +61,14 @@ describe('Transient Fuel — lambda excursions', function () {
   });
 
   it('skips events overlapping overrun, a fuel cut or fuel-cut lambda', function () {
-    var overrun = detectTransientEvents(tfLog(null, function (t) { return { overrunState: t > 1.2 && t < 1.5 ? 1 : 0 }; }), TF_SETTINGS);
+    var overrun = detectTransientEvents(tfLog(null, function (t) { return { overrunState: t > 1.2 && t < 1.5 ? 2 : 0 }; }), TF_SETTINGS);
     assert.equal(overrun.length, 0);
     assert.equal(overrun.skippedFuelCut, 1);
     var counter = detectTransientEvents(tfLog(null, function (t) { return { fuelCutCount: t < 1.5 ? 255 : 0 }; }), TF_SETTINGS);
     assert.equal(counter.length, 0, 'a wrapping counter is a cut too');
     var lean = detectTransientEvents(tfLog(function (t) { return t > 2.2 && t < 2.4 ? 8 : 1; }), TF_SETTINGS);
     assert.equal(lean.length, 0);
-    var clean = detectTransientEvents(tfLog(null, function (t) { return { overrunState: t < 0.5 ? 1 : 0 }; }), TF_SETTINGS);
+    var clean = detectTransientEvents(tfLog(null, function (t) { return { overrunState: t < 0.5 ? 2 : 0 }; }), TF_SETTINGS);
     assert.equal(clean.length, 1, 'a cut long before the event does not matter');
   });
 });
@@ -81,7 +81,8 @@ describe('Transient Fuel — recommendations', function () {
   function tipOut(rich, leanAfter) {
     return { type: 'tip-out', leanSpike: 0, richOvershoot: rich, leanAfter: leanAfter || 0, mapTo: 30, recoveryTime: 300 };
   }
-  var TC = { currentTimeConstants: { fastPct: 30, fastIncrease: 0.1, fastDecrease: 0.15, slowIncrease: 0.25, slowDecrease: 0.1 } };
+  // Inside the firmware's typical ranges (fast 0.1–1 s, slow 0.5–3 s), so the out-of-range checks stay quiet.
+  var TC = { currentTimeConstants: { fastPct: 30, fastIncrease: 0.2, fastDecrease: 0.3, slowIncrease: 1, slowDecrease: 1 } };
   function texts(recs) { return recs.map(function (r) { return r.text; }).join('\n'); }
 
   it('blames lean-only tip-ins on the table, and changes no time constants', function () {
@@ -96,7 +97,7 @@ describe('Transient Fuel — recommendations', function () {
     assert.ok(/RICH, THEN LEAN on 4 of 5 tip-ins/.test(t), t);
     assert.ok(/In 1 of them MAP overshoots its final value by 15 kPa/.test(t), t);
     assert.ok(!/Fuel Film Primary too low/.test(t));
-    assert.ok(/Fast Increase: 0.1s → 0.13s/.test(t) && /Fast Percentage: 30% → 20%/.test(t), 'up-front compensation too strong');
+    assert.ok(/Fast Increase: 0.2s → 0.26s/.test(t) && /Fast Percentage: 30% → 20%/.test(t), 'up-front compensation too strong');
   });
 
   it('flags rich-only tip-ins as too much film', function () {
@@ -106,16 +107,16 @@ describe('Transient Fuel — recommendations', function () {
   it('treats lean-then-rich as timing and only shortens the Increase constants', function () {
     var t = texts(generateRecommendations([tipIn(6, 6), tipIn(5, 5), tipIn(6, 7), tipIn(5, 6)], TC));
     assert.ok(/TIMING MISMATCH/.test(t));
-    assert.ok(/Fast Increase: 0.1s → 0.07s/.test(t) && /Slow Increase: 0.25s → 0.1[78]s/.test(t) && /Fast Percentage: 30% → 40%/.test(t), t);
+    assert.ok(/Fast Increase: 0.2s → 0.14s/.test(t) && /Slow Increase: 1s → 0.70s/.test(t) && /Fast Percentage: 30% → 40%/.test(t), t);
     assert.ok(!/Decrease: /.test(t), 'Decrease constants do not act on tip-in');
   });
 
   it('points tip-out problems at the Decrease constants', function () {
     var ins = [tipIn(1, 1), tipIn(1, 1), tipIn(1, 1), tipIn(1, 1)];
     var rich = texts(generateRecommendations(ins.concat([tipOut(8), tipOut(9)]), TC));
-    assert.ok(/Rich on tip-out/.test(rich) && /Slow Decrease: 0.1s → 0.07s/.test(rich));
+    assert.ok(/Rich on tip-out/.test(rich) && /Slow Decrease: 1s → 0.70s/.test(rich));
     var lean = texts(generateRecommendations(ins.concat([tipOut(0, 8), tipOut(0, 9)]), TC));
-    assert.ok(/Lean after tip-out/.test(lean) && /Slow Decrease: 0.1s → 0.13s/.test(lean));
+    assert.ok(/Lean after tip-out/.test(lean) && /Slow Decrease: 1s → 1.30s/.test(lean));
   });
 
   it('reports a good calibration when nothing stands out', function () {
@@ -152,5 +153,52 @@ describe('Transient Fuel — table corrections', function () {
 
   it('ignores small spikes', function () {
     assert.deepEqual(run(26, 30, [{ mapTo: 60, leanSpike: 2 }]).corrected, [20, 100, 160]);
+  });
+});
+
+describe('Transient Fuel — fuel cuts, near idle, closed loop and tune checks', function () {
+  it('keeps events during overrun Retard/Advance Ignition and skips the overrun cut itself', function () {
+    var retard = detectTransientEvents(tfLog(null, function () { return { overrunState: 1 }; }), TF_SETTINGS);
+    assert.equal(retard.length, 1, 'Retard Ignition only moves the timing');
+    var cut = detectTransientEvents(tfLog(null, function (t) { return t > 2.2 && t < 2.4 ? { overrunState: 2 } : {}; }), TF_SETTINGS);
+    assert.equal(cut.length, 0);
+    assert.equal(cut.skipped[0].reason, 'overrun');
+  });
+
+  it('skips injectors switched off without overrun as injection-off (Minimum Volume)', function () {
+    var events = detectTransientEvents(tfLog(function (t) { return t > 2.3 && t < 2.6 ? 1.3 : 1.0; },
+      function (t) { return { pw: t > 2.2 && t < 2.4 ? 0 : 1.2 }; }), TF_SETTINGS);
+    assert.equal(events.length, 0);
+    assert.equal(events.skipped[0].reason, 'injection-off');
+  });
+
+  it('warns about injection cuts without overrun, quoting the tune\'s Minimum Volume', function () {
+    var events = []; events.skipped = [1, 2, 3].map(function (k) { return { type: 'tip-out', time: k * 10, rpm: 2700, reason: 'injection-off' }; });
+    var recs = generateRecommendations(events, { tuneFilm: { minVolume: 4, minVolumeHysteresis: 0.5 } });
+    var r = recs.filter(function (x) { return /INJECTORS SWITCHED OFF/.test(x.text); })[0];
+    assert.ok(r, 'expected the injection-off warning');
+    assert.ok(r.text.indexOf('4 µl') !== -1);
+  });
+
+  it('marks events near idle and leaves them out of the table corrections', function () {
+    var e = detectTransientEvents(tfLog(function (t) { return t >= 2 && t < 2.3 ? 1.1 : 1.0; }, function () { return { rpm: 1000 }; }), TF_SETTINGS);
+    assert.equal(e[0].nearIdle, true);
+    var recs = generateRecommendations(e, {});
+    assert.ok(recs.some(function (x) { return /below 1300 rpm/.test(x.text); }));
+  });
+
+  it('records how far the closed-loop trim moved during an event', function () {
+    var e = detectTransientEvents(tfLog(null, function (t) { return { clTrim: t > 2 && t < 2.5 ? 6 : 1 }; }), TF_SETTINGS);
+    assert.equal(e[0].clRange, 5);
+  });
+
+  it('flags time constants below the firmware range and never suggests going shorter', function () {
+    var tipIns = [];
+    for (var k = 0; k < 6; k++) tipIns.push({ type: 'tip-in', leanSpike: 6, richOvershoot: 0, richBefore: 0, recoveryTime: 1500, mapTo: 60, mapFrom: 30 });
+    var recs = generateRecommendations(tipIns, { currentTimeConstants: { fastPct: 30, fastIncrease: 0.1, fastDecrease: 0.15, slowIncrease: 0.25, slowDecrease: 0.1 } });
+    assert.ok(recs.some(function (x) { return /outside the firmware's typical range/.test(x.text); }));
+    assert.ok(recs.some(function (x) { return /Slow Decrease \(0.1 s\) is shorter than Fast Decrease/.test(x.text); }));
+    var sug = recs.filter(function (x) { return /Suggested time constants/.test(x.text); })[0];
+    assert.ok(!sug || sug.text.indexOf('Slow Increase') === -1, 'Slow Increase is already below 0.5 s');
   });
 });

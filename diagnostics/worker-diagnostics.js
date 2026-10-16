@@ -3,8 +3,8 @@
  * Parses a MoTeC log and performs unified analysis across fueling, knock,
  * fuel pressure, and idle domains to identify correlated root causes.
  *
- * This file is loaded inline (not as a Web Worker) — the app.js creates
- * a worker from it using a Blob URL.
+ * app.js creates the worker from a Blob that importScripts injector/worker.js first (for its lean-episode analysis,
+ * analyzeLeanSpikes) and this file last, so this file's message handler wins.
  */
 
 // ---------------------------------------------------------------------------
@@ -120,8 +120,6 @@ function runCrossDiagnostics(columnNames, data) {
     }
 
     // --- Fueling Analysis ---
-    var leanCount = 0, richCount = 0, totalLambdaSamples = 0;
-    var leanWithLowPW = 0, leanWithLowPressure = 0, leanWithKnock = 0;
     var clTrimB1Sum = 0, clTrimB1Count = 0;
     var clTrimB2Sum = 0, clTrimB2Count = 0;
     var lowPWCount = 0;
@@ -131,6 +129,8 @@ function runCrossDiagnostics(columnNames, data) {
     var pressureSamples = 0;
 
     var lambdaIdx = ch.lambda_b1 !== -1 ? ch.lambda_b1 : (ch.lambda_avg !== -1 ? ch.lambda_avg : -1);
+    // Below about 1 ms a DI injector is non-linear (see injector/worker.js THRESHOLDS.SHORT_PW_MS).
+    var SHORT_PW_MS = 1.0, firingCount = 0;
     // Rail pressure is logged in MPa ("dMPa" = differential MPa); 1 MPa = 10 bar. "Below aim" means more than 2 bar under.
     var MPA_TO_BAR = 10, PRESS_TOL_BAR = 2;
     // A typical M1 Knock Threshold is 20–40 % of the knock level scale; the Knock Analyzer uses the tune's own table.
@@ -145,31 +145,20 @@ function runCrossDiagnostics(columnNames, data) {
         var pressAim = ch.fuel_press_aim !== -1 ? data[i][ch.fuel_press_aim] : NaN;
         var map = ch.map !== -1 ? data[i][ch.map] : NaN;
 
-        // Lambda analysis
-        if (!isNaN(lambda) && lambda > 0) {
-            totalLambdaSamples++;
-            var isLean = lambda > 1.06;
-            var isRich = lambda < 0.92;
-            if (isLean) {
-                leanCount++;
-                if (!isNaN(pw) && pw < 0.8) leanWithLowPW++;
-                if (!isNaN(press) && !isNaN(pressAim) && pressAim > 0 && (press - pressAim) * MPA_TO_BAR < -PRESS_TOL_BAR) leanWithLowPressure++;
-            }
-            if (isRich) richCount++;
-        }
+        var running = !(rpm < 400);
 
-        // CL trim
-        if (ch.cl_trim_b1 !== -1) {
+        // CL trim: engine running with closed loop active (the trim sits at exactly 0 while it is not)
+        if (ch.cl_trim_b1 !== -1 && running) {
             var t1 = data[i][ch.cl_trim_b1];
-            if (!isNaN(t1)) { clTrimB1Sum += t1; clTrimB1Count++; }
+            if (!isNaN(t1) && t1 !== 0) { clTrimB1Sum += t1; clTrimB1Count++; }
         }
-        if (ch.cl_trim_b2 !== -1) {
+        if (ch.cl_trim_b2 !== -1 && running) {
             var t2 = data[i][ch.cl_trim_b2];
-            if (!isNaN(t2)) { clTrimB2Sum += t2; clTrimB2Count++; }
+            if (!isNaN(t2) && t2 !== 0) { clTrimB2Sum += t2; clTrimB2Count++; }
         }
 
-        // Low PW
-        if (!isNaN(pw) && pw > 0.05 && pw < 0.8) lowPWCount++;
+        // Injecting time in the short-pulse (non-linear) region
+        if (running && !isNaN(pw) && pw > 0.05) { firingCount++; if (pw < SHORT_PW_MS) lowPWCount++; }
 
         // Fuel pressure
         if (!isNaN(press) && !isNaN(pressAim) && pressAim > 0 && !(rpm < 400)) {
@@ -191,48 +180,61 @@ function runCrossDiagnostics(columnNames, data) {
         }
         if (hasKnock && !knockWasOn) {
             knockEvents++;
-            if (!isNaN(lambda) && lambda > 1.06) knockWithLean++;
+            if (!isNaN(lambda) && lambda > 1.06 && !(pw <= 0.05)) knockWithLean++;
         }
         knockWasOn = hasKnock;
+    }
+
+    // --- Lean episodes (injector/worker.js): overrun cut, injectors off without overrun, lean while fuelling ---
+    var lean = null;
+    if (typeof analyzeLeanSpikes === 'function') {
+        try { lean = analyzeLeanSpikes(data, resolveInjectorChannels(columnNames)); } catch (e) { lean = null; }
     }
 
     // --- Build Summary ---
     summary.totalSamples = n;
     summary.duration = n > 0 ? (data[n-1][0] - data[0][0]).toFixed(1) + 's' : '0s';
-    summary.leanEvents = leanCount;
+    summary.leanEvents = lean ? lean.fuelledCount : 0;
+    summary.injectionOffEvents = lean ? lean.injectionOffCount : 0;
     summary.knockEvents = knockEvents;
     summary.pressureBelowAim = pressureSamples > 0 ? Math.round(pressureBelowAimCount / pressureSamples * 100) : 0;
-    summary.lowPWSamples = lowPWCount;
+    summary.shortPWPct = firingCount ? Math.round(lowPWCount / firingCount * 1000) / 10 : 0;
 
     var clTrimB1Mean = clTrimB1Count > 0 ? clTrimB1Sum / clTrimB1Count : null;
     var clTrimB2Mean = clTrimB2Count > 0 ? clTrimB2Sum / clTrimB2Count : null;
 
     // --- Generate Cross-Correlated Findings ---
 
-    // Finding: Lean spikes correlated with low PW (XDI instability)
-    if (leanCount > 10 && leanWithLowPW > 0) {
-        var pct = (leanWithLowPW / leanCount * 100).toFixed(0);
-        if (pct > 30) {
-            findings.push({
-                severity: 'critical',
-                title: 'Lean Spikes Caused by XDI Instability',
-                body: pct + '% of lean events (' + leanWithLowPW + '/' + leanCount + ') coincide with injector pulse width below 0.8ms. The injectors are operating in the instability zone where fuel delivery becomes erratic.',
-                action: 'Reduce fuel pressure aim at idle/light load to force longer pulse widths, or increase idle airflow to raise PW above 0.8ms.'
-            });
-        }
+    // Finding: injectors switched off without the overrun fuel cut (Minimum Volume)
+    if (lean && lean.injectionOffCount >= 3) {
+        findings.push({
+            severity: 'warning',
+            title: 'Injection Cut Without Overrun',
+            body: lean.injectionOffCount + ' lean episodes are the injectors switched off without the overrun fuel cut (mostly at ' +
+                injRange(lean.injectionOff, 'rpm') + ' rpm' + (injRange(lean.injectionOff, 'map') ? ', ' + injRange(lean.injectionOff, 'map') + ' kPa' : '') +
+                '). Lambda then reads air. On an M1 this is usually Fuel Injector Primary Minimum Volume: when any cylinder\'s request falls below it, all injectors stop until every cylinder is above Minimum Volume + Hysteresis.',
+            action: 'See the Injector tool\'s Lean Episodes. Log Fuel Cylinder 1 Primary Volume to confirm; set Minimum Volume from the injector maker\'s data, raise its Hysteresis to stop the on/off cycling, and spread the fuel film decrease (longer Decrease time constants — Transient Fuel tool).'
+        });
     }
 
-    // Finding: Lean spikes correlated with low fuel pressure
-    if (leanCount > 10 && leanWithLowPressure > 0) {
-        var pct = (leanWithLowPressure / leanCount * 100).toFixed(0);
-        if (pct > 20) {
-            findings.push({
-                severity: 'critical',
-                title: 'Lean Spikes Correlated with Fuel Pressure Drop',
-                body: pct + '% of lean events (' + leanWithLowPressure + '/' + leanCount + ') occur when fuel pressure is below aim. The HPFP cannot maintain target pressure during these conditions.',
-                action: 'Check HPFP capacity. If pressure drops at high RPM/load, the pump may be at its limit. Consider reducing pressure aim or upgrading the pump.'
-            });
-        }
+    // Finding: lean while fuelling, mostly with short pulses (injector linearisation)
+    if (lean && lean.fuelledCount >= 3 && lean.fuelledShortPW >= lean.fuelledCount / 2) {
+        findings.push({
+            severity: 'info',
+            title: 'Lean at Short Pulse Widths',
+            body: lean.fuelledShortPW + ' of ' + lean.fuelledCount + ' lean episodes while fuelling had pulses under ' + SHORT_PW_MS + ' ms, where a DI injector is non-linear.',
+            action: 'Check Fuel Injector Primary Linearisation against the injector maker\'s small-pulse data (volume vs pulse width by rail pressure).'
+        });
+    }
+
+    // Finding: lean while fuelling with rail pressure below aim
+    if (lean && lean.fuelledLowPressure >= 3) {
+        findings.push({
+            severity: 'warning',
+            title: 'Lean Episodes With Rail Pressure Below Aim',
+            body: lean.fuelledLowPressure + ' of ' + lean.fuelledCount + ' lean episodes while fuelling had rail pressure more than 10 bar below aim.',
+            action: 'Check the DI Fuel Pressure tool for where the rail falls behind (capacity at high rpm/load, or control on a rising aim).'
+        });
     }
 
     // Finding: Knock events correlated with lean condition
@@ -266,19 +268,6 @@ function runCrossDiagnostics(columnNames, data) {
             body: 'Bank 2 closed-loop trim averages ' + clTrimB2Mean.toFixed(1) + '% — the ECU is consistently ' + direction + '.',
             action: 'Same as Bank 1 — check injector reference flow and fuel pressure calibration. If both banks show similar offset, it\'s definitely a systemic issue.'
         });
-    }
-
-    // Finding: Low PW time without lean spikes (marginal but not failing)
-    if (lowPWCount > 0 && leanWithLowPW === 0 && totalLambdaSamples > 0) {
-        var lowPWPct = (lowPWCount / totalLambdaSamples * 100).toFixed(1);
-        if (lowPWPct > 5) {
-            findings.push({
-                severity: 'info',
-                title: 'Operating Near XDI Instability Zone',
-                body: lowPWPct + '% of samples have PW below 0.8ms but no lean spikes detected yet. The system is marginal — small changes in conditions could trigger instability.',
-                action: 'Monitor closely. Consider preemptively reducing fuel pressure aim at idle to increase PW margin.'
-            });
-        }
     }
 
     // Finding: Fuel pressure consistently below aim

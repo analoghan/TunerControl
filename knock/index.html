@@ -33,6 +33,14 @@
         <span id="tune-hint" class="tune-hint"></span>
       </div>
       <p id="tune-status" class="tune-status">No tune chosen: knock is judged against the fixed threshold below.</p>
+      <div id="tune-settings" class="tune-settings" hidden>
+        <div class="threshold-row">
+          <label for="bore-input">Engine bore (mm):</label>
+          <input type="number" id="bore-input" value="103.25" step="0.01" min="50" max="200">
+          <span class="tune-hint">for the bore-based frequency check (<a href="frequency-calc.html">Frequency Calculator</a>)</span>
+        </div>
+        <ul id="tune-advice" class="tune-advice"></ul>
+      </div>
       <div class="threshold-row">
         <label for="threshold-mode">Knock Threshold:</label>
         <select id="threshold-mode" class="tune-select">
@@ -151,6 +159,7 @@
   <script src="../m1-config/tune-api.js"></script>
   <script src="../m1-config/tune-source.js"></script>
   <script src="m1pkg-knock.js"></script>
+  <script src="knock-freq.js"></script>
   <script src="../history/run-store.js"></script>
   <script src="../history/run-builders.js"></script>
   <script src="../log-viewer/log-chart.js"></script>

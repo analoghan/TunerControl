@@ -165,7 +165,7 @@
 
     <h3>Optional Channels (enhance analysis)</h3>
     <ul>
-      <li><strong>Injector Pulse Width</strong> — DI injector on-time in milliseconds. Enables pulse width stability analysis and XDI instability detection.</li>
+      <li><strong>Injector Pulse Width</strong> — DI injector on-time in milliseconds. Enables the pulse width report and tells injection cuts (pulse width 0) apart from lean combustion.</li>
       <li><strong>Injection Timing</strong> — injection event timing in degrees BTDC. Enables timing window analysis and correlation with lean spikes.</li>
       <li><strong>DI Fuel Pressure</strong> — actual high-pressure fuel rail pressure in bar. Enables pressure stability and HPFP degradation analysis.</li>
       <li><strong>DI Fuel Pressure Aim</strong> — ECU target fuel pressure in bar. Enables pressure error calculation and aim tracking.</li>
@@ -176,6 +176,7 @@
       <li><strong>Coolant Temperature</strong> — engine coolant temp for thermal condition filtering.</li>
       <li><strong>Intake Air Temperature (IAT)</strong> — charge air temperature for density correction context.</li>
       <li><strong>Fuel Mixture Aim</strong> — target lambda/AFR for comparison against actual lambda.</li>
+      <li><strong>Engine Overrun State</strong> — tells the overrun fuel cut apart from other injection cuts (for example Minimum Volume).</li>
     </ul>
 
     <div class="warning">
@@ -185,31 +186,30 @@
     <!-- Report Sections -->
     <h2 id="reports">Report Sections</h2>
 
-    <h3>Lean Spike Analysis</h3>
-    <p>Identifies samples where lambda exceeds <code>1.06</code> (lean of stoichiometric target). The analysis includes:</p>
+    <h3>Lean Episodes</h3>
+    <p>A lean episode is a stretch, with the engine running, where lambda on either bank stays above <code>1.06</code> for at least
+      0.3 s (stretches less than 0.3 s apart are joined). Logs are resampled to 100 Hz by holding values, so episodes are counted,
+      not samples. Each episode is sorted by what happened in it and the 0.5 s before it (lambda lags the injection):</p>
     <ul>
-      <li><strong>Event count</strong> — total number of lean spike samples detected</li>
-      <li><strong>Bank categorization</strong> — whether lean spikes occur on Bank 1 only, Bank 2 only, or both banks simultaneously</li>
-      <li><strong>Low PW correlation</strong> — percentage of lean spikes that coincide with low injector pulse width (near the XDI instability threshold)</li>
-      <li><strong>RPM distribution</strong> — which RPM ranges see the most lean spikes, helping identify idle/cruise vs. WOT issues</li>
+      <li><strong>Overrun fuel cut</strong> — Engine Overrun State was Enabled. Intended: lambda reads air while the injectors are off.</li>
+      <li><strong>Injectors off (no overrun)</strong> — the injector pulse width was 0 without the overrun cut. On an M1 this is
+        usually <em>Fuel Injector Primary Minimum Volume</em>: when any cylinder's request falls below it, all injectors stop until
+        every cylinder is above Minimum Volume + Hysteresis. It typically happens on closed-throttle decel, often pushed there by the
+        fuel film decrease compensation. Log <em>Fuel Cylinder 1 Primary Volume</em> to see the request fall below the minimum.</li>
+      <li><strong>Lean while fuelling</strong> — the injectors kept firing, so the mixture really was lean. These are split by bank,
+        by a pulse under 1 ms (the non-linear region, below) and by rail pressure below aim, and counted per minute of running in
+        each RPM band.</li>
     </ul>
-    <div class="example-box">
-      <p><strong>Example output:</strong></p>
-      <p><code>Lean spikes detected: 142 samples (2.3% of log)</code></p>
-      <p><code>Bank 1 only: 38% | Bank 2 only: 12% | Both banks: 50%</code></p>
-      <p><code>Correlated with low PW (&lt;0.8ms): 67%</code></p>
-    </div>
 
-    <h3>Injector Pulsewidth Stability</h3>
-    <p>Statistical analysis of injector pulse width behavior:</p>
-    <ul>
-      <li><strong>Mean, median, std deviation</strong> — overall PW statistics across the log</li>
-      <li><strong>XDI instability threshold</strong> — flags samples where PW falls below <code>0.8 ms</code>, the approximate minimum for stable DI atomization</li>
-      <li><strong>5th percentile diagnostic</strong> — reports the PW value at the 5th percentile. If this is below 0.8 ms, a significant portion of operation is in the instability zone</li>
-      <li><strong>Time-in-zone</strong> — percentage of the log spent below the instability threshold</li>
-    </ul>
+    <h3>Injector Pulse Width</h3>
+    <p>Pulse width statistics while the engine runs and the injector fires (pulse width above 0.05 ms): mean, median, spread and the
+      5th and 1st percentiles, and the share of injecting time below <code>1 ms</code>.</p>
     <div class="warning">
-      <strong>XDI Instability Zone:</strong> Direct injection injectors require a minimum pulse width (~0.8 ms) to properly atomize fuel. Below this threshold, fuel delivery becomes erratic — the injector may deliver inconsistent fuel mass or fail to open fully, causing lean misfires.
+      <strong>The short-pulse region:</strong> below about 1 ms a DI injector is non-linear — the fuel it delivers no longer follows
+      flow × time (MoTeC M1 injector characterisation training; GM Gen V calls the correction the short pulse adder). That is not a
+      fault: on an M1 it is covered by <em>Fuel Injector Primary Linearisation</em>, whose pulse-volume axis should be filled from the
+      injector maker's small-pulse data. Below the injector's minimum (GM's stock calibration stops at 0.3 ms; on an M1 it is
+      <em>Minimum Volume</em>) delivery is erratic and the M1 does not inject at all.
     </div>
 
     <h3>DI Fuel Pressure</h3>
@@ -252,10 +252,10 @@
     <p>Plots lambda values over time for all available banks. Lean spikes appear as upward excursions above the 1.06 threshold line. Use this to see whether lean events are transient spikes or sustained lean conditions, and whether they correlate with specific driving events.</p>
 
     <h3>Pulse Width Time Series</h3>
-    <p>Injector pulse width over time with the 0.8 ms XDI instability threshold marked. Helps identify when the engine enters the instability zone — typically at idle, deceleration, or light-load cruise. Look for correlation between PW dips and lean spikes on the lambda chart.</p>
+    <p>Injector pulse width over time with the 1 ms short-pulse limit marked. A pulse width of 0 with the engine running is an injection cut (overrun or Minimum Volume) — compare with the lambda chart.</p>
 
     <h3>Lambda vs Pulse Width Scatter</h3>
-    <p>Scatter plot of lambda against injector pulse width. The key diagnostic chart for DI instability — you should see lean spikes clustering at low pulse widths (below 0.8 ms). If lean spikes occur across all pulse widths, the issue is likely fuel pressure or VE table related rather than injector minimum PW.</p>
+    <p>Scatter plot of lambda against injector pulse width. Lean points at a pulse width of 0 are injection cuts, not lean combustion. Lean points clustered below 1 ms point at the injector linearisation; lean points across all pulse widths point at the fuel model, film or rail pressure.</p>
 
     <h3>Fuel Pressure Time Series</h3>
     <p>DI fuel rail pressure over time, with the aim pressure overlaid if available. Look for:</p>
@@ -266,7 +266,7 @@
     </ul>
 
     <h3>Pulse Width Histogram</h3>
-    <p>Distribution of injector pulse width values across the log. Shows how much time is spent at various PW levels. A large portion of the distribution below 0.8 ms indicates the engine frequently operates in the XDI instability zone — consider raising idle airflow or adjusting fuel pressure targets to increase PW.</p>
+    <p>Distribution of firing pulse widths (above 0.05 ms). Bars below 1 ms (red) are in the injector's non-linear region, where fuelling depends on the linearisation data.</p>
 
     <h3>Lambda-RPM Density</h3>
     <p>2D density plot showing lambda values across the RPM range. Identifies which RPM bands have the most lean excursions. Useful for distinguishing idle lean spikes (low RPM) from tip-in lean spikes (mid RPM) from high-load issues (high RPM).</p>
@@ -277,48 +277,18 @@
     <!-- GM LT4 DI-Specific Guidance -->
     <h2 id="lt4-di">GM LT4 DI-Specific Guidance</h2>
 
-    <h3>XDI (Extreme Direct Injection) Injector Characteristics</h3>
-    <p>The LT4 uses GM's XDI (Extreme Direct Injection) system with solenoid-actuated, multi-hole injectors operating at pressures up to 200 bar. Key characteristics:</p>
+    <h3>Injectors and Pulse Width</h3>
     <ul>
-      <li><strong>Multi-hole nozzle design</strong> — produces a structured spray pattern optimized for the combustion chamber geometry</li>
-      <li><strong>High-speed solenoid actuation</strong> — enables multiple injection events per combustion cycle (pilot + main + post)</li>
-      <li><strong>Pressure-dependent flow</strong> — fuel mass delivered depends on both pulse width AND rail pressure (unlike port injection where flow is primarily PW-dependent)</li>
-      <li><strong>Minimum operating pulse width</strong> — below ~0.8 ms, the injector needle may not fully open or the spray pattern degrades, causing poor atomization and inconsistent fuel delivery</li>
+      <li><strong>Pressure-dependent flow</strong> — fuel delivered depends on pulse width <em>and</em> rail differential pressure.
+        The M1 uses the measured differential pressure, so a rail that is off its aim is compensated as long as the injector data is right.</li>
+      <li><strong>Non-linear below about 1 ms</strong> — needs <em>Fuel Injector Primary Linearisation</em> from the injector's
+        small-pulse data. Aftermarket injectors (for example XDI) need their own data; the stock injector's will not fit.</li>
+      <li><strong>Minimum Volume</strong> — the smallest pulse the M1 will deliver; requests below it switch the injectors off (see Lean Episodes).
+        Use the injector maker's figure.</li>
+      <li><strong>Rail pressure vs pulse width</strong> — lower pressure lengthens the pulse for the same fuel (further from the
+        non-linear region) but atomises less well; the DI Fuel Pressure tool shows how the rail tracks its aim. Characterising the
+        injector is the better fix than moving pressure to dodge the short-pulse region.</li>
     </ul>
-
-    <h3>Minimum Pulse Width Considerations</h3>
-    <p>DI injectors have a more critical minimum pulse width than port injectors due to the high-pressure environment and spray pattern requirements:</p>
-    <table class="freq-table">
-      <thead>
-        <tr><th>PW Range</th><th>Behavior</th><th>Concern Level</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>&gt; 1.2 ms</td><td>Normal operation, full atomization</td><td class="highlight">None</td></tr>
-        <tr><td>0.8 – 1.2 ms</td><td>Marginal zone, atomization may degrade</td><td>Low — monitor</td></tr>
-        <tr><td>0.5 – 0.8 ms</td><td>XDI instability zone, erratic fuel delivery</td><td>High — lean spikes likely</td></tr>
-        <tr><td>&lt; 0.5 ms</td><td>Injector may not open, severe lean risk</td><td style="color: #f44336; font-weight: 600;">Critical</td></tr>
-      </tbody>
-    </table>
-    <div class="tip">
-      <strong>Tip:</strong> If your engine spends significant time below 0.8 ms PW at idle, consider increasing idle airflow (higher idle RPM or more throttle opening) or reducing fuel pressure aim at idle to force longer pulse widths. The trade-off is slightly higher fuel consumption at idle vs. stable combustion.
-    </div>
-
-    <h3>Fuel Pressure Targets for DI Systems</h3>
-    <p>The LT4 HPFP (High-Pressure Fuel Pump) is cam-driven and varies pressure with load demand:</p>
-    <table class="freq-table">
-      <thead>
-        <tr><th>Operating Condition</th><th>Typical Pressure (bar)</th><th>Notes</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>Idle / Light Load</td><td>50 – 100</td><td>Lower pressure to allow longer PW for stability</td></tr>
-        <tr><td>Part Throttle / Cruise</td><td>100 – 150</td><td>Balanced for efficiency and response</td></tr>
-        <tr><td>Full Load / Boost</td><td>150 – 200</td><td>Maximum pressure for peak fuel delivery</td></tr>
-        <tr><td>Transient (Tip-in)</td><td>Rapidly rising</td><td>HPFP must respond quickly; lag causes lean spikes</td></tr>
-      </tbody>
-    </table>
-    <div class="warning">
-      <strong>Pressure vs. Pulse Width Trade-off:</strong> Higher rail pressure delivers more fuel per millisecond of injector opening. This means at high pressure, the same fuel mass requires a shorter pulse width. At idle with high pressure, PW can drop into the instability zone. The ECU's fuel pressure aim table should reduce pressure at idle/light load to keep PW above the minimum threshold.
-    </div>
 
     <h3>Injection Timing</h3>
     <p>DI injection timing is specified in degrees Before Top Dead Center (dBTDC) and determines when fuel enters the cylinder relative to the piston position:</p>
@@ -340,7 +310,8 @@
     <ul>
       <li><strong>HPFP degradation</strong> — the cam-driven high-pressure pump wears over time, especially on modified engines with higher fuel demand. Symptoms: pressure drops below aim at high RPM/load, increasing lean spikes under boost, audible pump noise changes.</li>
       <li><strong>Injector coking</strong> — carbon deposits on injector tips restrict spray pattern and reduce flow. Symptoms: gradual increase in lean spikes, bank-to-bank lambda imbalance, increasing CL trim offsets over time.</li>
-      <li><strong>Low-PW lean spikes at idle/light load</strong> — the most common DI issue. The ECU commands very short pulse widths at idle, pushing injectors into the instability zone. Symptoms: intermittent lean spikes at idle, rough idle, occasional misfires at light load.</li>
+      <li><strong>Lean at short pulses</strong> — lean while fuelling with pulses under about 1 ms usually means the injector linearisation does not match the injector (common after an injector change).</li>
+      <li><strong>Injection cut on decel</strong> — lambda reads air off-throttle without the overrun cut: the request fell below Minimum Volume (see Lean Episodes).</li>
       <li><strong>Fuel pressure transient lag</strong> — during rapid throttle application, the HPFP cannot increase pressure fast enough. Symptoms: lean spikes during tip-in, pressure dip visible on fuel pressure chart during transients.</li>
       <li><strong>Injector seal leakage</strong> — high-pressure seals degrade, causing fuel to leak past the injector body. Symptoms: fuel smell, single-cylinder lean condition, visible fuel residue around injector bore.</li>
     </ul>
@@ -354,21 +325,12 @@
     <ol>
       <li><strong>Baseline analysis:</strong> Log a session covering idle, cruise, part-throttle, and WOT. Load into this tool and analyze to establish the current state of injector behavior.</li>
       <li><strong>Identify lean spikes:</strong> Review the Lean Spike Analysis report. Note the bank distribution, RPM range, and correlation with low PW.</li>
-      <li><strong>Check PW stability:</strong> Review the Pulse Width Stability report. If significant time is spent below 0.8 ms, this is likely the root cause of lean spikes at idle/light load.</li>
+      <li><strong>Sort the lean episodes:</strong> overrun cuts are expected; injector-off episodes point at Minimum Volume and the film decrease; lean-while-fuelling with short pulses points at the injector linearisation.</li>
       <li><strong>Verify fuel pressure:</strong> Check the DI Fuel Pressure report. Ensure pressure tracks aim across all conditions. Flag any HPFP degradation warnings.</li>
       <li><strong>Review timing:</strong> Check injection timing distribution. Ensure most events fall in the 240–320 dBTDC intake stroke window.</li>
-      <li><strong>Adjust VE/fuel tables:</strong> Based on CL trim analysis, correct VE table regions where trim offsets exceed ±5%. Adjust fuel pressure aim to keep PW above 0.8 ms at idle.</li>
+      <li><strong>Adjust VE/fuel tables:</strong> Based on CL trim analysis, correct VE table regions where trim offsets exceed ±5%.</li>
       <li><strong>Re-log and verify:</strong> After changes, log another session and re-analyze. Lean spike count should decrease and CL trims should center closer to 0%.</li>
     </ol>
-    <div class="example-box">
-      <p><strong>Typical workflow iteration:</strong></p>
-      <p>1. Baseline: 142 lean spikes, 67% correlated with low PW</p>
-      <p>2. Reduce fuel pressure aim at idle from 120 bar → 80 bar (increases PW)</p>
-      <p>3. Re-log: 23 lean spikes, 30% correlated with low PW</p>
-      <p>4. Adjust VE table in idle region (+4% based on CL trim)</p>
-      <p>5. Re-log: 5 lean spikes, within acceptable range</p>
-    </div>
-
     <!-- Interpreting Diagnostics -->
     <h2 id="diagnostics">Interpreting Diagnostics</h2>
 
@@ -380,8 +342,8 @@
       <tbody>
         <tr>
           <td>Both banks lean simultaneously</td>
-          <td>System-wide issue: low fuel pressure, VE table error, or fuel pressure aim too high (causing low PW)</td>
-          <td>Check fuel pressure, review VE table, lower pressure aim at affected RPM/load</td>
+          <td>System-wide issue: fuel model (VE), fuel film, rail pressure or injector data</td>
+          <td>Check the closed-loop trims, the Transient Fuel tool, the DI Fuel Pressure tool and the injector linearisation</td>
         </tr>
         <tr>
           <td>Bank 1 only</td>
@@ -400,19 +362,6 @@
         </tr>
       </tbody>
     </table>
-
-    <h3>XDI Instability Zone Explanation</h3>
-    <p>The "XDI instability zone" refers to the pulse width range below <code>0.8 ms</code> where direct injection injectors cannot reliably atomize fuel. This is a fundamental physical limitation:</p>
-    <ul>
-      <li>The injector solenoid requires a minimum energization time to fully lift the needle off its seat</li>
-      <li>Below this time, the needle may only partially open, creating an irregular spray pattern</li>
-      <li>Partial needle lift reduces the effective flow area, making fuel delivery unpredictable</li>
-      <li>The high-pressure differential (100+ bar) means even small variations in needle lift cause large changes in delivered fuel mass</li>
-    </ul>
-    <div class="example-box">
-      <p><strong>Why 0.8 ms?</strong></p>
-      <p>The 0.8 ms threshold is empirically derived from GM XDI injector characterization data. It represents the approximate point where injector-to-injector variation in delivered fuel mass exceeds ±5% — enough to cause perceptible lambda fluctuations. Individual injectors may have slightly different thresholds due to manufacturing tolerances and wear.</p>
-    </div>
 
     <h3>HPFP Warning Interpretation</h3>
     <p>The tool generates HPFP (High-Pressure Fuel Pump) warnings based on these criteria:</p>

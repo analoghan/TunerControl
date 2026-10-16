@@ -6,7 +6,8 @@
  *   threshold: { rpm: [..], load: [..] | null, values: [[% per rpm site] per load site] } | null   (Knock.Threshold)
  *   ignitionAxes: { rpm: [..], load: [..], loadInput } | null    (Ignition.Timing.Main sites, to bin knock like the table)
  *   inputs: ['Knock Input 1', …] per cylinder (index 0 = cylinder 1) | null
- *   trimLimit, trimGain: degrees (first site) | null
+ *   trimLimit, trimGain: first site, as stored (the tune shows both in degrees) | null
+ *   frequencies: [A, B, C, D] Hz | null      mode: Knock Mode label, e.g. 'Enable A B C D' | null
  *   notes: [string]
  * }
  * Package values are SI: engine speed in deg/s (÷ 6 → rpm), ratios (× 100 → %).
@@ -73,6 +74,10 @@ function m1pkgKnock(pkg) {
     }
     out.trimLimit = first('Knock.Trim.Limit');
     out.trimGain = first('Knock.Trim.Gain');
+    out.frequencies = ['A', 'B', 'C', 'D'].map(function (k) { return first('Knock.Frequency ' + k); });
+    if (!out.frequencies.some(function (f) { return f > 0; })) out.frequencies = null;
+    var mode = m1knItem(pkg, 'Knock.Mode');
+    out.mode = mode ? mode.label || null : null;
     return out;
 }
 

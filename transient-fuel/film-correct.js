@@ -62,6 +62,7 @@ function computeFuelFilmCorrections(result, settings) {
         var evt = tipIns[e];
         if (evt.leanSpike <= 2) continue;
         if ((evt.richBefore || 0) > 3) continue;   // rich before the lean peak: not a shortage of film (see generateRecommendations)
+        if (evt.nearIdle) continue;                // near idle the lambda sensor is too slow to read film effects
 
         var bestIdx = 0;
         var bestDist = Math.abs(evt.mapTo - ffTable.breakpoints[0]);

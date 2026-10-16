@@ -432,86 +432,57 @@ function renderLeanSpikesReport(result) {
         return;
     }
 
-    // Summary statistics
-    var statsGrid = createStatsGrid([
+    // Lean episodes by cause (see analyzeLeanSpikes in worker.js)
+    content.appendChild(createStatsGrid([
         ['Lambda Channel', result.lambdaChannelUsed],
-        ['Total Samples', result.totalSamples.toLocaleString()],
-        ['Lean Events', result.leanEventCount.toLocaleString()],
-        ['Lean Event %', result.leanEventPct.toFixed(2) + '%']
-    ]);
-    content.appendChild(statsGrid);
+        ['Engine Running', (result.runningSeconds / 60).toFixed(1) + ' min'],
+        ['Lean Episodes', result.episodeCount.toLocaleString()],
+        ['Overrun Fuel Cut', result.hasOverrunChannel ? result.overrunCount.toLocaleString() : 'not logged'],
+        ['Injectors Off (no overrun)', result.hasPW ? result.injectionOffCount.toLocaleString() : 'no PW channel'],
+        ['Lean While Fuelling', result.fuelledCount.toLocaleString()]
+    ]));
 
-    // Bank categorization (if available)
-    if (result.bothBanksLean !== null) {
+    if (result.fuelledCount && result.bothBanksLean !== null) {
         var bankHeading = document.createElement('h3');
-        bankHeading.textContent = 'Bank Categorization';
+        bankHeading.textContent = 'Lean While Fuelling — by Bank and Cause';
         content.appendChild(bankHeading);
-
-        var bankGrid = createStatsGrid([
-            ['Both Banks Lean', result.bothBanksLean.toLocaleString()],
-            ['Only Bank 1 Lean', result.onlyB1Lean.toLocaleString()],
-            ['Only Bank 2 Lean', result.onlyB2Lean.toLocaleString()]
-        ]);
-        content.appendChild(bankGrid);
+        content.appendChild(createStatsGrid([
+            ['Both Banks', result.bothBanksLean.toLocaleString()],
+            ['Bank 1 Only', result.onlyB1Lean.toLocaleString()],
+            ['Bank 2 Only', result.onlyB2Lean.toLocaleString()],
+            ['With PW < 1 ms', result.fuelledShortPW !== null ? result.fuelledShortPW.toLocaleString() : '—'],
+            ['Rail Pressure Below Aim', result.fuelledLowPressure.toLocaleString()]
+        ]));
     }
 
-    // Low-PW correlation (if available)
-    if (result.lowPWEvents !== null) {
-        var pwHeading = document.createElement('h3');
-        pwHeading.textContent = 'Low-PW Correlation';
-        content.appendChild(pwHeading);
-
-        var pwGrid = createStatsGrid([
-            ['Low PW Events (< 0.8 ms)', result.lowPWEvents.toLocaleString()],
-            ['Lean with Low PW', result.leanWithLowPW.toLocaleString()],
-            ['Lean with Low PW %', result.leanWithLowPWPct.toFixed(1) + '%']
-        ]);
-        content.appendChild(pwGrid);
-    }
-
-    // RPM distribution table
-    if (result.rpmDistribution && result.rpmDistribution.length > 0) {
+    // RPM distribution of the lean-while-fuelling episodes
+    if (result.fuelledCount && result.rpmDistribution && result.rpmDistribution.length > 0) {
         var rpmHeading = document.createElement('h3');
-        rpmHeading.textContent = 'RPM Distribution';
+        rpmHeading.textContent = 'Lean While Fuelling — by RPM';
         content.appendChild(rpmHeading);
 
         var table = document.createElement('table');
         table.className = 'rpm-table';
-
         var thead = document.createElement('thead');
         var headerRow = document.createElement('tr');
-        var headers = ['RPM Band', 'Spikes', 'Total', '%'];
-        for (var h = 0; h < headers.length; h++) {
+        ['RPM Band', 'Episodes', 'Time Running', 'Per Minute'].forEach(function (h) {
             var th = document.createElement('th');
-            th.textContent = headers[h];
+            th.textContent = h;
             headerRow.appendChild(th);
-        }
+        });
         thead.appendChild(headerRow);
         table.appendChild(thead);
 
         var tbody = document.createElement('tbody');
-        for (var r = 0; r < result.rpmDistribution.length; r++) {
-            var row = result.rpmDistribution[r];
+        result.rpmDistribution.forEach(function (row) {
             var tr = document.createElement('tr');
-
-            var tdBand = document.createElement('td');
-            tdBand.textContent = row.band;
-            tr.appendChild(tdBand);
-
-            var tdSpikes = document.createElement('td');
-            tdSpikes.textContent = row.spikes.toLocaleString();
-            tr.appendChild(tdSpikes);
-
-            var tdTotal = document.createElement('td');
-            tdTotal.textContent = row.total.toLocaleString();
-            tr.appendChild(tdTotal);
-
-            var tdPct = document.createElement('td');
-            tdPct.textContent = row.pct.toFixed(1) + '%';
-            tr.appendChild(tdPct);
-
+            [row.band, row.spikes.toLocaleString(), (row.seconds / 60).toFixed(1) + ' min', row.seconds > 0 ? row.perMinute.toFixed(2) : '—'].forEach(function (v) {
+                var td = document.createElement('td');
+                td.textContent = v;
+                tr.appendChild(td);
+            });
             tbody.appendChild(tr);
-        }
+        });
         table.appendChild(tbody);
         content.appendChild(table);
     }
@@ -547,7 +518,7 @@ function renderPWStabilityReport(result) {
         ['Std Dev', result.stdDev.toFixed(3) + ' ms'],
         ['5th Percentile', result.pct5th.toFixed(3) + ' ms'],
         ['1st Percentile', result.pct1st.toFixed(3) + ' ms'],
-        ['Below 0.8 ms', result.belowThresholdCount.toLocaleString() + ' (' + result.belowThresholdPct.toFixed(1) + '%)']
+        ['Below 1 ms (non-linear)', result.belowThresholdCount.toLocaleString() + ' (' + result.belowThresholdPct.toFixed(1) + '%)']
     ]);
     content.appendChild(statsGrid);
 

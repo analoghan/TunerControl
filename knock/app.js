@@ -62,12 +62,66 @@ function setTune(knock, sourceLabel) {
     if (knock && knock.threshold) thresholdMode.value = 'tune';
     else if (thresholdMode.value === 'tune') thresholdMode.value = 'fixed';
     syncThresholdInput();
+    renderTuneSettings();
     if (!knock) { tuneStatus.textContent = 'No tune chosen: knock is judged against the fixed threshold below.'; return; }
     tuneStatus.textContent = sourceLabel + ': ' + (knock.tuneName || 'tune') + '. ' +
         (knock.threshold ? 'Knock Threshold ' + fmtThresholdTable(knock.threshold) + '. ' : 'No Knock Threshold table found. ') +
         (knock.ignitionAxes ? 'Knock grid uses the Ignition Timing Main sites. ' : '') +
         (knock.inputs ? 'Knock inputs per cylinder read from the tune.' : '') + (knock.notes.length ? ' ' + knock.notes.join(' ') : '');
 }
+
+/**
+ * Advice on the tune's knock control settings: frequency A against the bore-based first and second order
+ * (knock-freq.js), the knock mode and the trim gain. Returns [{ level, text }].
+ */
+function knockSettingsAdvice(knock, boreMm) {
+    var out = [], f = knockFrequencies(boreMm), fa = knock.frequencies ? knock.frequencies[0] : null;
+    if (knock.frequencies) {
+        var list = knock.frequencies.map(function (v, i) { return 'ABCD'[i] + ' ' + Math.round(v).toLocaleString(); }).join(', ') + ' Hz';
+        if (f && fa > 0) {
+            var near = Math.min(Math.abs(fa / f.first - 1), Math.abs(fa / f.second - 1));
+            out.push({ level: near > 0.25 ? 'warning' : 'info',
+                text: 'Knock Frequency ' + list + '. For a ' + boreMm + ' mm bore the bore-based first order is about ' + f.first.toLocaleString() +
+                    ' Hz and the second order ' + f.second.toLocaleString() + ' Hz' + (near > 0.25
+                    ? ': frequency A is ' + Math.round(near * 100) + ' % from the nearer of the two. Run a frequency test (Frequency Calculator) before trusting knock control, and set Knock Threshold again afterwards.'
+                    : '. Frequency A is close to one of them; only a frequency test confirms it is the best.') });
+        } else {
+            out.push({ level: 'info', text: 'Knock Frequency ' + list + '.' });
+        }
+    }
+    if (knock.mode) {
+        out.push({ level: 'info', text: 'Knock Mode: ' + knock.mode + (/B/.test(knock.mode)
+            ? '. M1 uses frequency A for knock control; B–D only add levels to compare during a frequency test — set Enable A once A is chosen.'
+            : '.') });
+    }
+    if (knock.trimGain !== null && knock.trimGain !== undefined) {
+        var g = +knock.trimGain.toFixed(1);
+        out.push({ level: g < 100 ? 'warning' : 'info',
+            text: 'Knock Trim Gain ' + g + (knock.trimLimit !== null ? ', Knock Trim Limit ' + (+knock.trimLimit.toFixed(1)) + '°' : '') +
+                (g < 100 ? '. MoTeC\'s knock training starts at a gain of 100 (1° of retard per 1 % over the threshold); ' + g +
+                    ' retards ' + (+(g / 100).toFixed(2)) + '° per 1 %, so knock is taken out more slowly.' : '.') });
+    }
+    return out;
+}
+
+var boreInput = document.getElementById('bore-input');
+function renderTuneSettings() {
+    var items = tuneKnock ? knockSettingsAdvice(tuneKnock, parseFloat(boreInput.value)) : [];
+    var list = document.getElementById('tune-advice');
+    list.textContent = '';
+    items.forEach(function (a) {
+        var li = document.createElement('li');
+        li.className = a.level;
+        li.textContent = a.text;
+        list.appendChild(li);
+    });
+    document.getElementById('tune-settings').hidden = !items.length;
+}
+try { if (localStorage.getItem('knockBoreMm')) boreInput.value = localStorage.getItem('knockBoreMm'); } catch (e) { /* storage unavailable */ }
+boreInput.addEventListener('input', function () {
+    try { localStorage.setItem('knockBoreMm', boreInput.value); } catch (e) { /* storage unavailable */ }
+    renderTuneSettings();
+});
 
 function syncThresholdInput() { thresholdInput.disabled = thresholdMode.value === 'tune'; }
 thresholdMode.addEventListener('change', syncThresholdInput);

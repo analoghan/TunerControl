@@ -519,6 +519,11 @@ h1 {
 .tune-hint { font-size: 0.8rem; color: #888; }
 .tune-hint.suggested { color: #4caf50; }
 .tune-status { font-size: 0.85rem; color: #b0b0b0; margin: 0 0 12px; }
+.tune-settings input[type="number"] { width: 90px; padding: 4px 8px; background: #222; border: 1px solid #333; border-radius: 4px; color: #fff; }
+.tune-settings a { color: #E31837; }
+.tune-advice { margin: 4px 0 12px; padding-left: 20px; font-size: 0.85rem; color: #b0b0b0; }
+.tune-advice li { margin-bottom: 4px; }
+.tune-advice li.warning { color: #ff9800; }
 .section-note { color: #888; font-size: 0.85rem; margin: 0 0 10px; }
 .knock-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 .knock-table th, .knock-table td { padding: 5px 8px; border: 1px solid #333; text-align: center; color: #ccc; }

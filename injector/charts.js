@@ -26,6 +26,9 @@ if (typeof ChartZoom !== 'undefined' && typeof Chart !== 'undefined') {
 // Color Palette
 // ---------------------------------------------------------------------------
 
+/** Below this a DI injector is non-linear (short-pulse region); matches THRESHOLDS.SHORT_PW_MS in worker.js. */
+var INJ_SHORT_PW_MS = 1.0;
+
 var CHART_COLORS = {
     lambdaB1:       '#4a9eff',
     lambdaB2:       '#ff6b7a',
@@ -269,7 +272,7 @@ function renderLambdaTimeSeries(canvas, data) {
 
 /**
  * Renders the Injector Pulsewidth time series chart.
- * Line chart: PW over time, with 0.8ms threshold.
+ * Line chart: PW over time, with the short-pulse (non-linear) region marked.
  */
 function renderPWTimeSeries(canvas, data) {
     destroyChart('pwTs');
@@ -298,7 +301,7 @@ function renderPWTimeSeries(canvas, data) {
             fill: false,
             order: 1
         },
-        makeThresholdDataset('XDI threshold (0.8 ms)', 0.8, tMin, tMax, CHART_COLORS.threshold)
+        makeThresholdDataset('Short-pulse region (< ' + INJ_SHORT_PW_MS + ' ms)', INJ_SHORT_PW_MS, tMin, tMax, CHART_COLORS.threshold)
     ];
 
     chartInstances['pwTs'] = new Chart(canvas, {
@@ -369,7 +372,7 @@ function renderLambdaVsPWScatter(canvas, data) {
             order: 1
         },
         makeThresholdDataset('Lean threshold (1.06)', 1.06, pwMin, pwMax, CHART_COLORS.threshold),
-        makeVerticalThresholdDataset('XDI threshold (0.8 ms)', 0.8, lamMin, lamMax, CHART_COLORS.threshold)
+        makeVerticalThresholdDataset('Short-pulse region (< ' + INJ_SHORT_PW_MS + ' ms)', INJ_SHORT_PW_MS, lamMin, lamMax, CHART_COLORS.threshold)
     ];
 
     chartInstances['lambdaPwScatter'] = new Chart(canvas, {
@@ -461,7 +464,7 @@ function renderFuelPressureTimeSeries(canvas, data) {
 
 /**
  * Renders the PW Histogram chart.
- * Bar chart: PW distribution histogram with 0.8ms threshold line.
+ * Bar chart: distribution of firing pulse widths (> 0.05 ms), the short-pulse region in red.
  */
 function renderPWHistogram(canvas, data) {
     destroyChart('pwHistogram');
@@ -474,7 +477,7 @@ function renderPWHistogram(canvas, data) {
     var validCount = 0;
     for (var i = 0; i < pw.length; i++) {
         var v = pw[i];
-        if (isNaN(v)) continue;
+        if (isNaN(v) || v <= 0.05) continue;   // injector not firing
         if (v < pwMin) pwMin = v;
         if (v > pwMax) pwMax = v;
         validCount++;
@@ -495,20 +498,20 @@ function renderPWHistogram(canvas, data) {
 
     for (var i = 0; i < pw.length; i++) {
         var val = pw[i];
-        if (isNaN(val)) continue;
+        if (isNaN(val) || val <= 0.05) continue;
         var binIdx = Math.floor((val - pwMin) / binWidth);
         if (binIdx >= numBins) binIdx = numBins - 1;
         if (binIdx < 0) binIdx = 0;
         bins[binIdx]++;
     }
 
-    // Determine which bin the 0.8ms threshold falls in
-    var thresholdBinIdx = Math.floor((0.8 - pwMin) / binWidth);
+    // Bins below the short-pulse limit
+    var thresholdBinIdx = Math.floor((INJ_SHORT_PW_MS - pwMin) / binWidth);
 
     // Color bars: below threshold in red-tinted, above in teal
     var barColors = [];
     for (var i = 0; i < numBins; i++) {
-        if (i <= thresholdBinIdx && 0.8 >= pwMin && 0.8 <= pwMax) {
+        if (i < thresholdBinIdx || (i === thresholdBinIdx && INJ_SHORT_PW_MS >= pwMin && INJ_SHORT_PW_MS <= pwMax)) {
             barColors.push('rgba(220, 53, 69, 0.6)');
         } else {
             barColors.push(CHART_COLORS.pw);

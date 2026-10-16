@@ -17,6 +17,7 @@ logInput.addEventListener('change', function() {
 });
 
 var ffFromPkg = null;   // fuel film table read from a selected .m1pkg (null for CSV or no file)
+var ffTuneChecks = null; // tune settings checked by the recommendations (m1pkg-film.js tuneChecks), from the chosen tune
 var ffTuneInfo = null;  // { id, name } of the tune the fuel film table came from (id only for a stored tune)
 
 ffTableInput.addEventListener('change', function() {
@@ -130,6 +131,7 @@ tsInit().then(tsList).then(function (list) {
 
 /** Fills the scale, offset and time-constant inputs with the values read from a tune package. */
 function applyTuneSettings(film) {
+    ffTuneChecks = film.tuneChecks || null;
     function set(id, value, dps) {
         if (typeof value === 'number' && isFinite(value)) document.getElementById(id).value = +value.toFixed(dps);
     }
@@ -160,6 +162,7 @@ analyzeBtn.addEventListener('click', function() {
         ffScale: parseFloat(document.getElementById('ff-scale').value) || 100,
         ffOffset: parseFloat(document.getElementById('ff-offset').value) || 0,
         minCoolant: parseFloat(document.getElementById('min-coolant').value),
+        tuneFilm: ffFromPkg && ffTuneChecks ? ffTuneChecks : null,
         currentTimeConstants: {
             fastPct: parseFloat(document.getElementById('fast-pct').value) || 30,
             fastIncrease: parseFloat(document.getElementById('fast-increase').value) || 0.2,
@@ -261,9 +264,17 @@ function renderSummary(r) {
         stat(r.avgRichOvershoot.toFixed(1) + '%', 'Avg Rich Overshoot') +
         stat((r.unsettledTipIns ? '≥ ' : '') + Math.round(r.avgRecoveryTime) + 'ms', 'Avg Recovery Time' +
             (r.unsettledTipIns ? ' (' + r.unsettledTipIns + ' never settled)' : '')) +
-        stat(r.skippedFuelCut || 0, 'Skipped (overrun/fuel cut)') +
+        stat(r.skippedFuelCut || 0, 'Skipped (fuel cut)' + skippedDetail(r.skippedByReason)) +
+        stat(r.nearIdleEvents || 0, 'Near idle (not used for advice)') +
         stat(r.richFirstTipIns || 0, 'Tip-ins rich, then lean') +
         '</div>';
+}
+
+/** " — 3 overrun, 5 injectors off" from the skipped-event reasons. */
+function skippedDetail(by) {
+    var names = { overrun: 'overrun', 'injection-off': 'injectors off', 'cut-count': 'cut count', air: 'lambda > 1.5' };
+    var parts = Object.keys(by || {}).map(function (k) { return by[k] + ' ' + (names[k] || k); });
+    return parts.length ? ' — ' + parts.join(', ') : '';
 }
 
 function stat(value, label) {

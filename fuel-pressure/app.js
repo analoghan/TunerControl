@@ -615,7 +615,7 @@ function renderPressurePwImpact(pwImpact) {
 
     var note = document.createElement('p');
     note.style.cssText = 'color:#666;font-size:0.8rem;font-style:italic;margin-top:8px;';
-    note.textContent = 'If PW increase pushes injectors below 0.8ms at idle/light load, XDI instability may result. Cross-reference with the Injector Characterization tool.';
+    note.textContent = 'The M1 lengthens the pulse itself from the measured rail pressure (Fuel Injector Primary Differential Pressure), so undershoot is compensated as long as the injector data is right and the longer pulse still ends in time — check the latest end of injection in the DI Injection Timing tool.';
     content.appendChild(note);
 }
 

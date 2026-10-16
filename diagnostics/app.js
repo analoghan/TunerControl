@@ -60,8 +60,10 @@ analyzeBtn.addEventListener('click', function() {
     reader.onload = function() {
         if (worker) { worker.terminate(); worker = null; }
 
+        // The injector worker supplies the lean-episode analysis; this tool's worker loads last so its handler wins.
+        var injectorUrl = new URL('../injector/worker.js', window.location.href).href;
         var workerUrl = new URL('worker-diagnostics.js', window.location.href).href;
-        var blob = new Blob(['importScripts("' + workerUrl + '");'], { type: 'application/javascript' });
+        var blob = new Blob(['importScripts("' + injectorUrl + '", "' + workerUrl + '");'], { type: 'application/javascript' });
         worker = new Worker(URL.createObjectURL(blob));
 
         worker.onmessage = function(e) {
@@ -124,10 +126,11 @@ function renderResults(diagnostics) {
     // Summary stats
     addStat(s.duration, 'Log Duration');
     addStat(s.totalSamples.toLocaleString(), 'Total Samples');
-    addStat(s.leanEvents.toLocaleString(), 'Lean Events');
+    addStat(s.leanEvents.toLocaleString(), 'Lean Episodes (fuelling)');
+    addStat(s.injectionOffEvents.toLocaleString(), 'Injection Cuts (no overrun)');
     addStat(s.knockEvents.toLocaleString(), 'Knock Events');
     addStat(s.pressureBelowAim + '%', 'Pressure Below Aim');
-    addStat(s.lowPWSamples.toLocaleString(), 'Low PW Samples');
+    addStat(s.shortPWPct + '%', 'Injecting Below 1 ms');
 
     // Findings
     for (var i = 0; i < diagnostics.findings.length; i++) {

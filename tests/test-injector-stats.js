@@ -1,232 +1,101 @@
 /**
- * Unit tests for analyzeLeanSpikes function in injector/worker.js
+ * Unit tests for analyzeLeanSpikes in injector/worker.js: lean episodes (not samples), sorted into the
+ * overrun fuel cut, injectors off without overrun (Minimum Volume) and lean while fuelling.
  */
 
 describe('analyzeLeanSpikes', function () {
 
-    // Helper to build a channels object with specified indices
+    // Columns: [time, rpm, lambda_b1, lambda_b2, inj_pw, overrun, map]
     function makeChannels(opts) {
-        return {
-            time: opts.time !== undefined ? opts.time : -1,
-            rpm: opts.rpm !== undefined ? opts.rpm : 0,
-            map: opts.map !== undefined ? opts.map : -1,
-            lambda_b1: opts.lambda_b1 !== undefined ? opts.lambda_b1 : -1,
-            lambda_b2: opts.lambda_b2 !== undefined ? opts.lambda_b2 : -1,
-            lambda_avg: opts.lambda_avg !== undefined ? opts.lambda_avg : -1,
-            inj_pw: opts.inj_pw !== undefined ? opts.inj_pw : -1,
-            inj_timing: opts.inj_timing !== undefined ? opts.inj_timing : -1,
-            tps: opts.tps !== undefined ? opts.tps : -1,
-            fuel_press_di: opts.fuel_press_di !== undefined ? opts.fuel_press_di : -1,
-            fuel_press_di_aim: opts.fuel_press_di_aim !== undefined ? opts.fuel_press_di_aim : -1,
-            coolant_temp: -1,
-            iat: -1,
-            cl_trim_b1: -1,
-            cl_trim_b2: -1,
-            fuel_mix_aim: -1,
-            warnings: []
+        var c = {
+            time: 0, rpm: 1, map: 6, lambda_b1: 2, lambda_b2: 3, lambda_avg: -1, inj_pw: 4, inj_timing: -1, tps: -1,
+            fuel_press_di: -1, fuel_press_di_aim: -1, coolant_temp: -1, iat: -1, cl_trim_b1: -1, cl_trim_b2: -1,
+            fuel_mix_aim: -1, overrun: 5, warnings: []
         };
+        return Object.assign(c, opts || {});
+    }
+
+    /** Builds 100 Hz rows: segments of { s: seconds, rpm, l1, l2, pw, ov, map }. */
+    function rows(segments) {
+        var out = [], t = 0;
+        segments.forEach(function (g) {
+            for (var k = 0; k < Math.round(g.s * 100); k++, t += 0.01) {
+                out.push([t, g.rpm === undefined ? 2000 : g.rpm, g.l1, g.l2 === undefined ? g.l1 : g.l2,
+                    g.pw === undefined ? 1.5 : g.pw, g.ov || 0, g.map === undefined ? 40 : g.map]);
+            }
+        });
+        return out;
     }
 
     it('returns null when no lambda channel is available', function () {
-        var channels = makeChannels({ rpm: 0, lambda_b1: -1, lambda_b2: -1, lambda_avg: -1 });
-        var data = [[2000, 1.0]];
-        var result = analyzeLeanSpikes(data, channels);
+        var result = analyzeLeanSpikes([[0, 2000, 1, 1, 1, 0, 40]], makeChannels({ lambda_b1: -1, lambda_b2: -1, lambda_avg: -1 }));
         assert.equal(result, null);
     });
 
-    it('counts lean events where lambda > 1.06', function () {
-        // Columns: [rpm, lambda_b1]
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1 });
-        var data = [
-            [2000, 1.00],  // not lean
-            [2000, 1.06],  // not lean (must exceed, not equal)
-            [2000, 1.07],  // lean
-            [2000, 1.10],  // lean
-            [2000, 0.95],  // not lean
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.equal(result.leanEventCount, 2);
-        assert.equal(result.totalSamples, 5);
+    it('counts one episode per lean stretch, not per sample', function () {
+        var data = rows([{ s: 1, l1: 1.0 }, { s: 0.6, l1: 1.10 }, { s: 1, l1: 1.0 }]);
+        var result = analyzeLeanSpikes(data, makeChannels());
+        assert.equal(result.episodeCount, 1);
+        assert.equal(result.fuelledCount, 1);
     });
 
-    it('prefers lambda_b1 over lambda_avg', function () {
-        // Columns: [rpm, lambda_b1, lambda_avg]
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1, lambda_avg: 2 });
-        var data = [
-            [2000, 1.07, 1.00],  // lean by b1, not by avg
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.equal(result.lambdaChannelUsed, 'lambda_b1');
-        assert.equal(result.leanEventCount, 1);
+    it('ignores lean stretches shorter than 0.3 s and joins gaps under 0.3 s', function () {
+        var data = rows([{ s: 1, l1: 1.0 }, { s: 0.2, l1: 1.10 }, { s: 1, l1: 1.0 },
+                         { s: 0.4, l1: 1.10 }, { s: 0.1, l1: 1.0 }, { s: 0.4, l1: 1.10 }, { s: 1, l1: 1.0 }]);
+        var result = analyzeLeanSpikes(data, makeChannels());
+        assert.equal(result.episodeCount, 1);
     });
 
-    it('falls back to lambda_avg when lambda_b1 not available', function () {
-        // Columns: [rpm, lambda_avg]
-        var channels = makeChannels({ rpm: 0, lambda_b1: -1, lambda_avg: 1 });
-        var data = [
-            [2000, 1.07],  // lean
-            [2000, 1.00],  // not lean
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.equal(result.lambdaChannelUsed, 'lambda_avg');
-        assert.equal(result.leanEventCount, 1);
+    it('ignores lean readings with the engine stopped', function () {
+        var data = rows([{ s: 2, rpm: 0, l1: 10, pw: 0 }, { s: 1, l1: 1.0 }]);
+        var result = analyzeLeanSpikes(data, makeChannels());
+        assert.equal(result.episodeCount, 0);
     });
 
-    it('categorizes lean events by bank when both banks available', function () {
-        // Columns: [rpm, lambda_b1, lambda_b2]
-        // Primary lambda is lambda_b1, so a sample is "lean" only if B1 > 1.06
-        // Bank categorization then checks both B1 and B2 within lean events
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1, lambda_b2: 2 });
-        var data = [
-            [2000, 1.10, 1.10],  // lean (B1>1.06), both banks lean
-            [2000, 1.10, 1.00],  // lean (B1>1.06), only B1 lean
-            [2000, 1.10, 1.10],  // lean (B1>1.06), both banks lean
-            [2000, 1.10, 1.08],  // lean (B1>1.06), both banks lean
-            [2000, 1.00, 1.00],  // not lean (B1 not > 1.06)
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.equal(result.leanEventCount, 4);
-        assert.equal(result.bothBanksLean, 3);
+    it('sorts an episode after the overrun fuel cut as overrun', function () {
+        var data = rows([{ s: 1, l1: 1.0 }, { s: 0.3, l1: 1.0, ov: 2 }, { s: 0.5, l1: 2.0 }, { s: 1, l1: 1.0 }]);
+        var result = analyzeLeanSpikes(data, makeChannels());
+        assert.equal(result.overrunCount, 1);
+        assert.equal(result.injectionOffCount, 0);
+        assert.equal(result.fuelledCount, 0);
+    });
+
+    it('sorts injectors off without the overrun cut as injection-off (Minimum Volume)', function () {
+        var data = rows([{ s: 1, l1: 1.0 }, { s: 0.2, l1: 1.0, pw: 0, ov: 1, map: 10, rpm: 2600 },
+                         { s: 0.5, l1: 3.0, map: 10, rpm: 2600 }, { s: 1, l1: 1.0 }]);
+        var result = analyzeLeanSpikes(data, makeChannels());
+        assert.equal(result.injectionOffCount, 1);
+        assert.equal(result.injectionOff[0].rpm, 2600);
+        assert.ok(result.diagnostics[0].indexOf('Minimum Volume') !== -1);
+    });
+
+    it('splits lean-while-fuelling episodes by bank and short pulses', function () {
+        var data = rows([{ s: 1, l1: 1.0 }, { s: 0.5, l1: 1.10, l2: 1.10, pw: 0.6 }, { s: 1, l1: 1.0 },
+                         { s: 0.5, l1: 1.10, l2: 1.00, pw: 1.4 }, { s: 1, l1: 1.0 }]);
+        var result = analyzeLeanSpikes(data, makeChannels());
+        assert.equal(result.fuelledCount, 2);
+        assert.equal(result.bothBanksLean, 1);
         assert.equal(result.onlyB1Lean, 1);
         assert.equal(result.onlyB2Lean, 0);
+        assert.equal(result.fuelledShortPW, 1);
     });
 
-    it('bank categorization sums to total lean count', function () {
-        // Columns: [rpm, lambda_b1, lambda_b2]
-        // When lambda_b1 is primary, b1Lean is always true for lean events
-        // So only "both" and "only-B1" are possible
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1, lambda_b2: 2 });
-        var data = [
-            [2000, 1.10, 1.10],  // both
-            [2000, 1.10, 1.00],  // only B1
-            [2000, 1.10, 1.10],  // both
-            [2000, 1.10, 1.10],  // both
-            [2000, 1.10, 1.00],  // only B1
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        var bankSum = result.bothBanksLean + result.onlyB1Lean + result.onlyB2Lean;
-        assert.equal(bankSum, result.leanEventCount);
+    it('rates lean-while-fuelling episodes per minute of running in each RPM band', function () {
+        var data = rows([{ s: 30, l1: 1.0, rpm: 1700 }, { s: 0.5, l1: 1.10, rpm: 1700 }, { s: 29.5, l1: 1.0, rpm: 1700 }]);
+        var result = analyzeLeanSpikes(data, makeChannels());
+        var band = result.rpmDistribution.filter(function (r) { return r.band === '1.5-2k'; })[0];
+        assert.equal(band.spikes, 1);
+        assert.closeTo(band.perMinute, 1, 0.05);
     });
 
-    it('returns null bank categorization when only one bank available', function () {
-        // Columns: [rpm, lambda_b1]
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1, lambda_b2: -1 });
-        var data = [
-            [2000, 1.10],
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.equal(result.bothBanksLean, null);
-        assert.equal(result.onlyB1Lean, null);
-        assert.equal(result.onlyB2Lean, null);
+    it('reports no lean episodes for a clean log', function () {
+        var result = analyzeLeanSpikes(rows([{ s: 2, l1: 1.0 }]), makeChannels());
+        assert.equal(result.episodeCount, 0);
+        assert.ok(result.diagnostics[0].indexOf('No lean episodes') !== -1);
     });
 
-    it('distributes lean spikes across RPM bins', function () {
-        // Columns: [rpm, lambda_b1]
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1 });
-        var data = [
-            [500, 1.10],   // bin 0 (<800)
-            [1000, 1.10],  // bin 1 (800-1.2k)
-            [2500, 1.10],  // bin 4 (2-2.5k)
-            [6000, 1.10],  // bin 8 (5.5k+)
-            [2500, 1.00],  // not lean, bin 4
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.equal(result.rpmDistribution[0].spikes, 1);
-        assert.equal(result.rpmDistribution[0].band, '<800');
-        assert.equal(result.rpmDistribution[1].spikes, 1);
-        assert.equal(result.rpmDistribution[4].spikes, 1);
-        assert.equal(result.rpmDistribution[4].total, 2);  // 2 samples in this bin
-        assert.equal(result.rpmDistribution[8].spikes, 1);
-    });
-
-    it('counts low PW events and lean spikes with low PW', function () {
-        // Columns: [rpm, lambda_b1, inj_pw]
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1, inj_pw: 2 });
-        var data = [
-            [2000, 1.10, 0.5],   // lean + low PW
-            [2000, 1.10, 1.2],   // lean + normal PW
-            [2000, 1.00, 0.6],   // not lean + low PW
-            [2000, 1.10, 0.7],   // lean + low PW
-            [2000, 1.00, 2.0],   // not lean + normal PW
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.equal(result.lowPWEvents, 3);       // 3 samples with PW < 0.8
-        assert.equal(result.leanWithLowPW, 2);     // 2 lean spikes with low PW
-        assert.closeTo(result.leanWithLowPWPct, 66.67, 0.1);  // 2/3 * 100
-    });
-
-    it('returns null PW fields when inj_pw channel not available', function () {
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1, inj_pw: -1 });
-        var data = [
-            [2000, 1.10],
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.equal(result.lowPWEvents, null);
-        assert.equal(result.leanWithLowPW, null);
-        assert.equal(result.leanWithLowPWPct, null);
-    });
-
-    it('generates diagnostic messages for bank distribution', function () {
-        // Columns: [rpm, lambda_b1, lambda_b2]
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1, lambda_b2: 2 });
-        // All lean events are both-banks (100% > 70%)
-        var data = [
-            [2000, 1.10, 1.10],
-            [2000, 1.10, 1.10],
-            [2000, 1.10, 1.10],
-            [2000, 1.00, 1.00],
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.ok(result.diagnostics.length > 0);
-        assert.ok(result.diagnostics[0].indexOf('system-wide fueling issue') !== -1);
-    });
-
-    it('generates diagnostic messages for low-PW correlation', function () {
-        // Columns: [rpm, lambda_b1, inj_pw]
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1, inj_pw: 2 });
-        // All lean spikes coincide with low PW (100% > 50%)
-        var data = [
-            [2000, 1.10, 0.5],
-            [2000, 1.10, 0.6],
-            [2000, 1.00, 2.0],
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        var lowPWDiag = result.diagnostics.find(function (d) {
-            return d.indexOf('XDI instability zone') !== -1;
-        });
-        assert.ok(lowPWDiag, 'Expected a low-PW diagnostic message');
-    });
-
-    it('computes correct leanEventPct', function () {
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1 });
-        var data = [
-            [2000, 1.10],
-            [2000, 1.00],
-            [2000, 1.10],
-            [2000, 1.00],
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.closeTo(result.leanEventPct, 50.0, 0.01);
-    });
-
-    it('handles empty data array', function () {
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1 });
-        var data = [];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.equal(result.leanEventCount, 0);
-        assert.equal(result.totalSamples, 0);
-        assert.equal(result.leanEventPct, 0);
-    });
-
-    it('handles data with no lean events', function () {
-        var channels = makeChannels({ rpm: 0, lambda_b1: 1 });
-        var data = [
-            [2000, 1.00],
-            [2000, 0.95],
-            [2000, 1.06],  // exactly 1.06 is NOT lean (must exceed)
-        ];
-        var result = analyzeLeanSpikes(data, channels);
-        assert.equal(result.leanEventCount, 0);
-        assert.equal(result.leanEventPct, 0);
+    it('handles an empty data array', function () {
+        var result = analyzeLeanSpikes([], makeChannels());
+        assert.equal(result.episodeCount, 0);
     });
 });

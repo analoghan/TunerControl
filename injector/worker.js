@@ -11,8 +11,11 @@
  * Analysis thresholds used across all analysis modules.
  */
 const THRESHOLDS = {
-    LEAN_SPIKE_LAMBDA: 1.06,    // Lambda above this = lean spike
-    LOW_PW_MS: 0.8,             // Below this = XDI instability risk zone
+    LEAN_SPIKE_LAMBDA: 1.06,    // Lambda above this = lean
+    LEAN_MIN_EPISODE_S: 0.3,    // a lean episode lasts at least this long (logs hold 10 Hz lambda at 100 Hz)
+    LEAN_MERGE_GAP_S: 0.3,      // lean stretches closer than this are one episode
+    LEAN_LOOKBACK_S: 0.5,       // window before an episode checked for an injection cut (lambda lags injection)
+    SHORT_PW_MS: 1.0,           // below this a DI injector is non-linear (MoTeC/GM: short-pulse region, ~1 ms)
     TARGET_LAMBDA: 1.0,         // Stoichiometric target
     IDLE_RPM_MAX: 1500,         // Max RPM considered idle
     LIGHT_LOAD_MAP_KPA: 60,     // kPa gauge for light load
@@ -57,6 +60,7 @@ const CHANNEL_MAP = {
     cl_trim_b1:       ["Fuel Closed Loop Control Bank 1 Trim"],
     cl_trim_b2:       ["Fuel Closed Loop Control Bank 2 Trim"],
     fuel_mix_aim:     ["Fuel Mixture Aim"],
+    overrun:          ["Engine Overrun State"],
 };
 
 // ---------------------------------------------------------------------------
@@ -685,194 +689,189 @@ function resolveInjectorChannels(columnNames) {
 // ---------------------------------------------------------------------------
 
 /**
- * Analyzes lean spike events across the log data.
- *
- * Preconditions:
- *   - data is a non-empty array of numeric row arrays
- *   - channels is a resolved channels object with valid indices
- *
- * Postconditions:
- *   - Returns LeanSpikeResult object or null if no lambda channel available
- *   - leanEventCount = count of samples where lambda > LEAN_SPIKE_LAMBDA (1.06)
- *   - If both banks available: bothBanksLean + onlyB1Lean + onlyB2Lean = leanEventCount
- *   - rpmDistribution bins spikes sum <= leanEventCount (some may have unclassifiable RPM)
- *   - diagnostics contains interpretive messages based on patterns found
- *
- * @param {number[][]} data - Array of numeric row arrays
- * @param {Object} channels - Resolved channel indices
- * @returns {Object|null} LeanSpikeResult or null if no lambda available
+ * Seconds per row: from the Time channel when there is one, else the 100 Hz resample rate.
  */
-function analyzeLeanSpikes(data, channels) {
-    // Determine which lambda column to use: prefer lambda_b1, then lambda_avg
-    var lambdaCol = channels.lambda_b1 !== -1 ? 'lambda_b1'
-                  : channels.lambda_avg !== -1 ? 'lambda_avg' : null;
-    if (!lambdaCol) return null;
+function injSampleTime(data, channels, i) {
+    return channels.time !== -1 ? data[i][channels.time] : i / 100;
+}
 
-    var lambdaIdx = channels[lambdaCol];
-    var rpmIdx = channels.rpm;
-    var hasBothBanks = channels.lambda_b1 !== -1 && channels.lambda_b2 !== -1;
-    var hasPW = channels.inj_pw !== -1;
-
-    var leanCount = 0;
-    var bothBanksLean = 0;
-    var onlyB1 = 0;
-    var onlyB2 = 0;
-    var lowPWEvents = 0;
-    var leanWithLowPW = 0;
-
-    // RPM bin tracking: spikes per bin and total samples per bin
-    var rpmBinSpikes = new Array(RPM_LABELS.length).fill(0);
-    var rpmBinTotals = new Array(RPM_LABELS.length).fill(0);
-
-    for (var i = 0; i < data.length; i++) {
-        var lambda = data[i][lambdaIdx];
-        var rpm = data[i][rpmIdx];
-        var isLean = lambda > THRESHOLDS.LEAN_SPIKE_LAMBDA;
-
-        // RPM bin assignment for all samples
-        var binIdx = assignRPMBin(rpm);
-        if (binIdx >= 0) {
-            rpmBinTotals[binIdx]++;
-        }
-
-        // Track low PW events (all samples, not just lean)
-        if (hasPW) {
-            var pw = data[i][channels.inj_pw];
-            if (pw < THRESHOLDS.LOW_PW_MS) {
-                lowPWEvents++;
-            }
-        }
-
-        if (isLean) {
-            leanCount++;
-
-            // Distribute lean spike into RPM bin
-            if (binIdx >= 0) {
-                rpmBinSpikes[binIdx]++;
-            }
-
-            // Bank categorization (if both banks available)
-            if (hasBothBanks) {
-                var b1Lean = data[i][channels.lambda_b1] > THRESHOLDS.LEAN_SPIKE_LAMBDA;
-                var b2Lean = data[i][channels.lambda_b2] > THRESHOLDS.LEAN_SPIKE_LAMBDA;
-                if (b1Lean && b2Lean) {
-                    bothBanksLean++;
-                } else if (b1Lean) {
-                    onlyB1++;
-                } else if (b2Lean) {
-                    onlyB2++;
-                }
-            }
-
-            // Low PW correlation with lean spikes
-            if (hasPW) {
-                var pwVal = data[i][channels.inj_pw];
-                if (pwVal < THRESHOLDS.LOW_PW_MS) {
-                    leanWithLowPW++;
-                }
-            }
-        }
-    }
-
-    // Build RPM distribution array
-    var rpmDistribution = [];
-    for (var b = 0; b < RPM_LABELS.length; b++) {
-        var total = rpmBinTotals[b];
-        var spikes = rpmBinSpikes[b];
-        var pct = total > 0 ? (spikes / total) * 100 : 0;
-        rpmDistribution.push({
-            band: RPM_LABELS[b],
-            spikes: spikes,
-            total: total,
-            pct: pct
-        });
-    }
-
-    // Compute percentages
-    var leanEventPct = data.length > 0 ? (leanCount / data.length) * 100 : 0;
-    var leanWithLowPWPct = leanCount > 0 ? (leanWithLowPW / leanCount) * 100 : 0;
-
-    // Build result object
-    var result = {
-        lambdaChannelUsed: lambdaCol,
-        totalSamples: data.length,
-        leanEventCount: leanCount,
-        leanEventPct: leanEventPct,
-        bothBanksLean: hasBothBanks ? bothBanksLean : null,
-        onlyB1Lean: hasBothBanks ? onlyB1 : null,
-        onlyB2Lean: hasBothBanks ? onlyB2 : null,
-        lowPWEvents: hasPW ? lowPWEvents : null,
-        leanWithLowPW: hasPW ? leanWithLowPW : null,
-        leanWithLowPWPct: hasPW ? leanWithLowPWPct : null,
-        rpmDistribution: rpmDistribution,
-        diagnostics: []
-    };
-
-    // Generate diagnostic messages
-    result.diagnostics = generateLeanSpikeDiagnostics(result);
-
-    return result;
+/** The engine is running (not stopped or cranking). Without an engine speed channel every row counts. */
+function injRunning(data, channels, i) {
+    return channels.rpm === -1 || data[i][channels.rpm] >= THRESHOLDS.MIN_RUNNING_RPM;
 }
 
 /**
- * Generates diagnostic messages interpreting lean spike patterns.
+ * Finds lean episodes and sorts them by cause.
  *
- * @param {Object} result - Partial LeanSpikeResult with counts populated
+ * A lean episode is a stretch, while the engine runs, where lambda on either bank (or the average when there are no
+ * bank channels) stays above LEAN_SPIKE_LAMBDA for at least LEAN_MIN_EPISODE_S; gaps up to LEAN_MERGE_GAP_S are joined.
+ * Logs are resampled to 100 Hz by holding values, so episodes are counted, not samples.
+ *
+ * Each episode is classified from the window LEAN_LOOKBACK_S before it to its end (lambda lags the injection):
+ *   - overrun cut: Engine Overrun State was Enabled (2) — the intended overrun fuel cut;
+ *   - injection off: the injector pulse width was zero with no overrun cut — on an M1 usually Fuel Injector Primary
+ *     Minimum Volume switching all injectors off;
+ *   - fuelled: the injectors kept firing, so lambda really was lean. These are split by bank, by a pulse in the
+ *     short-pulse (non-linear) region and by rail pressure below aim.
+ *
+ * Returns null without a lambda channel.
+ */
+function analyzeLeanSpikes(data, channels) {
+    var banks = ['lambda_b1', 'lambda_b2'].filter(function (k) { return channels[k] !== -1; });
+    var lambdaCols = banks.length ? banks : (channels.lambda_avg !== -1 ? ['lambda_avg'] : []);
+    if (!lambdaCols.length) return null;
+    var hasPW = channels.inj_pw !== -1, hasOverrun = channels.overrun !== undefined && channels.overrun !== -1, n = data.length;
+
+    function leanAt(i) {
+        for (var k = 0; k < lambdaCols.length; k++) if (data[i][channels[lambdaCols[k]]] > THRESHOLDS.LEAN_SPIKE_LAMBDA) return true;
+        return false;
+    }
+
+    // Running time per RPM band, for the episode rate.
+    var binSeconds = new Array(RPM_LABELS.length).fill(0), runningSeconds = 0;
+    var raw = [], cur = null;
+    for (var i = 0; i < n; i++) {
+        var dt = i > 0 ? Math.max(0, Math.min(0.1, injSampleTime(data, channels, i) - injSampleTime(data, channels, i - 1))) : 0;
+        var running = injRunning(data, channels, i);
+        if (running) {
+            runningSeconds += dt;
+            var b = assignRPMBin(data[i][channels.rpm]);
+            if (b >= 0) binSeconds[b] += dt;
+        }
+        var t = injSampleTime(data, channels, i);
+        if (running && leanAt(i)) {
+            if (cur && t - cur.endTime <= THRESHOLDS.LEAN_MERGE_GAP_S) { cur.end = i; cur.endTime = t; }
+            else { if (cur) raw.push(cur); cur = { start: i, end: i, startTime: t, endTime: t }; }
+        }
+    }
+    if (cur) raw.push(cur);
+
+    var episodes = [];
+    raw.forEach(function (e) {
+        var duration = e.endTime - e.startTime + 0.1;
+        if (duration < THRESHOLDS.LEAN_MIN_EPISODE_S) return;
+        var from = e.start;
+        while (from > 0 && injSampleTime(data, channels, from - 1) >= e.startTime - THRESHOLDS.LEAN_LOOKBACK_S) from--;
+        var pwOff = false, overrunCut = false, minPW = Infinity, minPressErr = Infinity, maxLambda = 0, b1 = false, b2 = false;
+        for (var k = from; k <= e.end; k++) {
+            if (!injRunning(data, channels, k)) continue;
+            if (hasOverrun && Math.round(data[k][channels.overrun]) === 2) overrunCut = true;
+            if (hasPW) {
+                var pw = data[k][channels.inj_pw];
+                if (!(pw > 0.05)) pwOff = true; else if (pw < minPW) minPW = pw;
+            }
+            if (k >= e.start) {
+                lambdaCols.forEach(function (c) { if (data[k][channels[c]] > maxLambda) maxLambda = data[k][channels[c]]; });
+                if (channels.lambda_b1 !== -1 && data[k][channels.lambda_b1] > THRESHOLDS.LEAN_SPIKE_LAMBDA) b1 = true;
+                if (channels.lambda_b2 !== -1 && data[k][channels.lambda_b2] > THRESHOLDS.LEAN_SPIKE_LAMBDA) b2 = true;
+            }
+            if (channels.fuel_press_di !== -1 && channels.fuel_press_di_aim !== -1) {
+                var err = (data[k][channels.fuel_press_di] - data[k][channels.fuel_press_di_aim]) * THRESHOLDS.MPA_TO_BAR;
+                if (data[k][channels.fuel_press_di_aim] > 0 && err < minPressErr) minPressErr = err;
+            }
+        }
+        episodes.push({
+            time: Math.round(e.startTime * 10) / 10,
+            duration: Math.round(duration * 10) / 10,
+            rpm: Math.round(data[e.start][channels.rpm]),
+            map: channels.map !== -1 ? Math.round(data[e.start][channels.map]) : null,
+            maxLambda: Math.round(maxLambda * 100) / 100,
+            cause: overrunCut ? 'overrun' : pwOff ? 'injection-off' : 'fuelled',
+            minPW: minPW < Infinity ? Math.round(minPW * 1000) / 1000 : null,
+            banks: b1 && b2 ? 'both' : b1 ? 'b1' : b2 ? 'b2' : null,
+            lowPressure: minPressErr < -THRESHOLDS.LOW_FUEL_PRESS_BELOW_AIM_BAR
+        });
+    });
+
+    var fuelled = episodes.filter(function (e) { return e.cause === 'fuelled'; });
+    var off = episodes.filter(function (e) { return e.cause === 'injection-off'; });
+    var overrun = episodes.filter(function (e) { return e.cause === 'overrun'; });
+    var rpmDistribution = RPM_LABELS.map(function (band, bi) {
+        var count = fuelled.filter(function (e) { return assignRPMBin(e.rpm) === bi; }).length;
+        return { band: band, spikes: count, seconds: binSeconds[bi], perMinute: binSeconds[bi] > 0 ? count / binSeconds[bi] * 60 : 0 };
+    });
+
+    var result = {
+        lambdaChannelUsed: lambdaCols.join(' + '),
+        runningSeconds: runningSeconds,
+        episodeCount: episodes.length,
+        overrunCount: overrun.length,
+        injectionOffCount: off.length,
+        fuelledCount: fuelled.length,
+        hasOverrunChannel: hasOverrun,
+        hasPW: hasPW,
+        bothBanksLean: banks.length === 2 ? fuelled.filter(function (e) { return e.banks === 'both'; }).length : null,
+        onlyB1Lean: banks.length === 2 ? fuelled.filter(function (e) { return e.banks === 'b1'; }).length : null,
+        onlyB2Lean: banks.length === 2 ? fuelled.filter(function (e) { return e.banks === 'b2'; }).length : null,
+        fuelledShortPW: hasPW ? fuelled.filter(function (e) { return e.minPW !== null && e.minPW < THRESHOLDS.SHORT_PW_MS; }).length : null,
+        fuelledLowPressure: fuelled.filter(function (e) { return e.lowPressure; }).length,
+        injectionOff: off.slice(0, 200),
+        fuelled: fuelled.slice(0, 200),
+        rpmDistribution: rpmDistribution,
+        diagnostics: []
+    };
+    result.diagnostics = generateLeanSpikeDiagnostics(result);
+    return result;
+}
+
+function injRange(list, key) {
+    var v = list.map(function (e) { return e[key]; }).filter(function (x) { return x !== null && !isNaN(x); }).sort(function (a, b) { return a - b; });
+    if (!v.length) return null;
+    var lo = v[Math.floor(v.length * 0.1)], hi = v[Math.min(v.length - 1, Math.floor(v.length * 0.9))];
+    return lo === hi ? String(lo) : lo + '–' + hi;
+}
+
+/**
+ * Diagnostic messages for the lean episodes (see analyzeLeanSpikes).
+ *
+ * @param {Object} result - LeanSpikeResult with counts populated
  * @returns {string[]} Array of diagnostic message strings
  */
 function generateLeanSpikeDiagnostics(result) {
-    var diagnostics = [];
-
-    // Bank distribution interpretation
-    if (result.bothBanksLean !== null && result.leanEventCount > 0) {
-        var bothPct = (result.bothBanksLean / result.leanEventCount) * 100;
-        if (bothPct > 70) {
-            diagnostics.push(
-                'Both banks lean simultaneously in ' + bothPct.toFixed(1) +
-                '% of events \u2014 suggests system-wide fueling issue (fuel pressure or injector characterization)'
-            );
-        } else if (result.onlyB1Lean > result.onlyB2Lean * 2) {
-            diagnostics.push(
-                'Bank 1 lean events dominate (' + result.onlyB1Lean +
-                ' vs ' + result.onlyB2Lean +
-                ') \u2014 possible Bank 1 injector or wiring issue'
-            );
-        } else if (result.onlyB2Lean > result.onlyB1Lean * 2) {
-            diagnostics.push(
-                'Bank 2 lean events dominate (' + result.onlyB2Lean +
-                ' vs ' + result.onlyB1Lean +
-                ') \u2014 possible Bank 2 injector or wiring issue'
-            );
-        } else {
-            diagnostics.push(
-                'Both banks lean simultaneously in ' + bothPct.toFixed(1) +
-                '% of events \u2014 mixed bank distribution'
-            );
-        }
+    var d = [];
+    if (!result.episodeCount) {
+        d.push('No lean episodes (lambda above ' + THRESHOLDS.LEAN_SPIKE_LAMBDA + ' for ' + THRESHOLDS.LEAN_MIN_EPISODE_S +
+            ' s or more) while the engine was running.');
+        return d;
     }
-
-    // Low-PW correlation
-    if (result.leanWithLowPW !== null && result.leanEventCount > 0) {
-        var lowPWPct = result.leanWithLowPWPct;
-        if (lowPWPct > 50) {
-            diagnostics.push(
-                lowPWPct.toFixed(1) + '% of lean spikes coincide with PW < ' +
-                THRESHOLDS.LOW_PW_MS + ' ms \u2014 XDI instability zone is primary contributor'
-            );
-        } else if (lowPWPct > 20) {
-            diagnostics.push(
-                lowPWPct.toFixed(1) + '% of lean spikes coincide with PW < ' +
-                THRESHOLDS.LOW_PW_MS + ' ms \u2014 XDI instability zone is a contributing factor'
-            );
-        } else if (lowPWPct > 0) {
-            diagnostics.push(
-                lowPWPct.toFixed(1) + '% of lean spikes coincide with PW < ' +
-                THRESHOLDS.LOW_PW_MS + ' ms \u2014 minimal low-PW correlation'
-            );
-        }
+    if (result.injectionOffCount) {
+        var off = result.injectionOff;
+        d.push(result.injectionOffCount + ' of ' + result.episodeCount + ' lean episodes are the injectors switched OFF' +
+            (result.hasOverrunChannel ? ' without the overrun fuel cut' : '') + ' (rpm ' + injRange(off, 'rpm') +
+            (injRange(off, 'map') ? ', MAP ' + injRange(off, 'map') + ' kPa' : '') + '). Lambda then reads air, not lean combustion. ' +
+            'On an M1 the usual cause is Fuel Injector Primary Minimum Volume: when any cylinder\'s request falls below it, all ' +
+            'injectors stop until every cylinder is above Minimum Volume + Hysteresis — typically on closed-throttle decel, often ' +
+            'pushed there by the fuel film decrease compensation. Log Fuel Cylinder 1 Primary Volume to confirm.');
     }
+    if (result.overrunCount) {
+        d.push(result.overrunCount + ' lean episodes are the overrun fuel cut (Engine Overrun State Enabled) — expected.');
+    } else if (!result.hasOverrunChannel && result.injectionOffCount) {
+        d.push('Engine Overrun State is not logged, so the overrun fuel cut cannot be told apart from other injection cuts.');
+    }
+    if (!result.hasPW) d.push('Injector pulse width is not logged, so injection cuts cannot be told apart from lean combustion.');
 
-    return diagnostics;
+    var f = result.fuelledCount;
+    if (!f) {
+        d.push('No lean episodes while the injectors were firing.');
+        return d;
+    }
+    var fl = result.fuelled;
+    var text = f + ' lean episode' + (f > 1 ? 's' : '') + ' with the injectors firing (rpm ' + injRange(fl, 'rpm') +
+        (injRange(fl, 'map') ? ', MAP ' + injRange(fl, 'map') + ' kPa' : '') + ', ' + (result.runningSeconds / 60).toFixed(1) + ' min of running).';
+    if (result.bothBanksLean !== null) {
+        if (result.bothBanksLean >= f * 0.7) text += ' Both banks go lean together in ' + result.bothBanksLean + ' — a whole-engine cause (fuel model, film, pressure or injector data).';
+        else if (result.onlyB1Lean > result.onlyB2Lean * 2) text += ' Bank 1 alone in ' + result.onlyB1Lean + ' — look at that bank\'s injectors, wiring or lambda sensor.';
+        else if (result.onlyB2Lean > result.onlyB1Lean * 2) text += ' Bank 2 alone in ' + result.onlyB2Lean + ' — look at that bank\'s injectors, wiring or lambda sensor.';
+    }
+    d.push(text);
+    if (result.fuelledShortPW) {
+        d.push(result.fuelledShortPW + ' of them had pulses under ' + THRESHOLDS.SHORT_PW_MS + ' ms, the injector\'s non-linear (short-pulse) region. ' +
+            'Fuel delivered there depends on Fuel Injector Primary Linearisation — check it against the injector\'s small-pulse data (volume vs pulse width by pressure).');
+    }
+    if (result.fuelledLowPressure) {
+        d.push(result.fuelledLowPressure + ' of them had rail pressure more than ' + THRESHOLDS.LOW_FUEL_PRESS_BELOW_AIM_BAR + ' bar below aim — see the DI Fuel Pressure tool.');
+    }
+    return d;
 }
 
 /**
@@ -898,53 +897,25 @@ function countBelow(sortedArray, threshold) {
 }
 
 /**
- * Generates diagnostic messages for PW stability analysis based on 5th percentile thresholds.
+ * Diagnostic messages for the pulse width distribution: time in the short-pulse (non-linear) region.
  *
- * Diagnostic rules:
- *   - pct5th < 0.7: SEVERE instability
- *   - pct5th >= 0.7 and < 0.8: WARNING possible instability
- *   - pct5th >= 0.8: HEALTHY
- *
- * @param {Object} stats - PW statistics object with pct5th field
+ * @param {Object} stats - PW statistics object (pct1st, pct5th, belowThresholdPct)
  * @returns {string[]} Array of diagnostic message strings
  */
 function generatePWDiagnostics(stats) {
-    var diagnostics = [];
-    var pct5th = stats.pct5th;
-
-    if (pct5th < 0.7) {
-        diagnostics.push(
-            'SEVERE: 5th percentile PW of ' + pct5th.toFixed(2) +
-            ' ms is well below XDI instability threshold (0.8 ms)'
-        );
-    } else if (pct5th < 0.8) {
-        diagnostics.push(
-            'WARNING: 5th percentile PW of ' + pct5th.toFixed(2) +
-            ' ms approaches XDI instability threshold (0.8 ms)'
-        );
+    var d = [];
+    if (stats.belowThresholdPct > 0) {
+        d.push(stats.belowThresholdPct.toFixed(1) + '% of injecting time is below ' + THRESHOLDS.SHORT_PW_MS + ' ms (5th percentile ' +
+            stats.pct5th.toFixed(2) + ' ms, 1st ' + stats.pct1st.toFixed(2) + ' ms). Below about 1 ms a DI injector is non-linear: ' +
+            'fuelling there is only as good as Fuel Injector Primary Linearisation, which should come from the injector\'s small-pulse data.');
     } else {
-        diagnostics.push(
-            'HEALTHY: 5th percentile PW of ' + pct5th.toFixed(2) +
-            ' ms is above XDI instability threshold'
-        );
+        d.push('All injections are at or above ' + THRESHOLDS.SHORT_PW_MS + ' ms (5th percentile ' + stats.pct5th.toFixed(2) + ' ms).');
     }
-
-    return diagnostics;
+    return d;
 }
 
 /**
- * Analyzes injector pulsewidth stability across the log data.
- *
- * Preconditions:
- *   - data is a non-empty array of numeric row arrays
- *   - channels is a resolved channels object with valid indices
- *
- * Postconditions:
- *   - Returns PWStabilityResult object or null if inj_pw channel unavailable
- *   - Statistics computed only on samples where PW > 0.05 (excludes off events)
- *   - pct5th and pct1st are accurate percentile values via linear interpolation
- *   - diagnostics reflect threshold comparisons per XDI injector specs
- *   - belowThresholdPct = (belowThresholdCount / validPW.length) * 100
+ * Analyzes injector pulse width while the engine runs and the injectors fire (PW > 0.05 ms).
  *
  * @param {number[][]} data - Array of numeric row arrays
  * @param {Object} channels - Resolved channel indices
@@ -956,7 +927,7 @@ function analyzePWStability(data, channels) {
     var validPW = [];
     for (var i = 0; i < data.length; i++) {
         var pw = data[i][channels.inj_pw];
-        if (!isNaN(pw) && pw > 0.05) {
+        if (!isNaN(pw) && pw > 0.05 && injRunning(data, channels, i)) {
             validPW.push(pw);
         }
     }
@@ -974,7 +945,7 @@ function analyzePWStability(data, channels) {
         stdDev: computeStdDev(validPW),
         pct5th: computePercentile(validPW, 0.05),
         pct1st: computePercentile(validPW, 0.01),
-        belowThresholdCount: countBelow(validPW, THRESHOLDS.LOW_PW_MS),
+        belowThresholdCount: countBelow(validPW, THRESHOLDS.SHORT_PW_MS),
     };
 
     stats.belowThresholdPct = (stats.belowThresholdCount / validPW.length) * 100;
@@ -1014,7 +985,8 @@ function analyzeClosedLoop(data, channels) {
         var values = [];
         for (var i = 0; i < data.length; i++) {
             var v = data[i][channels[chKey]];
-            if (!isNaN(v)) values.push(v);
+            // Running, with closed loop active (the trim sits at exactly 0 while it is not).
+            if (!isNaN(v) && v !== 0 && injRunning(data, channels, i)) values.push(v);
         }
 
         if (values.length === 0) continue;
@@ -1209,7 +1181,8 @@ function analyzeFuelPressure(data, channels) {
         // Lean spike correlation
         if (lambdaCol !== -1) {
             var lambda = data[i][lambdaCol];
-            if (lambda > THRESHOLDS.LEAN_SPIKE_LAMBDA) {
+            var firing = channels.inj_pw === -1 || data[i][channels.inj_pw] > 0.05;
+            if (lambda > THRESHOLDS.LEAN_SPIKE_LAMBDA && firing) {
                 leanSpikePressureSum += pressBar;
                 leanSpikeCount++;
             }
@@ -1252,6 +1225,9 @@ function analyzeInjectionTiming(data, channels) {
     for (var i = 0; i < data.length; i++) {
         var timing = data[i][channels.inj_timing];
         if (isNaN(timing)) continue;
+        // Only real injections: engine running and the injector firing (the angle holds its last value otherwise).
+        if (channels.rpm !== -1 && !injRunning(data, channels, i)) continue;
+        if (channels.inj_pw !== -1 && !(data[i][channels.inj_pw] > 0.05)) continue;
 
         timingValues.push(timing);
 
