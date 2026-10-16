@@ -37,6 +37,7 @@ const smoothingAmountInput = document.getElementById('smoothing-amount');
 
 let logFile = null;   // currently selected log File object (null if invalid/cleared)
 let veFile  = null;   // currently selected VE table File object (null if invalid/cleared)
+let veM1pkgCsv = null; // VE table CSV built from a selected .m1pkg (null for CSV inputs)
 let lastResult = null; // stores the last processing result for table toggling
 let worker  = null;   // current Web Worker instance
 
@@ -65,6 +66,15 @@ function isValidCsv(file) {
 }
 
 /**
+ * Validates that a file has a .m1pkg extension (case-insensitive).
+ * @param {File} file
+ * @returns {boolean}
+ */
+function isM1Pkg(file) {
+    return file && file.name.toLowerCase().endsWith('.m1pkg');
+}
+
+/**
  * Updates the Process button enabled/disabled state based on current file selections.
  */
 function updateProcessButtonState() {
@@ -89,13 +99,33 @@ logInput.addEventListener('change', () => {
     updateProcessButtonState();
 });
 
-veInput.addEventListener('change', () => {
+veInput.addEventListener('change', async () => {
     const file = veInput.files[0] || null;
-    if (file && !isValidCsv(file)) {
-        showError(`Invalid file: "${file.name}" is not a .csv file.`);
+    veM1pkgCsv = null;
+    if (file && !isValidCsv(file) && !isM1Pkg(file)) {
+        showError(`Invalid file: "${file.name}" is not a .csv or .m1pkg file.`);
         veFile = null;
         veFilename.textContent = 'No file selected';
         veInput.value = '';
+    } else if (isM1Pkg(file)) {
+        // Extract Engine.Efficiency.Main from the tune package up front so problems show immediately.
+        veFile = null;
+        veFilename.textContent = 'Reading ' + file.name + '…';
+        updateProcessButtonState();
+        try {
+            const table = m1pkgVeTableCsv(parseM1Pkg(await readFileAsArrayBuffer(file)));
+            if (veInput.files[0] !== file) return; // a different file was picked meanwhile
+            veFile = file;
+            veM1pkgCsv = table.csv;
+            veFilename.textContent = `${file.name} — ${table.tuneName || 'tune'}, ` +
+                `${M1VE_TABLE_NAME} (${table.rpmSites} × ${table.mapSites})`;
+            clearError();
+        } catch (err) {
+            if (veInput.files[0] !== file) return;
+            showError(`Could not read the VE table from "${file.name}": ${err.message}`);
+            veFilename.textContent = 'No file selected';
+            veInput.value = '';
+        }
     } else if (file) {
         veFile = file;
         veFilename.textContent = file.name;
@@ -256,7 +286,7 @@ processBtn.addEventListener('click', async () => {
     try {
         const results = await Promise.all([
             isLd ? readFileAsArrayBuffer(logFile) : readFileAsText(logFile),
-            readFileAsText(veFile),
+            veM1pkgCsv !== null ? veM1pkgCsv : readFileAsText(veFile),
         ]);
         logData = results[0];
         veText = results[1];

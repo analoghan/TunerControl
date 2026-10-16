@@ -11,7 +11,7 @@ A zero-dependency, browser-based toolkit for MoTeC M1 ECU tuning and analysis. N
 ## Tools
 
 ### VE Table Tuning
-Analyze MoTeC log data against your current VE table to compute per-cell correction percentages. Produces downloadable CSVs ready to import back into MoTeC M1 Tune.
+Analyze MoTeC log data against your current VE table to compute per-cell correction percentages. The table can come straight from an M1 Tune package (`.m1pkg`, reads Engine Efficiency Main) or from a CSV export. Produces downloadable CSVs ready to import back into MoTeC M1 Tune.
 
 **Features:**
 - Accepts CSV log exports or raw `.ld` binary log files

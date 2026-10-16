@@ -175,6 +175,13 @@ describe('M1 package parser — parseM1Pkg', function () {
     assert.equal(t.axes[1].unit, 'Pa');
   });
 
+  it('stops used sites at zero-filled unused axis sites', function () {
+    assert.equal(m1pkgUsedSites([0, 3000, 48000, 0, 0]), 3);
+    assert.equal(m1pkgUsedSites([10, 16, 0.05, 0.05]), 2);
+    assert.equal(m1pkgUsedSites([1, 2, 3]), 3);
+    assert.equal(m1pkgUsedSites([5]), 1);
+  });
+
   it('reads IO resources as five pin IDs', function () {
     var r = m1tFind(pkg, 'Engine.Switch Resource');
     assert.equal(r.type, 'io_resource');

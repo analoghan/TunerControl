@@ -24,8 +24,8 @@
       </div>
 
       <div class="file-row">
-        <label for="ve-input">VE Table CSV:</label>
-        <input type="file" id="ve-input" accept=".csv" />
+        <label for="ve-input">VE Table (CSV or .m1pkg):</label>
+        <input type="file" id="ve-input" accept=".csv,.m1pkg" />
         <span id="ve-filename" class="filename-display">No file selected</span>
       </div>
 
@@ -158,6 +158,9 @@
     </div>
   </div>
 
+  <script src="../lib/xz-decoder.js"></script>
+  <script src="../lib/m1pkg-parser.js"></script>
+  <script src="m1pkg-ve.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
