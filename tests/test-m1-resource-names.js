@@ -71,24 +71,35 @@ describe('M1 Config — I/O resource names', function () {
   });
 
   it('adds M142 connector pins from the datasheet', function () {
-    assert.equal(m1cResourceLabel(slot2('0x6201'), 'M142'), 'AVI2 · pin C15 (0x6201)');
-    assert.equal(m1cResourceLabel(slot2('0x6211'), 'M142'), 'AT1 · pin D03 (0x6211)');
+    assert.equal(m1cResourceLabel(slot2('0x6201'), 'M142'), 'AVI2 · M142 pin C15 (0x6201)');
+    assert.equal(m1cResourceLabel(slot2('0x6211'), 'M142'), 'AT1 · M142 pin D03 (0x6211)');
     assert.equal(m1cResourceLabel(['0x0000', '0x640f', '0x6110', '0x0000', '0x644c'], 'M142'),
-      'Direct Injector 1A- · pin A06 (+ A07) (0x640f, 0x6110, 0x644c)');
-    assert.equal(m1cResourcePin('Low Side Ignition 8', 'M142'), 'C13');
-    assert.equal(m1cResourcePin('E888 AVI7', 'M142'), null);
+      'Direct Injector 1A- · M142 pin A06 (+ A07) (0x640f, 0x6110, 0x644c)');
+    assert.equal(m1cResourcePin('Low Side Ignition 8', 'M142'), 'M142 pin C13');
+    assert.equal(m1cResourcePin('FIRMWARE4', 'M142'), null);
     assert.equal(m1cResourcePin('AVI2', 'M150'), null);
   });
 
   it('finds pins for user-entered names in M1 Tune or datasheet spelling', function () {
     var ids = slot2('0x6464');
     var user = { 'M142|0x0000,0x0000,0x6464,0x0000,0x0000': 'Universal Digital Input 2' };
-    assert.equal(m1cResourceLabel(ids, 'M142', user), 'Universal Digital Input 2 · pin D02 (0x6464)');
-    assert.equal(m1cResourcePin('UDIG2', 'M142'), 'D02');
-    assert.equal(m1cResourcePin('Analog Voltage Input 9', 'M142'), 'B10');
-    assert.equal(m1cResourcePin('OUT_HB4', 'M142'), 'C32');
-    assert.equal(m1cResourcePin('Knock Input 2', 'M142'), 'D13');
+    assert.equal(m1cResourceLabel(ids, 'M142', user), 'Universal Digital Input 2 · M142 pin D02 (0x6464)');
+    assert.equal(m1cResourcePin('UDIG2', 'M142'), 'M142 pin D02');
+    assert.equal(m1cResourcePin('Analog Voltage Input 9', 'M142'), 'M142 pin B10');
+    assert.equal(m1cResourcePin('OUT_HB4', 'M142'), 'M142 pin C32');
+    assert.equal(m1cResourcePin('Knock Input 2', 'M142'), 'M142 pin D13');
     assert.equal(m1cResourcePin('Front brake', 'M142'), null);
+  });
+
+  it('adds E888 expander pins from its manual for E888 names', function () {
+    assert.equal(m1cResourceLabel(slot2('0x654c'), 'M142'), 'E888 AVI7 · E888 pin A32 (0x654c)');
+    assert.equal(m1cResourceLabel(['0x0000', '0x657f', '0x0000', '0x0000', '0x0000'], 'M142'),
+      'E888 Output 8 · E888 pin B13 (0x657f)');
+    assert.equal(m1cResourcePin('E888 AVI1', 'M142'), 'E888 pin A22');
+    assert.equal(m1cResourcePin('E888 Thermocouple 3', 'M142'), 'E888 pin A14 (- A5)');
+    assert.equal(m1cResourcePin('E888 DIG5', 'M150'), 'E888 pin B12', 'E888 pins do not depend on the ECU');
+    assert.equal(m1cResourcePin('E888 AVI9', 'M142'), null);
+    assert.equal(m1cResourcePin('PDM Byte 0, Mask 01', 'M142'), null);
   });
 
   it('formats labels with the raw IDs', function () {

@@ -53,8 +53,10 @@ var M1C_RESOURCE_RULES = {
 };
 
 /**
- * ECU connector pins from the hardware datasheet (M142: MoTeC part 13142, connectors A-D), keyed by
- * the canonical form from m1cPinKey. Direct injectors list the '-' pin M1 Tune assigns, then the '+' pin.
+ * Connector pins from the hardware documentation, keyed by the canonical form from m1cPinKey.
+ * M142: datasheet part 13142, connectors A-D. Direct injectors list the '-' pin M1 Tune assigns,
+ * then the '+' pin. E888: user manual Appendix G (its own A/B connectors), used for "E888 …" names
+ * on any ECU; thermocouples list the '+' pin, then the '-' pin.
  */
 var M1C_PINOUTS = {
     M142: {
@@ -75,8 +77,20 @@ var M1C_PINOUTS = {
         lambda1: 'A11', lambda2: 'A12',
         rs232: 'A21 (TX A22)', lin: 'A20',
         can1: 'D17 (LO D18)', can2: 'A30 (LO A31)', can3: 'A28 (LO A29)'
+    },
+    E888: {
+        av1: 'A22', av2: 'A23', av3: 'A24', av4: 'A25', av5: 'A30', av6: 'A31', av7: 'A32', av8: 'A33',
+        out1: 'B1', out2: 'B2', out3: 'B3', out4: 'B4', out5: 'B5', out6: 'B6', out7: 'B7', out8: 'B13',
+        tc1: 'A1 (- A2)', tc2: 'A3 (- A4)', tc3: 'A14 (- A5)', tc4: 'A12 (- A13)',
+        tc5: 'A18 (- A19)', tc6: 'A20 (- A21)', tc7: 'A26 (- A27)', tc8: 'A28 (- A29)',
+        cjc1: 'A6', cjc2: 'A7',
+        dig1: 'B11', dig2: 'B10', dig3: 'B19', dig4: 'B18', dig5: 'B12', dig6: 'B25',
+        can1: 'B23 (LO B24)'
     }
 };
+
+/** Expander modules whose resources M1 Tune prefixes with the device name, e.g. "E888 AVI7". */
+var M1C_PIN_DEVICES = /^(e888)\s+(.*)$/;
 
 /** Name spellings (M1 Tune, datasheet designation and full name) → canonical pinout key prefix. */
 var M1C_PIN_PATTERNS = [
@@ -91,6 +105,9 @@ var M1C_PIN_PATTERNS = [
     [/^knock(?: input)? ?(\d+)$/, 'knock'],
     [/^(?:lambda narrow(?: input)?|la_?nb) ?(\d+)$/, 'lambda'],
     [/^(?:can(?: bus)?) ?(\d)$/, 'can'],
+    [/^(?:output|pwm|aux(?:iliary)?(?: output)?|exaux) ?(\d+)$/, 'out'],
+    [/^(?:tc|thermocouple(?: input)?|extc) ?(\d+)$/, 'tc'],
+    [/^cjc ?(\d)$/, 'cjc'],
     [/^(rs232|lin)(?: bus| receive)?$/, '']
 ];
 
@@ -104,10 +121,16 @@ function m1cPinKey(name) {
     return null;
 }
 
-/** ECU connector pin for a resource name on this hardware, or null (e.g. E888/PDM/FIRMWARE resources). */
+/**
+ * Connector pin for a resource name, labelled with the unit it is on: "M142 pin C15" on the ECU,
+ * "E888 pin A32" on an E888 expander, or null when unknown (PDM, FIRMWARE, other hardware).
+ */
 function m1cResourcePin(name, hardware) {
-    var pins = M1C_PINOUTS[hardware || ''], key = m1cPinKey(name);
-    return pins && key && pins[key] ? pins[key] : null;
+    var device = String(name || '').trim().toLowerCase().match(M1C_PIN_DEVICES);
+    var unit = device ? device[1].toUpperCase() : hardware || '';
+    var pins = M1C_PINOUTS[unit], key = m1cPinKey(device ? device[2] : name);
+    if (!pins || !key || !pins[key]) return null;
+    return unit + ' pin ' + pins[key];
 }
 
 function m1cResourceKey(ids) {
@@ -136,14 +159,17 @@ function m1cResourceName(ids, hardware, userNames) {
     return null;
 }
 
-/** Display text: "AVI2 · pin C15 (0x6201)", "FIRMWARE4 (0x6524)", raw IDs when unnamed, or "Not assigned". */
+/**
+ * Display text: "AVI2 · M142 pin C15 (0x6201)", "E888 AVI7 · E888 pin A32 (0x654c)", "FIRMWARE4 (0x6524)",
+ * raw IDs when unnamed, or "Not assigned".
+ */
 function m1cResourceLabel(ids, hardware, userNames) {
     if (!m1cResourceAssigned(ids)) return 'Not assigned';
     var raw = ids.filter(function (id) { return id !== '0x0000'; }).join(', ');
     var n = m1cResourceName(ids, hardware, userNames);
     if (!n) return raw;
     var pin = m1cResourcePin(n.name, hardware);
-    return n.name + (pin ? ' · pin ' + pin : '') + ' (' + raw + ')';
+    return n.name + (pin ? ' · ' + pin : '') + ' (' + raw + ')';
 }
 
 if (typeof module !== 'undefined' && module.exports) {
