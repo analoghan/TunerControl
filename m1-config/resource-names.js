@@ -52,6 +52,64 @@ var M1C_RESOURCE_RULES = {
     ]
 };
 
+/**
+ * ECU connector pins from the hardware datasheet (M142: MoTeC part 13142, connectors A-D), keyed by
+ * the canonical form from m1cPinKey. Direct injectors list the '-' pin M1 Tune assigns, then the '+' pin.
+ */
+var M1C_PINOUTS = {
+    M142: {
+        av1: 'C14', av2: 'C15', av3: 'C16', av4: 'C17', av5: 'C25', av6: 'D20', av7: 'D21', av8: 'D22',
+        av9: 'B10', av10: 'B11', av11: 'B12', av12: 'B16', av13: 'B17', av14: 'B18', av15: 'A03', av16: 'A04',
+        av17: 'A05',
+        at1: 'D03', at2: 'D04', at3: 'D05', at4: 'D06', at5: 'A01', at6: 'A02',
+        di1a: 'A06 (+ A07)', di1b: 'A09 (+ A08)', di2a: 'B22 (+ B23)', di2b: 'B25 (+ B24)',
+        di3a: 'C27 (+ C19)', di3b: 'C28 (+ C20)', di4a: 'C29 (+ C21)', di4b: 'C30 (+ C22)',
+        ign1: 'C03', ign2: 'C04', ign3: 'C05', ign4: 'C06', ign5: 'C07', ign6: 'C08', ign7: 'C12', ign8: 'C13',
+        inj1: 'C23', inj2: 'C24', inj3: 'B09', inj4: 'B15', inj5: 'B08', inj6: 'B14',
+        hb1: 'C18', hb2: 'C01', hb3: 'C31', hb4: 'C32', hb5: 'C33', hb6: 'C34', hb7: 'B20', hb8: 'B21',
+        hb9: 'B01', hb10: 'B02',
+        udig1: 'D01', udig2: 'D02', udig3: 'D08', udig4: 'D09', udig5: 'D10', udig6: 'D11', udig7: 'D14',
+        udig8: 'B03', udig9: 'B04', udig10: 'B05', udig11: 'B06', udig12: 'B07',
+        dig1: 'A23', dig2: 'A15', dig3: 'A16', dig4: 'A17',
+        knock1: 'D07', knock2: 'D13', knock3: 'A13', knock4: 'A14',
+        lambda1: 'A11', lambda2: 'A12',
+        rs232: 'A21 (TX A22)', lin: 'A20',
+        can1: 'D17 (LO D18)', can2: 'A30 (LO A31)', can3: 'A28 (LO A29)'
+    }
+};
+
+/** Name spellings (M1 Tune, datasheet designation and full name) → canonical pinout key prefix. */
+var M1C_PIN_PATTERNS = [
+    [/^(?:avi?|analog(?:ue)? voltage(?: input)?) ?(\d+)$/, 'av'],
+    [/^(?:at|analog(?:ue)? temp(?:erature)?(?: input)?) ?(\d+)$/, 'at'],
+    [/^(?:direct injector|inj_?d) ?(\d[ab])(?: ?[-+]|_neg|_pos)?$/, 'di'],
+    [/^(?:low side ignition|ign_?ls) ?(\d+)$/, 'ign'],
+    [/^(?:low side injector|inj_?ls) ?(\d+)$/, 'inj'],
+    [/^(?:half bridge(?: output)?|out_?hb|hb) ?(\d+)$/, 'hb'],
+    [/^(?:universal digital(?: input)?|udig) ?(\d+)$/, 'udig'],
+    [/^(?:digital input|dig) ?(\d+)$/, 'dig'],
+    [/^knock(?: input)? ?(\d+)$/, 'knock'],
+    [/^(?:lambda narrow(?: input)?|la_?nb) ?(\d+)$/, 'lambda'],
+    [/^(?:can(?: bus)?) ?(\d)$/, 'can'],
+    [/^(rs232|lin)(?: bus| receive)?$/, '']
+];
+
+/** Canonical pinout key for a resource name, e.g. "Analogue Voltage Input 2" / "AVI2" → "av2". */
+function m1cPinKey(name) {
+    var n = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    for (var i = 0; i < M1C_PIN_PATTERNS.length; i++) {
+        var m = n.match(M1C_PIN_PATTERNS[i][0]);
+        if (m) return M1C_PIN_PATTERNS[i][1] + m[1];
+    }
+    return null;
+}
+
+/** ECU connector pin for a resource name on this hardware, or null (e.g. E888/PDM/FIRMWARE resources). */
+function m1cResourcePin(name, hardware) {
+    var pins = M1C_PINOUTS[hardware || ''], key = m1cPinKey(name);
+    return pins && key && pins[key] ? pins[key] : null;
+}
+
 function m1cResourceKey(ids) {
     return (ids || []).join(',');
 }
@@ -78,17 +136,20 @@ function m1cResourceName(ids, hardware, userNames) {
     return null;
 }
 
-/** Display text: "FIRMWARE4 (0x6524)", raw IDs when unnamed, or "Not assigned". */
+/** Display text: "AVI2 · pin C15 (0x6201)", "FIRMWARE4 (0x6524)", raw IDs when unnamed, or "Not assigned". */
 function m1cResourceLabel(ids, hardware, userNames) {
     if (!m1cResourceAssigned(ids)) return 'Not assigned';
     var raw = ids.filter(function (id) { return id !== '0x0000'; }).join(', ');
     var n = m1cResourceName(ids, hardware, userNames);
-    return n ? n.name + ' (' + raw + ')' : raw;
+    if (!n) return raw;
+    var pin = m1cResourcePin(n.name, hardware);
+    return n.name + (pin ? ' · pin ' + pin : '') + ' (' + raw + ')';
 }
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         m1cResourceKey: m1cResourceKey, m1cResourceName: m1cResourceName,
-        m1cResourceLabel: m1cResourceLabel, m1cResourceAssigned: m1cResourceAssigned
+        m1cResourceLabel: m1cResourceLabel, m1cResourceAssigned: m1cResourceAssigned,
+        m1cResourcePin: m1cResourcePin, m1cPinKey: m1cPinKey
     };
 }

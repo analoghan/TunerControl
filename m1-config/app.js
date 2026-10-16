@@ -617,7 +617,8 @@ function nameResource(item) {
     var current = m1cResourceName(item.value, hw, state.resourceNames);
     var name = window.prompt('Resource name shown in M1 Tune for ' + item.name +
         ' (' + item.value.filter(function (v) { return v !== '0x0000'; }).join(', ') + ').\n' +
-        'Applies to every item and tune using this assignment on ' + (hw || 'this hardware') + '. Leave empty to clear.',
+        'Applies to every item and tune using this assignment on ' + (hw || 'this hardware') + '. Leave empty to clear.\n' +
+        'ECU inputs/outputs named as in M1 Tune or the datasheet (e.g. UDIG2, Half Bridge Output 4) get their connector pin.',
         current ? current.name : '');
     if (name === null) return;
     name = name.trim();
