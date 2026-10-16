@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DI Injection Timing Calculator — MoTeC M1</title>
+  <title>DI Injection Timing — MoTeC M1</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -13,111 +13,106 @@
       <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
     </nav>
 
-    <h1>DI Injection Timing Calculator</h1>
-    <p class="subtitle">Computes optimal Start of Injection timing for direct injection engines based on cam profile and operating conditions. Outputs values in MoTeC M1's 720° reference scale.</p>
+    <h1>DI Injection Timing</h1>
+    <p class="subtitle">Works out where direct injection can start and end from the cam, and checks the tune's Fuel Timing Primary table, its
+      limits and a log against it. Angles are in M1's <strong>dBTDC</strong> (degrees before the firing TDC), as M1 Tune shows them.</p>
 
     <div class="form-section">
-      <h2>Cam Profile</h2>
-      <div class="input-grid">
-        <div class="input-group">
-          <label for="intake-duration">Intake Duration @ .050" (°):</label>
-          <input type="number" id="intake-duration" value="229" step="1" />
-        </div>
-        <div class="input-group">
-          <label for="exhaust-duration">Exhaust Duration @ .050" (°):</label>
-          <input type="number" id="exhaust-duration" value="244" step="1" />
-        </div>
-        <div class="input-group">
-          <label for="intake-centerline">Intake Centerline (° ATDC):</label>
-          <input type="number" id="intake-centerline" value="114" step="0.5" />
-        </div>
-        <div class="input-group">
-          <label for="lsa">Lobe Separation Angle (°):</label>
-          <input type="number" id="lsa" value="118" step="0.5" />
-        </div>
-        <div class="input-group">
-          <label for="cam-advance">Cam Advance (°):</label>
-          <input type="number" id="cam-advance" value="4" step="0.5" />
-        </div>
-        <div class="input-group">
-          <label for="overlap">Overlap @ .050" (°):</label>
-          <input type="number" id="overlap" value="0.5" step="0.5" />
-        </div>
+      <h2>Tune and log (optional)</h2>
+      <div class="file-row">
+        <label for="pkg-input">Tune (.m1pkg):</label>
+        <input type="file" id="pkg-input" accept=".m1pkg" />
+      </div>
+      <div class="file-row" id="tune-row" hidden>
+        <label for="tune-select">Or a stored tune:</label>
+        <select id="tune-select"><option value="">— choose a tune from the M1 Config Viewer —</option></select>
+        <span id="tune-hint" class="hint"></span>
+      </div>
+      <p id="tune-status" class="hint">No tune chosen: enter the limits below, or choose a tune to fill them and review its timing table.</p>
+      <div class="file-row">
+        <label for="log-input">Log (.ld or .csv):</label>
+        <input type="file" id="log-input" accept=".ld,.csv" />
+        <span id="log-status" class="hint"></span>
       </div>
 
-      <h2>Engine Parameters</h2>
+      <h2>Cam profile</h2>
       <div class="input-grid">
-        <div class="input-group">
-          <label for="max-rpm">Max RPM:</label>
-          <input type="number" id="max-rpm" value="7000" step="500" />
-        </div>
-        <div class="input-group">
-          <label for="rpm-step">RPM Step:</label>
-          <input type="number" id="rpm-step" value="500" step="100" />
-        </div>
-        <div class="input-group">
-          <label for="max-spark">Max Spark Advance (° BTDC):</label>
-          <input type="number" id="max-spark" value="35" step="1" />
-        </div>
+        <div class="input-group"><label for="intake-duration">Intake duration (°):</label><input type="number" id="intake-duration" value="229" step="1" /></div>
+        <div class="input-group"><label for="exhaust-duration">Exhaust duration (°):</label><input type="number" id="exhaust-duration" value="244" step="1" /></div>
+        <div class="input-group"><label for="lift-basis">Durations measured at:</label>
+          <select id="lift-basis"><option value="050">0.050" lift (cam card)</option><option value="006">0.006" lift (seat to seat)</option></select></div>
+        <div class="input-group"><label for="lsa">Lobe separation (°):</label><input type="number" id="lsa" value="118" step="0.5" /></div>
+        <div class="input-group"><label for="icl">Intake centreline (° ATDC):</label><input type="number" id="icl" value="114" step="0.5" /></div>
+        <div class="input-group"><label for="seat-extra">0.050" → 0.006" adds (°):</label><input type="number" id="seat-extra" value="52" step="1" /></div>
+        <div class="input-group"><label for="phaser">Cam phaser advance (°):</label><input type="number" id="phaser" value="0" step="1" /></div>
+        <div class="input-group"><label for="phaser-exhaust">Phaser moves the exhaust too:</label>
+          <input type="checkbox" id="phaser-exhaust" checked /> <span class="hint">single cam (GM Gen V)</span></div>
       </div>
 
-      <h2>MoTeC Injection Limits</h2>
+      <h2>Engine and M1 limits</h2>
       <div class="input-grid">
-        <div class="input-group">
-          <label for="start-limit">Injection Start Limit (° dBTDC):</label>
-          <input type="number" id="start-limit" value="330" step="5" />
-        </div>
-        <div class="input-group">
-          <label for="start-margin">Start Limit Margin (°):</label>
-          <input type="number" id="start-margin" value="20" step="5" />
-        </div>
-        <div class="input-group">
-          <label for="primary-limit">Primary Limit / EOI Limit (° dBTDC):</label>
-          <input type="number" id="primary-limit" value="90" step="5" />
-        </div>
+        <div class="input-group"><label for="max-rpm">Max RPM:</label><input type="number" id="max-rpm" value="7000" step="500" /></div>
+        <div class="input-group"><label for="rpm-step">RPM step:</label><input type="number" id="rpm-step" value="500" step="100" /></div>
+        <div class="input-group"><label for="design-pw">Longest pulse width (ms):</label><input type="number" id="design-pw" value="6" step="0.5" /></div>
+        <div class="input-group"><label for="max-spark">Most spark advance (° BTDC):</label><input type="number" id="max-spark" value="35" step="1" /></div>
+        <div class="input-group"><label for="start-limit">Injection Start Limit (dBTDC):</label><input type="number" id="start-limit" value="330" step="5" /></div>
+        <div class="input-group"><label for="primary-limit">Primary Limit Main (dBTDC):</label><input type="number" id="primary-limit" value="135" step="5" /></div>
       </div>
-
       <div class="button-row">
         <button id="calc-btn">Calculate</button>
         <a href="help.html" class="secondary-btn" style="text-decoration:none;">Help</a>
       </div>
+      <div id="error" class="error-banner" hidden></div>
     </div>
 
-    <!-- Results -->
     <div id="results-section" class="results-section" hidden>
       <div class="report-block">
-        <h2>Valve Events (MoTeC 720° Reference)</h2>
+        <h2>Valve events</h2>
+        <p class="section-desc">Injection timing uses the seat-to-seat (0.006") events: fuel can escape while the exhaust valve is off its seat,
+          even below 0.050" lift.</p>
         <div id="valve-events"></div>
-        <div id="valve-diagram" class="diagram-container"></div>
+        <div id="diagram" class="diagram-container"></div>
       </div>
 
       <div class="report-block">
-        <h2>DI Injection Window</h2>
-        <div id="injection-window"></div>
+        <h2>Recommended start of injection</h2>
+        <div id="soi-rec"></div>
       </div>
 
       <div class="report-block">
-        <h2>Recommended SOI Timing Table</h2>
-        <p class="section-desc">Start of Injection values for the MoTeC Fuel Timing Primary Main table. Edge type: Start of Injection.</p>
+        <h2>Limits</h2>
+        <div id="limits-content"></div>
+      </div>
+
+      <div class="report-block" id="tune-block" hidden>
+        <h2>Tune: Fuel Timing Primary Main</h2>
+        <div id="tune-content"></div>
+      </div>
+
+      <div class="report-block" id="log-block" hidden>
+        <h2>Log check</h2>
+        <div id="log-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Start of injection by RPM</h2>
+        <p class="section-desc">For the longest pulse width above: the recommended start, moved earlier (never before the exhaust valve seats)
+          only where the pulse would otherwise run into the compression stroke.</p>
         <div id="soi-table"></div>
         <div class="button-row">
-          <button id="copy-btn" class="secondary-btn">Copy Table to Clipboard</button>
+          <button id="copy-btn" class="secondary-btn">Copy start of injection row</button>
         </div>
-      </div>
-
-      <div class="report-block">
-        <h2>Limit Recommendations</h2>
-        <p class="section-desc">Suggested MoTeC limit settings based on your cam profile and RPM range. Compare against your current values.</p>
-        <div id="recommendations-content"></div>
-      </div>
-
-      <div class="report-block">
-        <h2>Notes</h2>
-        <div id="notes-content"></div>
       </div>
     </div>
   </div>
 
+  <script src="../m1-config/tune-db.js"></script>
+  <script src="../m1-config/tune-api.js"></script>
+  <script src="../m1-config/tune-source.js"></script>
+  <script src="../lib/xz-decoder.js"></script>
+  <script src="../lib/m1pkg-parser.js"></script>
+  <script src="m1pkg-di.js"></script>
+  <script src="di-calc.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

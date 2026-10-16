@@ -1,432 +1,338 @@
 /**
- * di-timing/app.js — DI Injection Timing Calculator for MoTeC M1
- *
- * Computes Start of Injection timing based on cam profile specs.
- * For direct injection: SOI must be after exhaust valve closes
- * and before the ignition event (with safety margin).
+ * di-timing/app.js — DI Injection Timing page: valve events from the cam, the recommended start of injection, the M1
+ * limits, and (optionally) a review of the tune's Fuel Timing Primary Main table and a log. Calculations: di-calc.js.
  */
 
-// Only calculate when button is clicked — not on page load
-document.getElementById('calc-btn').addEventListener('click', calculate);
+var diTune = null, diTuneId = null, diTunePicked = false, diStored = [], diLogFile = null, diLogResult = null, diWorker = null;
+var diPwEdited = false;   // the user typed a design pulse width: don't replace it with the log's
 
-function calculate() {
-    // Read inputs
-    var intakeDuration = parseFloat(document.getElementById('intake-duration').value) || 229;
-    var exhaustDuration = parseFloat(document.getElementById('exhaust-duration').value) || 244;
-    var intakeCenterline = parseFloat(document.getElementById('intake-centerline').value) || 114;
-    var lsa = parseFloat(document.getElementById('lsa').value) || 118;
-    var camAdvance = parseFloat(document.getElementById('cam-advance').value) || 4;
-    var overlap = parseFloat(document.getElementById('overlap').value) || 0;
-    var maxRpm = parseInt(document.getElementById('max-rpm').value, 10) || 7000;
-    var rpmStep = parseInt(document.getElementById('rpm-step').value, 10) || 500;
-    var maxSpark = parseFloat(document.getElementById('max-spark').value) || 35;
-    var startLimit = parseFloat(document.getElementById('start-limit').value) || 330;
-    var startMargin = parseFloat(document.getElementById('start-margin').value) || 20;
-    var primaryLimit = parseFloat(document.getElementById('primary-limit').value) || 90;
+function $(id) { return document.getElementById(id); }
+function num(id, dflt) { var v = parseFloat($(id).value); return isNaN(v) ? dflt : v; }
+function esc(s) { return String(s === null || s === undefined ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function deg(v, d) { return v === null || v === undefined || isNaN(v) ? '—' : (+v).toFixed(d === undefined ? 0 : d) + '°'; }
 
-    // Compute valve events in MoTeC 720° reference
-    var exhaustCenterlineBTDC = lsa + camAdvance;
-    var evo720 = 360 - (exhaustCenterlineBTDC + exhaustDuration / 2);
-    var evc720 = 360 - (exhaustCenterlineBTDC - exhaustDuration / 2);
-    var ivo720 = 360 + (intakeCenterline - intakeDuration / 2);
-    var ivc720 = 360 + (intakeCenterline + intakeDuration / 2);
-
-    // Convert valve events to dBTDC (degrees before TDC compression = 720)
-    var evc_dBTDC = 720 - evc720;
-    var ivo_dBTDC = 720 - ivo720;
-
-    // MoTeC DI timing is in dBTDC:
-    // - Higher dBTDC = earlier in the cycle
-    // - Start Limit (330°) = earliest SOI allowed (just after EVC)
-    // - Primary Limit (90°) = latest EOI allowed (must finish by this point)
-    // - Table value = the SOI the ECU will use (clamped by start limit)
-
-    // Effective start limit with margin
-    var effectiveStartLimit = startLimit - startMargin; // 310° dBTDC
-
-    // The ideal SOI should be just after EVC
-    // EVC in dBTDC = 720 - evc720
-    // We want SOI slightly after EVC: SOI_dBTDC = EVC_dBTDC - small_buffer
-    // (lower dBTDC = later in cycle = after EVC)
-    var idealSOI_dBTDC = evc_dBTDC - 5; // 5° after EVC
-
-    // But SOI cannot exceed the start limit
-    var clampedSOI_dBTDC = Math.min(idealSOI_dBTDC, effectiveStartLimit);
-
-    // Compression stroke starts at 180° dBTDC (= 540° in 720° scale = BDC)
-    var compressionStart_dBTDC = 180;
-
-    // Build RPM table
-    var rpmPoints = [];
-    for (var rpm = 0; rpm <= maxRpm; rpm += rpmStep) {
-        rpmPoints.push(rpm);
-    }
-
-    // For each RPM, compute the SOI that avoids compression stroke injection
-    // At higher RPM, pulse width spans more crank degrees, so SOI needs to advance (higher dBTDC)
-    var soiValues = [];
-    var validationResults = [];
-    var suggestions = [];
-
-    for (var i = 0; i < rpmPoints.length; i++) {
-        var rpm = rpmPoints[i];
-
-        // At low RPM, use the ideal SOI (just after EVC)
-        // At high RPM, advance SOI so EOI stays before compression
-        // Assume a reference pulse width that scales with RPM (rough estimate)
-        var refPW_ms = 4; // typical mid-load DI pulse width
-        var crankDegPerMs = rpm > 0 ? (rpm / 60) * 360 / 1000 : 0;
-        var refCrankDeg = refPW_ms * crankDegPerMs;
-
-        // SOI needed to keep EOI before compression start:
-        // EOI_dBTDC = SOI_dBTDC - crankDeg (EOI is later = lower dBTDC)
-        // Want EOI_dBTDC >= compressionStart_dBTDC
-        // So SOI_dBTDC >= compressionStart_dBTDC + crankDeg
-        var minSOI_forCompression = compressionStart_dBTDC + refCrankDeg;
-
-        // Use the higher of: ideal SOI or the RPM-adjusted minimum
-        var soiForRpm = Math.max(clampedSOI_dBTDC, minSOI_forCompression);
-
-        // Clamp to start limit
-        soiForRpm = Math.min(soiForRpm, effectiveStartLimit);
-
-        soiValues.push(Math.round(soiForRpm));
-
-        // Validation at various pulse widths
-        var maxPW_beforeCompression = compressionStart_dBTDC < soiForRpm ?
-            (soiForRpm - compressionStart_dBTDC) / crankDegPerMs : 999;
-        var maxPW_beforePrimaryLimit = primaryLimit < soiForRpm ?
-            (soiForRpm - primaryLimit) / crankDegPerMs : 999;
-
-        validationResults.push({
-            rpm: rpm,
-            soi_dBTDC: soiForRpm,
-            crankDegPerMs: crankDegPerMs,
-            maxPW_noCompression: rpm > 0 ? maxPW_beforeCompression : 999,
-            maxPW_withinLimit: rpm > 0 ? maxPW_beforePrimaryLimit : 999,
-            eoi6ms_dBTDC: soiForRpm - (6 * crankDegPerMs),
-            intoCompression: rpm > 0 && (soiForRpm - 6 * crankDegPerMs) < compressionStart_dBTDC,
-            exceedsPrimaryLimit: rpm > 0 && (soiForRpm - 6 * crankDegPerMs) < primaryLimit,
-        });
-    }
-
-    // --- Generate limit recommendations based on cam and RPM data ---
-
-    // 1. Injection Start Limit recommendation
-    // Should be set so that even with margin, injection never starts before EVC
-    // In dBTDC: SOI must be LESS than EVC (lower dBTDC = later in cycle = after EVC)
-    // Start Limit is the MAX dBTDC value the ECU will use for SOI
-    // So Start Limit should be <= EVC_dBTDC (can't start before EVC)
-    var recommendedStartLimit = Math.round(evc_dBTDC - 5); // 5° buffer inside EVC
-
-    if (startLimit > evc_dBTDC) {
-        suggestions.push('<b>⚠ Injection Start Limit (' + startLimit + '°) exceeds EVC (' + evc_dBTDC.toFixed(0) + '°).</b> This would allow injection to start BEFORE the exhaust valve closes — fuel will escape through the exhaust. <b>Reduce Start Limit to ' + recommendedStartLimit + '° dBTDC or lower.</b>');
-    } else if (startLimit < evc_dBTDC - 25) {
-        var wasted = evc_dBTDC - startLimit;
-        suggestions.push('<b>Injection Start Limit (' + startLimit + '°) is ' + wasted.toFixed(0) + '° below EVC (' + evc_dBTDC.toFixed(0) + '°).</b> This unnecessarily restricts the injection window — you\'re losing ' + wasted.toFixed(0) + '° of available crank rotation. With this cam (only ' + overlap + '° overlap), you could safely raise the Start Limit to <b>' + recommendedStartLimit + '° dBTDC</b>, gaining ' + (recommendedStartLimit - startLimit) + '° of injection window at high RPM. With the ' + startMargin + '° margin, effective earliest SOI would be ' + (recommendedStartLimit - startMargin) + '° — still ' + (evc_dBTDC - (recommendedStartLimit - startMargin)).toFixed(0) + '° after EVC.');
-    } else {
-        suggestions.push('<b>Injection Start Limit (' + startLimit + '°):</b> Appropriate for this cam. EVC at ' + evc_dBTDC.toFixed(0) + '° with ' + (evc_dBTDC - startLimit).toFixed(0) + '° clearance. ✓');
-    }
-
-    // 2. Start Limit Margin recommendation
-    // Margin should account for cam timing variation and sensor tolerance
-    // Typical: 15-25° for street, 10-15° for race (tighter control)
-    if (startMargin < 10) {
-        suggestions.push('<b>⚠ Start Limit Margin (' + startMargin + '°) is very tight.</b> Risk of injection starting near EVC under transient conditions. Recommend at least 15° for street applications.');
-    } else if (startMargin > 30) {
-        suggestions.push('<b>Start Limit Margin (' + startMargin + '°) is conservative.</b> This reduces available injection window by ' + startMargin + '°. For a well-controlled engine, 15-20° is typical.');
-    } else {
-        suggestions.push('<b>Start Limit Margin (' + startMargin + '°):</b> Within normal range (15-25°). ✓');
-    }
-
-    // 3. Primary Limit (EOI) recommendation
-    // Should be set to prevent injection too deep into compression
-    // Ideal: just past BDC (180° dBTDC) to allow some compression injection if needed
-    // but not so late that fuel hits the flame front
-    // Minimum safe: spark advance + 15° buffer
-    var minSafePrimaryLimit = maxSpark + 15;
-    var recommendedPrimaryLimit = Math.max(90, minSafePrimaryLimit);
-
-    // Check if primary limit is too aggressive (allows injection too close to ignition)
-    if (primaryLimit < minSafePrimaryLimit) {
-        suggestions.push('<b>⚠ Primary Limit (' + primaryLimit + '°) is dangerously close to ignition.</b> With max spark at ' + maxSpark + '° BTDC, ignition occurs at ' + maxSpark + '° dBTDC. Primary Limit should be at least ' + minSafePrimaryLimit + '° to maintain safe clearance. <b>Recommended: ' + recommendedPrimaryLimit + '° dBTDC.</b>');
-    } else if (primaryLimit > compressionStart_dBTDC) {
-        suggestions.push('<b>Primary Limit (' + primaryLimit + '°) prevents any compression stroke injection.</b> This is the safest setting — injection will always complete before BDC. No fuel enters during compression. ✓');
-    } else {
-        // Check how deep into compression the limit allows
-        var compressionDegAllowed = compressionStart_dBTDC - primaryLimit;
-        suggestions.push('<b>Primary Limit (' + primaryLimit + '°):</b> Allows up to ' + compressionDegAllowed + '° of injection into the compression stroke before truncation. This is ' + (compressionDegAllowed > 60 ? 'aggressive — monitor for misfires at high RPM/load.' : 'moderate — acceptable for most applications.'));
-    }
-
-    // 4. RPM-specific concerns
-    // Find the RPM where max PW before compression drops below 6ms (typical high-load PW)
-    var criticalRpm = null;
-    for (var i = 0; i < validationResults.length; i++) {
-        var v = validationResults[i];
-        if (v.rpm > 0 && v.maxPW_noCompression < 6) {
-            criticalRpm = v.rpm;
-            break;
-        }
-    }
-    if (criticalRpm) {
-        suggestions.push('<b>RPM concern:</b> Above ' + criticalRpm + ' RPM, a 6ms pulse width will extend into the compression stroke with the current SOI. Options: (1) Advance SOI further (increase table values), (2) Increase fuel pressure to reduce pulse width, (3) Use split injection for high-RPM/high-load cells.');
-    }
-
-    // 5. Overall assessment
-    var maxRpmInTable = rpmPoints[rpmPoints.length - 1];
-    var worstCase = validationResults[validationResults.length - 1];
-    if (worstCase && worstCase.rpm > 0 && !worstCase.intoCompression) {
-        suggestions.push('<b>✓ Overall:</b> At ' + maxRpmInTable + ' RPM with 6ms PW, injection completes before compression. Current limits are appropriate for this cam and RPM range.');
-    }
-
-    // Render results
-    document.getElementById('results-section').hidden = false;
-    renderValveEvents(evo720, evc720, ivo720, ivc720);
-    renderInjectionWindow(evc_dBTDC, startLimit, startMargin, effectiveStartLimit, primaryLimit, clampedSOI_dBTDC, compressionStart_dBTDC, maxSpark);
-    renderSOITable(rpmPoints, soiValues, validationResults, startLimit, primaryLimit, compressionStart_dBTDC);
-    renderRecommendations(suggestions);
-    renderDiagram(evo720, evc720, ivo720, ivc720, 720 - clampedSOI_dBTDC, 720 - primaryLimit);
-    renderNotes(intakeDuration, exhaustDuration, intakeCenterline, lsa, camAdvance, overlap, clampedSOI_dBTDC, startLimit, startMargin, primaryLimit, validationResults);
-}
-
-function renderValveEvents(evo, evc, ivo, ivc) {
-    var container = document.getElementById('valve-events');
-    container.innerHTML = '<div class="valve-grid">' +
-        valveItem('EVO', evo, 'Exhaust Valve Open', (180 - evo).toFixed(1) + '° BBDC', (720 - evo).toFixed(0) + '° dBTDC') +
-        valveItem('EVC', evc, 'Exhaust Valve Close', evcDesc(evc), (720 - evc).toFixed(0) + '° dBTDC') +
-        valveItem('IVO', ivo, 'Intake Valve Open', ivoDesc(ivo), (720 - ivo).toFixed(0) + '° dBTDC') +
-        valveItem('IVC', ivc, 'Intake Valve Close', (ivc - 540).toFixed(1) + '° ABDC', (720 - ivc).toFixed(0) + '° dBTDC') +
-        '</div>';
-}
-
-function valveItem(label, value, desc, detail, dbtdc) {
-    return '<div class="valve-item"><div class="label">' + desc + '</div><div class="value">' + value.toFixed(1) + '°</div><div class="detail">' + detail + '</div><div class="detail" style="color:#ff9800;">' + dbtdc + '</div></div>';
-}
-function evcDesc(evc) {
-    if (evc <= 360) return (360 - evc).toFixed(1) + '° BTDC overlap';
-    return (evc - 360).toFixed(1) + '° ATDC overlap';
-}
-function ivoDesc(ivo) {
-    if (ivo >= 360) return (ivo - 360).toFixed(1) + '° ATDC overlap';
-    return (360 - ivo).toFixed(1) + '° BTDC overlap';
-}
-
-function renderInjectionWindow(evc_dBTDC, startLimit, startMargin, effectiveStart, primaryLimit, soiValue, compressionStart, maxSpark) {
-    var html = '<div class="window-info">';
-    html += '<p>EVC: <b>' + evc_dBTDC.toFixed(0) + '° dBTDC</b></p>';
-    html += '<p>Injection Start Limit: <b>' + startLimit + '° dBTDC</b> (margin: ' + startMargin + '° → effective: ' + effectiveStart + '°)</p>';
-    html += '<p>Primary Limit (EOI must finish by): <b>' + primaryLimit + '° dBTDC</b></p>';
-    html += '<p>Compression stroke starts at: <b>' + compressionStart + '° dBTDC</b></p>';
-    html += '<hr style="border-color:#333;margin:12px 0;">';
-    html += '<p>Calculated SOI: <b class="safe">' + soiValue.toFixed(0) + '° dBTDC</b></p>';
-    html += '<p>Available window (SOI to compression): <b>' + (soiValue - compressionStart).toFixed(0) + '°</b> of crank rotation before compression</p>';
-    html += '<p>Hard EOI limit window (SOI to Primary Limit): <b>' + (soiValue - primaryLimit).toFixed(0) + '°</b></p>';
-
-    if (soiValue > effectiveStart) {
-        html += '<p class="warn">⚠ Calculated SOI (' + soiValue.toFixed(0) + '°) exceeds effective start limit (' + effectiveStart + '°). The ECU will clamp to ' + effectiveStart + '°.</p>';
-    }
-    html += '</div>';
-    document.getElementById('injection-window').innerHTML = html;
-}
-
-function renderSOITable(rpmPoints, soiValues, validationResults, startLimit, primaryLimit, compressionStart) {
-    var container = document.getElementById('soi-table');
-
-    // Main SOI table (dBTDC values for MoTeC)
-    var html = '<table class="soi-table"><thead><tr><th>RPM</th>';
-    for (var i = 0; i < rpmPoints.length; i++) html += '<th>' + rpmPoints[i] + '</th>';
-    html += '</tr></thead><tbody><tr><td style="font-weight:600;color:#b0b0b0;">SOI (° dBTDC)</td>';
-    for (var i = 0; i < soiValues.length; i++) html += '<td>' + soiValues[i] + '</td>';
-    html += '</tr></tbody></table>';
-
-    // Max injection time vs RPM (before compression)
-    html += '<h3 style="margin-top:20px;font-size:0.95rem;color:#fff;">Maximum Injection Time vs RPM</h3>';
-    html += '<p style="font-size:0.8rem;color:#888;margin-bottom:8px;">Maximum pulse width before injection extends into the compression stroke (180° dBTDC). Exceeding this means fuel is injected during compression — avoid if possible.</p>';
-    html += '<table class="soi-table"><thead><tr><th>RPM</th>';
-    for (var i = 0; i < validationResults.length; i++) {
-        if (validationResults[i].rpm === 0) continue;
-        html += '<th>' + validationResults[i].rpm + '</th>';
-    }
-    html += '</tr></thead><tbody><tr><td style="font-weight:600;color:#b0b0b0;">Max PW (ms)</td>';
-    for (var i = 0; i < validationResults.length; i++) {
-        var v = validationResults[i];
-        if (v.rpm === 0) continue;
-        var maxPW = v.maxPW_noCompression;
-        var cls = maxPW < 4 ? 'color:#f44336;font-weight:600;' : maxPW < 8 ? 'color:#ff9800;' : 'color:#4caf50;';
-        html += '<td style="' + cls + '">' + (maxPW > 50 ? '>50' : maxPW.toFixed(1)) + '</td>';
-    }
-    html += '</tr><tr><td style="font-weight:600;color:#b0b0b0;">Max PW to Limit (ms)</td>';
-    for (var i = 0; i < validationResults.length; i++) {
-        var v = validationResults[i];
-        if (v.rpm === 0) continue;
-        var maxPW = v.maxPW_withinLimit;
-        html += '<td style="color:#b0b0b0;">' + (maxPW > 50 ? '>50' : maxPW.toFixed(1)) + '</td>';
-    }
-    html += '</tr></tbody></table>';
-    html += '<p style="font-size:0.75rem;color:#666;margin-top:4px;">Row 1: max PW before compression stroke. Row 2: max PW before Primary Limit (' + primaryLimit + '° dBTDC) truncates the pulse.</p>';
-
-    // Validation at 6ms
-    html += '<h3 style="margin-top:20px;font-size:0.95rem;color:#fff;">Injection Duration Analysis (at 6ms pulse width)</h3>';
-    html += '<table class="soi-table"><thead><tr><th>RPM</th><th>Crank °</th><th>EOI (° dBTDC)</th><th>Into Compression?</th><th>Exceeds Primary Limit?</th></tr></thead><tbody>';
-    for (var i = 0; i < validationResults.length; i++) {
-        var v = validationResults[i];
-        if (v.rpm === 0) continue;
-        html += '<tr>';
-        html += '<td style="color:#b0b0b0;">' + v.rpm + '</td>';
-        html += '<td>' + (6 * v.crankDegPerMs).toFixed(1) + '°</td>';
-        html += '<td>' + v.eoi6ms_dBTDC.toFixed(0) + '°</td>';
-        html += '<td style="color:' + (v.intoCompression ? '#f44336' : '#4caf50') + ';font-weight:' + (v.intoCompression ? '600' : 'normal') + ';">' + (v.intoCompression ? 'YES — avoid' : 'No') + '</td>';
-        html += '<td style="color:' + (v.exceedsPrimaryLimit ? '#f44336' : '#4caf50') + ';">' + (v.exceedsPrimaryLimit ? 'YES — pulse truncated' : 'No') + '</td>';
-        html += '</tr>';
-    }
-    html += '</tbody></table>';
-
-    container.innerHTML = html;
-
-    // Copy button
-    document.getElementById('copy-btn').onclick = function() {
-        var csv = rpmPoints.join('\t') + '\n' + soiValues.join('\t');
-        navigator.clipboard.writeText(csv).catch(function() {});
-        this.textContent = 'Copied!';
-        var btn = this;
-        setTimeout(function() { btn.textContent = 'Copy Table to Clipboard'; }, 1500);
+function readInputs() {
+    return {
+        cam: { intakeDur: num('intake-duration', 229), exhaustDur: num('exhaust-duration', 244), basis: $('lift-basis').value,
+               lsa: num('lsa', 118), icl: num('icl', 114), seatExtra: num('seat-extra', 52), phaser: num('phaser', 0),
+               phaserMovesExhaust: $('phaser-exhaust').checked },
+        maxRpm: Math.max(500, num('max-rpm', 7000)), rpmStep: Math.max(100, num('rpm-step', 500)), pwMs: Math.max(0, num('design-pw', 6)),
+        spark: num('max-spark', 35), startLimit: num('start-limit', null), primaryLimit: num('primary-limit', null)
     };
 }
 
-function renderDiagram(evo, evc, ivo, ivc, soi, windowEnd) {
-    var container = document.getElementById('valve-diagram');
-    container.innerHTML = '<canvas id="timing-canvas" width="800" height="200"></canvas>';
-    var canvas = document.getElementById('timing-canvas');
-    var ctx = canvas.getContext('2d');
-    var w = canvas.width, h = canvas.height;
-    var margin = 50;
-    var barY = 80;
-    var barH = 30;
+function showError(msg) { $('error').hidden = !msg; $('error').textContent = msg || ''; }
 
-    // Scale: 0-720° maps to margin...(w-margin)
-    function xPos(deg) { return margin + (deg / 720) * (w - 2 * margin); }
+// --- tune ---------------------------------------------------------------------------------------------------
 
-    // Background
-    ctx.fillStyle = '#111';
-    ctx.fillRect(0, 0, w, h);
-
-    // Stroke labels
-    ctx.fillStyle = '#555';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'center';
-    var strokes = [
-        { start: 0, end: 180, label: 'Power' },
-        { start: 180, end: 360, label: 'Exhaust' },
-        { start: 360, end: 540, label: 'Intake' },
-        { start: 540, end: 720, label: 'Compression' }
-    ];
-    strokes.forEach(function(s) {
-        var x1 = xPos(s.start), x2 = xPos(s.end);
-        ctx.fillStyle = '#222';
-        ctx.fillRect(x1, 20, x2 - x1, h - 40);
-        ctx.strokeStyle = '#333';
-        ctx.strokeRect(x1, 20, x2 - x1, h - 40);
-        ctx.fillStyle = '#666';
-        ctx.fillText(s.label, (x1 + x2) / 2, 16);
-    });
-
-    // TDC/BDC markers
-    ctx.fillStyle = '#444';
-    ctx.font = '9px sans-serif';
-    ctx.textAlign = 'center';
-    [0, 180, 360, 540, 720].forEach(function(deg) {
-        ctx.fillText(deg + '°', xPos(deg), h - 5);
-    });
-
-    // TDC/BDC labels above the degree numbers
-    ctx.fillStyle = '#888';
-    ctx.font = '9px sans-serif';
-    var tdcBdc = [
-        { deg: 0, label: 'TDC' },
-        { deg: 180, label: 'BDC' },
-        { deg: 360, label: 'TDC' },
-        { deg: 540, label: 'BDC' },
-        { deg: 720, label: 'TDC' }
-    ];
-    tdcBdc.forEach(function(item) {
-        ctx.fillText(item.label, xPos(item.deg), h - 15);
-    });
-
-    // Exhaust valve open (red bar)
-    ctx.fillStyle = 'rgba(244, 67, 54, 0.4)';
-    ctx.fillRect(xPos(evo), barY - 35, xPos(evc) - xPos(evo), 25);
-    ctx.fillStyle = '#f44336';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Exhaust Valve Open', (xPos(evo) + xPos(evc)) / 2, barY - 40);
-
-    // Intake valve open (blue bar)
-    ctx.fillStyle = 'rgba(33, 150, 243, 0.4)';
-    ctx.fillRect(xPos(ivo), barY + 5, xPos(ivc) - xPos(ivo), 25);
-    ctx.fillStyle = '#2196f3';
-    ctx.fillText('Intake Valve Open', (xPos(ivo) + xPos(ivc)) / 2, barY + 45);
-
-    // DI injection window (green bar)
-    ctx.fillStyle = 'rgba(76, 175, 80, 0.5)';
-    ctx.fillRect(xPos(soi), barY + 40, xPos(windowEnd) - xPos(soi), 20);
-    ctx.fillStyle = '#4caf50';
-    ctx.font = '10px bold sans-serif';
-    ctx.fillText('DI Injection Window', (xPos(soi) + xPos(windowEnd)) / 2, barY + 75);
-
-    // SOI marker
-    ctx.strokeStyle = '#4caf50';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(xPos(soi), barY - 35);
-    ctx.lineTo(xPos(soi), barY + 60);
-    ctx.stroke();
-    ctx.fillStyle = '#4caf50';
-    ctx.font = '9px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('SOI ' + soi + '°', xPos(soi) + 3, barY + 68);
-
-    // Ignition marker
-    ctx.strokeStyle = '#ff9800';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(xPos(windowEnd), barY - 35);
-    ctx.lineTo(xPos(windowEnd), barY + 60);
-    ctx.stroke();
-    ctx.fillStyle = '#ff9800';
-    ctx.textAlign = 'right';
-    ctx.fillText('Latest EOI ' + windowEnd + '°', xPos(windowEnd) - 3, barY + 68);
-}
-
-function renderNotes(intDur, exhDur, intCL, lsa, advance, overlap, soiValue, startLimit, startMargin, primaryLimit, validationResults) {
-    var notes = [];
-    notes.push('<b>MoTeC Setup:</b> Set Fuel Timing Primary Edge to "Start of Injection". Enter <b>' + soiValue.toFixed(0) + '° dBTDC</b> across all RPM/MAP breakpoints as starting value.');
-    notes.push('<b>⚠ Avoid compression stroke injection:</b> Injecting during compression risks spraying fuel into the flame front, causing misfires, detonation, and piston damage. The Max PW table shows the limit at each RPM.');
-
-    var compressionIssues = validationResults.filter(function(v) { return v.intoCompression && v.rpm > 0; });
-    if (compressionIssues.length > 0) {
-        notes.push('<b>Note:</b> At 6ms pulse width, injection extends into compression above ' + compressionIssues[0].rpm + ' RPM. Verify actual pulse width — if exceeded, consider split injection or higher fuel pressure.');
+function setTune(di, label) {
+    diTune = di;
+    if (!di) { $('tune-status').textContent = 'No tune chosen: enter the limits below, or choose a tune to fill them and review its timing table.'; return; }
+    if (di.startLimit !== null) $('start-limit').value = di.startLimit;
+    if (di.primaryLimit !== null) $('primary-limit').value = di.primaryLimit;
+    if (di.spark !== null) $('max-spark').value = Math.ceil(di.spark);
+    if (di.camAim) $('phaser').value = di.camAim.max;
+    if (di.table && di.table.rpm.length > 1) {
+        var r = di.table.rpm, gaps = r.slice(1).map(function (v, i) { return v - r[i]; });
+        $('max-rpm').value = r[r.length - 1];
+        if (gaps.every(function (g) { return g === gaps[0]; })) $('rpm-step').value = gaps[0];
     }
+    $('tune-status').textContent = label + ': ' + (di.tuneName || 'tune') + '. Filled the Injection Start Limit (' + di.startLimit + '), Primary Limit (' +
+        di.primaryLimit + '), most spark advance (' + di.spark + '° BTDC)' + (di.camAim ? ', cam phaser (' + di.camAim.min + '–' + di.camAim.max + '° advance)' : '') +
+        ' and the RPM sites from the tune.';
+    calculate();
+}
 
-    var truncationIssues = validationResults.filter(function(v) { return v.exceedsPrimaryLimit && v.rpm > 0; });
-    if (truncationIssues.length > 0) {
-        notes.push('<b>⚠ Warning:</b> At 6ms pulse width, the Primary Limit (' + primaryLimit + '°) would truncate injection above ' + truncationIssues[0].rpm + ' RPM. Engine will run lean at these points.');
+$('pkg-input').addEventListener('change', function () {
+    var f = $('pkg-input').files[0];
+    if (!f) return;
+    diTunePicked = true; diTuneId = null; $('tune-select').value = '';
+    f.arrayBuffer().then(function (buf) { setTune(m1pkgDi(parseM1Pkg(buf)), 'Tune file ' + f.name); })
+        .catch(function (err) { showError('Could not read ' + f.name + ': ' + err.message); });
+});
+
+function useStoredTune(id, hint, suggested) {
+    if (!id) { setTune(null); $('tune-hint').textContent = ''; return Promise.resolve(); }
+    $('tune-select').value = id;
+    $('tune-hint').textContent = 'Loading…';
+    return tsLoad(id).then(function (pkg) {
+        if ($('tune-select').value !== id) return;
+        diTuneId = id; $('pkg-input').value = '';
+        $('tune-hint').textContent = hint || '';
+        $('tune-hint').classList.toggle('suggested', !!suggested);
+        setTune(m1pkgDi(pkg), 'Stored tune');
+    }).catch(function (err) { $('tune-hint').textContent = ''; showError('Could not read the stored tune: ' + err.message); });
+}
+
+$('tune-select').addEventListener('change', function () { diTunePicked = !!$('tune-select').value; useStoredTune($('tune-select').value, '', false); });
+
+if (typeof tsInit === 'function') {
+    tsInit().then(tsList).then(function (list) {
+        diStored = list;
+        if (!list.length) return;
+        list.forEach(function (t) { var o = document.createElement('option'); o.value = t.id; o.textContent = tsLabel(t); $('tune-select').appendChild(o); });
+        $('tune-row').hidden = false;
+    }).catch(function () { /* no stored tunes */ });
+}
+
+// --- log ----------------------------------------------------------------------------------------------------
+
+$('log-input').addEventListener('change', function () {
+    diLogFile = $('log-input').files[0] || null;
+    diLogResult = null;
+    $('log-status').textContent = diLogFile ? diLogFile.name : '';
+    if (diLogFile && diStored.length && !diTunePicked && typeof tsLogInfo === 'function') {
+        tsLogInfo(diLogFile).then(function (info) {
+            var s = tsSuggest(diStored, info);
+            if (s.tune) useStoredTune(s.tune.id, s.reason, true); else { $('tune-hint').textContent = s.reason; $('tune-hint').classList.remove('suggested'); }
+        });
     }
+    calculate();
+});
 
-    notes.push('<b>Tuning tip:</b> After VE table is dialed in, try adjusting SOI ±10-20° and watch for lambda changes. Richer without VE change = more efficient injection point found.');
-    notes.push('<b>Cam specs:</b> Intake ' + intDur + '°/' + exhDur + '° duration @ .050", ' + intCL + '° ICL, ' + lsa + '°+' + advance + '° LSA, ' + overlap + '° overlap.');
-
-    var html = '<ul class="notes-list">';
-    notes.forEach(function(n) { html += '<li>' + n + '</li>'; });
-    html += '</ul>';
-    document.getElementById('notes-content').innerHTML = html;
+function analyzeLog(evc, primaryLimit) {
+    if (!diLogFile) return Promise.resolve(null);
+    if (diWorker) diWorker.terminate();
+    var base = new URL('.', window.location.href).href;
+    var urls = ['../ve-table/worker.js', '../log-viewer/log-file.js', 'di-calc.js', 'worker.js'].map(function (u) { return JSON.stringify(new URL(u, base).href); });
+    var blob = new Blob(['importScripts(' + urls.join(',') + ');'], { type: 'application/javascript' });
+    var url = URL.createObjectURL(blob);
+    diWorker = new Worker(url);
+    URL.revokeObjectURL(url);
+    var isCsv = /\.csv$/i.test(diLogFile.name), file = diLogFile;
+    $('log-status').textContent = 'Reading ' + file.name + '…';
+    return (isCsv ? file.text() : file.arrayBuffer()).then(function (data) {
+        return new Promise(function (resolve, reject) {
+            diWorker.onmessage = function (e) { if (e.data.type === 'error') reject(new Error(e.data.message)); else resolve(e.data); };
+            diWorker.onerror = function (e) { reject(new Error(e.message || 'Log analysis failed')); };
+            diWorker.postMessage({ type: 'analyze', data: data, name: file.name, evc: evc, primaryLimit: primaryLimit,
+                                   table: diTune && diTune.table ? { rpm: diTune.table.rpm, map: diTune.table.map } : null }, isCsv ? [] : [data]);
+        });
+    }).then(function (r) { $('log-status').textContent = file.name + ': ' + r.samples.toLocaleString() + ' injection readings.'; return r; },
+            function (err) { $('log-status').textContent = 'Could not check the log: ' + err.message; return null; });
 }
 
-function renderRecommendations(suggestions) {
-    var container = document.getElementById('recommendations-content');
-    var html = '<ul class="notes-list">';
-    suggestions.forEach(function(s) { html += '<li>' + s + '</li>'; });
-    html += '</ul>';
-    container.innerHTML = html;
+// --- calculation and rendering --------------------------------------------------------------------------------
+
+var calcSeq = 0;
+
+function calculate() {
+    showError('');
+    var inp = readInputs(), seq = ++calcSeq;
+    if (!(inp.cam.intakeDur > 0 && inp.cam.exhaustDur > 0 && inp.cam.lsa > 0)) { showError('Enter the cam durations and lobe separation.'); return; }
+    var ev = diValveEvents(inp.cam), e6 = ev.at006, rec = diRecommendSoi(e6);
+    var evc = e6.dBTDC.evc, earliest = Math.floor(evc - 5);
+    var rpms = [];
+    if (diTune && diTune.table && diTune.table.rpm.length > 1 && diTune.table.rpm[diTune.table.rpm.length - 1] === inp.maxRpm) rpms = diTune.table.rpm.slice();
+    else for (var r = 0; r <= inp.maxRpm; r += inp.rpmStep) rpms.push(r);
+    var rows = diSoiTable(rpms, { soi: Math.round(rec.dBTDC), earliest: earliest, pwMs: inp.pwMs, spark: inp.spark, primaryLimit: inp.primaryLimit, evc: evc });
+    var tableCheck = diTune && diTune.table ? diTableCheck(diTune.table, e6) : null;
+
+    $('results-section').hidden = false;
+    renderEvents(ev);
+    renderRecommendation(rec, e6, inp);
+    renderLimits(diLimitAdvice({ startLimit: inp.startLimit, primaryLimit: inp.primaryLimit }, e6, inp.spark, tableCheck ? tableCheck.max : null), inp, e6);
+    renderSoiTable(rows, inp);
+    renderDiagram(e6, ev.at050, rec, inp, rows);
+    renderTune(tableCheck, e6, rec, inp, null);
+    $('log-block').hidden = !diLogFile;
+    if (diLogFile) {
+        $('log-content').innerHTML = '<p class="hint">Checking the log…</p>';
+        analyzeLog(evc, inp.primaryLimit).then(function (lr) {
+            if (seq !== calcSeq) return;
+            diLogResult = lr;
+            // Design for the longest pulse the engine actually reached, plus 10 %, unless a value was typed.
+            if (lr && !diPwEdited) {
+                var pw = Math.ceil(lr.pw.max * 1.1 * 2) / 2;
+                if (pw !== inp.pwMs) {
+                    $('design-pw').value = pw;
+                    inp.pwMs = pw;
+                    rows = diSoiTable(rpms, { soi: Math.round(rec.dBTDC), earliest: earliest, pwMs: pw, spark: inp.spark, primaryLimit: inp.primaryLimit, evc: evc });
+                    renderSoiTable(rows, inp);
+                    renderDiagram(e6, ev.at050, rec, inp, rows);
+                }
+            }
+            renderLog(lr, e6, inp);
+            renderTune(tableCheck, e6, rec, inp, lr);
+        });
+    }
 }
 
-// Wait for user to click Calculate
+function evRow(name, crank, dbtdc050, dbtdc006) {
+    return '<tr><td>' + name + '</td><td>' + crank[0] + '</td><td>' + crank[1] + '</td><td>' + deg(dbtdc006, 1) + '</td><td>' + deg(720 - dbtdc006, 1) + '</td></tr>';
+}
+
+function renderEvents(ev) {
+    var a = ev.at050, b = ev.at006;
+    var f = function (v, w) { return (+v).toFixed(1) + '° ' + w; };
+    $('valve-events').innerHTML = '<div class="scroll"><table class="ev-table"><thead><tr><th>Event</th><th>0.050"</th><th>0.006" (seat)</th>' +
+        '<th>M1 dBTDC (0.006")</th><th>720° from firing TDC</th></tr></thead><tbody>' +
+        evRow('Exhaust valve opens (EVO)', [f(a.evoBBDC, 'BBDC'), f(b.evoBBDC, 'BBDC')], a.dBTDC.evo, b.dBTDC.evo) +
+        evRow('Intake valve opens (IVO)', [f(a.ivoBTDC, 'BTDC'), f(b.ivoBTDC, 'BTDC')], a.dBTDC.ivo, b.dBTDC.ivo) +
+        evRow('Exhaust valve closes (EVC)', [f(a.evcATDC, 'ATDC'), f(b.evcATDC, 'ATDC')], a.dBTDC.evc, b.dBTDC.evc) +
+        evRow('Intake valve closes (IVC)', [f(a.ivcABDC, 'ABDC'), f(b.ivcABDC, 'ABDC')], a.dBTDC.ivc, b.dBTDC.ivc) +
+        '</tbody></table></div><p class="hint">Exhaust centreline ' + deg(b.ecl, 1) + ' BTDC, intake centreline ' + deg(b.icl, 1) + ' ATDC (with the phaser). ' +
+        'Overlap ' + deg(a.overlap, 1) + ' at 0.050", ' + deg(b.overlap, 1) + ' seat to seat. "720° from firing TDC" is the scale of the MoTeC training ' +
+        'spreadsheet (= 720 − dBTDC).</p>';
+}
+
+function renderRecommendation(rec, e6, inp) {
+    var html = '<p><span class="big">' + rec.dBTDC.toFixed(0) + ' dBTDC</span> &nbsp; (' + rec.atdc.toFixed(1) + '° after overlap TDC)</p>' +
+        '<p class="hint">Halfway between the intake valve opening (' + deg(e6.ivoBTDC, 1) + ' BTDC) and the intake centreline (' + deg(e6.icl, 1) +
+        ' ATDC), but at least 20° after TDC — the method of the GM Gen V calculator. It starts ' + deg(rec.atdc - e6.evcATDC, 1) + ' after the exhaust ' +
+        'valve seats (' + deg(e6.dBTDC.evc) + ' dBTDC)' + (rec.limitedByEvc ? ', which is what sets it here' : '') + '. Use it across the table as a ' +
+        'starting point, then fine-tune: move it a few degrees at a time at steady load and keep the setting where lambda goes richest without ' +
+        'a VE change (the fuel is mixing best).</p>';
+    if (inp.cam.phaser) {
+        html += '<p class="hint">With ' + inp.cam.phaser + '° of cam advance the valve events above already include the phaser. If the phaser moves ' +
+            'with load, check the recommendation at each end of its range.</p>';
+    }
+    $('soi-rec').innerHTML = html;
+}
+
+function renderLimits(advice, inp, e6) {
+    var maxRpm = inp.maxRpm, html = advice.map(function (a) { return '<div class="advice ' + a.severity + '">' + esc(a.text) + '</div>'; }).join('');
+    if (inp.primaryLimit !== null) {
+        html += '<p class="hint">At ' + maxRpm + ' rpm a pulse lasts ' + (maxRpm * 0.006).toFixed(1) + '° per millisecond. From the recommended start, the ' +
+            'Primary Limit leaves room for ' + diMaxPw(diRecommendSoi(e6).dBTDC, inp.primaryLimit, maxRpm).toFixed(1) + ' ms there before the pulse is cut short.</p>';
+    }
+    if (diTune && diTune.limitMargin !== null) {
+        html += '<p class="hint">The tune also has Fuel Timing Primary Limit Margin = ' + diTune.limitMargin + '°; it is shown for reference and ' +
+            'not used in these checks.</p>';
+    }
+    $('limits-content').innerHTML = html;
+}
+
+function renderSoiTable(rows, inp) {
+    var cell = function (v, cls) { return '<td' + (cls ? ' class="' + cls + '"' : '') + '>' + v + '</td>'; };
+    var html = '<div class="scroll"><table class="soi-table"><thead><tr><th>RPM</th>' + rows.map(function (r) { return '<th>' + r.rpm + '</th>'; }).join('') +
+        '</tr></thead><tbody>';
+    html += '<tr><td class="dim">Start (dBTDC)</td>' + rows.map(function (r) { return cell(r.soi); }).join('') + '</tr>';
+    html += '<tr><td class="dim">End at ' + inp.pwMs + ' ms</td>' + rows.map(function (r) {
+        return cell(r.rpm ? Math.round(r.eoi) : '—', r.rpm && (r.intoCompression || r.truncated || r.nearSpark) ? 'flag' : 'dim');
+    }).join('') + '</tr>';
+    html += '<tr><td class="dim">Max PW to BDC (ms)</td>' + rows.map(function (r) { return cell(r.rpm ? (r.maxPwToBdc > 50 ? '>50' : r.maxPwToBdc.toFixed(1)) : '—', 'dim'); }).join('') + '</tr>';
+    if (inp.primaryLimit !== null) {
+        html += '<tr><td class="dim">Max PW to limit (ms)</td>' + rows.map(function (r) { return cell(r.rpm ? (r.maxPwToLimit > 50 ? '>50' : r.maxPwToLimit.toFixed(1)) : '—', 'dim'); }).join('') + '</tr>';
+    }
+    html += '</tbody></table></div>';
+    var comp = rows.filter(function (r) { return r.rpm && r.intoCompression; }), trunc = rows.filter(function (r) { return r.rpm && r.truncated; });
+    var fix = ' The better fix is more rail pressure, which shortens the pulse for the same fuel; otherwise start earlier — even before the exhaust valve ' +
+        'seats where that is what it takes. Around 6 ms is the practical limit at high rpm.';
+    if (trunc.length) html += '<div class="advice warning">From ' + trunc[0].rpm + ' rpm a ' + inp.pwMs + ' ms pulse runs past the Primary Limit and is cut short — the ' +
+        'engine would run lean there. Check the pulse widths you actually reach (load a log) first.' + fix + '</div>';
+    else if (comp.length) html += '<div class="advice info">From ' + comp[0].rpm + ' rpm a ' + inp.pwMs + ' ms pulse ends on the compression stroke (before the ' +
+        'Primary Limit). Fuel injected against rising cylinder pressure flows less and mixes poorly — watch for sooting, misfire or lost power.' + fix + '</div>';
+    $('soi-table').innerHTML = html;
+    $('copy-btn').onclick = function () {
+        var text = rows.map(function (r) { return r.rpm; }).join('\t') + '\n' + rows.map(function (r) { return r.soi; }).join('\t');
+        var btn = this;
+        (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () { btn.textContent = 'Copied'; }, function () { btn.textContent = 'Copy failed'; })
+            .then(function () { setTimeout(function () { btn.textContent = 'Copy start of injection row'; }, 1500); });
+    };
+}
+
+function renderTune(check, e6, rec, inp, lr) {
+    $('tune-block').hidden = !(diTune && diTune.table);
+    if (!diTune || !diTune.table) return;
+    var t = diTune.table, evc = e6.dBTDC.evc, html = '';
+    if (check.early.length) {
+        var maxBy = Math.max.apply(null, check.early.map(function (c) { return c.by; }));
+        html += '<div class="advice ' + (maxBy > 10 ? 'warning' : 'info') + '">' + check.early.length + ' cell' + (check.early.length > 1 ? 's start' : ' starts') +
+            ' injection before the exhaust valve seats (' + Math.round(evc) + ' dBTDC), by up to ' + Math.round(maxBy) + '°: ' +
+            check.early.slice(0, 6).map(function (c) { return c.rpm + ' rpm / ' + c.map + ' kPa (' + c.soi + ')'; }).join(', ') + (check.early.length > 6 ? '…' : '') +
+            '. Some fuel leaves through the exhaust there. That can be a deliberate trade at high rpm and boost, to keep a long pulse out of the ' +
+            'compression stroke; if the pulse fits anyway (see the log figures), start them after ' + Math.round(evc) + '.' +
+            (inp.startLimit !== null && inp.startLimit < check.max ? ' The Injection Start Limit (' + inp.startLimit + ') caps them at ' + inp.startLimit + '.' : '') + '</div>';
+    } else {
+        html += '<div class="advice good">Every cell starts after the exhaust valve seats (' + Math.round(evc) + ' dBTDC).</div>';
+    }
+    if (check.late.length) {
+        html += '<div class="advice info">' + check.late.length + ' cell' + (check.late.length > 1 ? 's start' : ' starts') + ' injection later than ' + DI_LATE_SOI +
+            ' dBTDC, close to BDC: the intake air is slow there, so the fuel mixes poorly (sooting, lost power). Start them earlier unless there is a ' +
+            'reason.</div>';
+    }
+    html += '<p class="hint">Each cell: the table\'s start of injection' + (lr && lr.cells ? '; below it, from the log, the longest pulse (99th percentile) and the ' +
+        'latest end of injection in that cell' : '') + '. Red = starts before the exhaust valve seats' + (lr ? ' or ends past the Primary Limit' : '') +
+        '; orange = ends on the compression stroke. Recommended start: ' + rec.dBTDC.toFixed(0) + ' dBTDC.</p>';
+    html += '<div class="scroll"><table class="grid-table"><thead><tr><th>kPa \\ rpm</th>' + t.rpm.map(function (r) { return '<th>' + r + '</th>'; }).join('') + '</tr></thead><tbody>';
+    for (var m = t.map.length - 1; m >= 0; m--) {
+        html += '<tr><th>' + (t.map[m] === null ? '' : t.map[m]) + '</th>';
+        t.values[m].forEach(function (v, r) {
+            var c = lr && lr.cells ? lr.cells[m][r] : null, cls = v > evc ? 'bad' : '';
+            if (c && c.worstEoi !== null) {
+                if (inp.primaryLimit !== null && c.worstEoi < inp.primaryLimit) cls = 'bad';
+                else if (c.worstEoi < 180 && !cls) cls = 'warn';
+                else if (!cls) cls = 'ok';
+            }
+            html += '<td class="' + cls + '">' + Math.round(v) + (c ? '<small>' + c.p99Pw + ' ms → ' + Math.round(c.worstEoi) + '</small>' : '') + '</td>';
+        });
+        html += '</tr>';
+    }
+    html += '</tbody></table></div>';
+    $('tune-content').innerHTML = html;
+}
+
+function renderLog(lr, e6, inp) {
+    if (!lr) { $('log-content').innerHTML = '<p class="hint">' + esc($('log-status').textContent) + '</p>'; return; }
+    var c = lr.counts, n = lr.samples, pct = function (k) { return (c[k] / n * 100).toFixed(1) + '%'; };
+    var problems = c.beforeEvc + c.truncated + c.nearSpark;
+    var html = '<p>Logged pulse width ' + lr.pw.median + ' ms typical, ' + lr.pw.p99 + ' ms (99th percentile), ' + lr.pw.max + ' ms longest. Logged start of ' +
+        'injection ' + lr.angle.min + '–' + lr.angle.max + ' dBTDC.</p>';
+    html += '<div class="advice ' + (problems ? 'warning' : 'good') + '">' + (problems
+        ? 'Of ' + n.toLocaleString() + ' injection readings: ' + [c.beforeEvc ? c.beforeEvc + ' (' + pct('beforeEvc') + ') started before the exhaust valve seats' : '',
+            c.truncated ? c.truncated + ' (' + pct('truncated') + ') ran past the Primary Limit' : '',
+            c.nearSpark ? c.nearSpark + ' (' + pct('nearSpark') + ') ended within 10° of the spark' : ''].filter(Boolean).join('; ') + '.'
+        : 'All ' + n.toLocaleString() + ' injection readings started after the exhaust valve seats and ended well before the spark' +
+          (c.intoCompression ? '' : ', on the intake stroke') + '.') + '</div>';
+    if (c.intoCompression) html += '<p class="hint">' + c.intoCompression + ' readings (' + pct('intoCompression') + ') ended on the compression stroke.</p>';
+    if (lr.worst) {
+        var w = lr.worst;
+        html += '<p class="hint">Latest end of injection: ' + w.eoi + ' dBTDC at ' + w.time + ' s (' + w.rpm + ' rpm, ' + (w.map !== null ? w.map + ' kPa, ' : '') +
+            w.pw + ' ms from ' + w.soi + ' dBTDC' + (w.spark !== null ? ', spark ' + w.spark + '° BTDC' : '') + ').</p>';
+    }
+    if (lr.pw.max > num('design-pw', 6)) {
+        html += '<p class="hint">The longest logged pulse (' + lr.pw.max + ' ms) is longer than the design pulse width above; raise it to check the table at that length.</p>';
+    } else if (!diPwEdited) {
+        html += '<p class="hint">"Longest pulse width" is set from this log (' + lr.pw.max + ' ms + 10%). Pulses get longer at full load and high rpm, so if the log ' +
+            'has no full-throttle pulls at the top of the rev range, enter the pulse width you expect there.</p>';
+    }
+    $('log-content').innerHTML = html;
+}
+
+/** Cycle diagram: crank angle from firing TDC (left) through the four strokes, valve events at 0.006" (and 0.050"), injection. */
+function renderDiagram(e6, e5, rec, inp, rows) {
+    var W = 900, H = 230, L = 20, R = 20, x = function (dbtdc) { return L + (720 - dbtdc) / 720 * (W - L - R); };
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Engine cycle with valve events and the injection window">';
+    [['Power', 720, 540], ['Exhaust', 540, 360], ['Intake', 360, 180], ['Compression', 180, 0]].forEach(function (s, i) {
+        svg += '<rect x="' + x(s[1]) + '" y="22" width="' + (x(s[2]) - x(s[1])) + '" height="' + (H - 54) + '" fill="' + (i % 2 ? '#1c1c1c' : '#161616') + '" stroke="#2c2c2c"/>' +
+            '<text x="' + (x(s[1]) + x(s[2])) / 2 + '" y="16" fill="#888" font-size="12" text-anchor="middle">' + s[0] + '</text>';
+    });
+    [[720, 'TDC 720/0'], [540, 'BDC 540'], [360, 'TDC 360'], [180, 'BDC 180'], [0, 'TDC 0']].forEach(function (p, i, all) {
+        var anchor = i === 0 ? 'start' : i === all.length - 1 ? 'end' : 'middle';
+        svg += '<text x="' + x(p[0]) + '" y="' + (H - 18) + '" fill="#777" font-size="11" text-anchor="' + anchor + '">' + p[1] + '</text>';
+    });
+    var bar = function (from, to, y, color, label, light) {
+        return '<rect x="' + x(from) + '" y="' + y + '" width="' + Math.max(1, x(to) - x(from)) + '" height="16" rx="3" fill="' + color + '" opacity="' + (light ? 0.35 : 0.75) + '"/>' +
+            (label ? '<text x="' + (x(from) + x(to)) / 2 + '" y="' + (y + 12) + '" fill="#fff" font-size="11" text-anchor="middle">' + label + '</text>' : '');
+    };
+    svg += bar(e6.dBTDC.evo, e6.dBTDC.evc, 34, '#f44336', 'Exhaust open (seat to seat)') + bar(e5.dBTDC.evo, e5.dBTDC.evc, 54, '#f44336', '0.050"', true);
+    svg += bar(e6.dBTDC.ivo, e6.dBTDC.ivc, 78, '#2196f3', 'Intake open (seat to seat)') + bar(e5.dBTDC.ivo, e5.dBTDC.ivc, 98, '#2196f3', '0.050"', true);
+    var last = rows[rows.length - 1], start = last ? last.soi : rec.dBTDC, eoi = last && last.rpm ? last.soi - last.crank : rec.dBTDC - 30;
+    svg += bar(start, Math.max(eoi, 0), 124, '#4caf50', inp.pwMs + ' ms at ' + (last ? last.rpm : '') + ' rpm');
+    var line = function (dbtdc, color, label, y) {
+        return '<line x1="' + x(dbtdc) + '" x2="' + x(dbtdc) + '" y1="22" y2="' + (H - 32) + '" stroke="' + color + '" stroke-width="2" stroke-dasharray="4 3"/>' +
+            '<text x="' + (x(dbtdc) + 4) + '" y="' + y + '" fill="' + color + '" font-size="11">' + label + '</text>';
+    };
+    svg += line(rec.dBTDC, '#4caf50', 'Start ' + rec.dBTDC.toFixed(0), 162);
+    if (inp.startLimit !== null) svg += line(inp.startLimit, '#ffb74d', 'Start limit ' + inp.startLimit, 176);
+    if (inp.primaryLimit !== null) svg += line(inp.primaryLimit, '#ff9800', 'Primary limit ' + inp.primaryLimit, 162);
+    svg += line(inp.spark, '#ce93d8', 'Spark ' + inp.spark + '°', 176);
+    svg += '</svg>';
+    $('diagram').innerHTML = svg;
+}
+
+$('calc-btn').addEventListener('click', calculate);
+$('design-pw').addEventListener('input', function () { diPwEdited = true; });
+
+if (typeof module !== 'undefined' && module.exports) module.exports = {};
