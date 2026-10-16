@@ -22,6 +22,11 @@
  *   PUT    /api/resource-names               body { key, name } (empty name removes)
  *   GET    /api/backup                       JSON backup (same format as the browser export)
  *   POST   /api/backup                       restore a JSON backup → { added }
+ *   GET    /api/harnesses                    wiring harness summaries, newest first
+ *   POST   /api/harnesses                    body { name, data, note } → { id, revision, saved }
+ *   GET    /api/harnesses/:id[?revision=N]   latest (or given) revision with data and revision list
+ *   PUT    /api/harnesses/:id                body { name, data, note } → new revision { id, revision, saved }
+ *   DELETE /api/harnesses/:id
  */
 
 'use strict';
@@ -160,6 +165,32 @@ function handleApi(req, res, url, store) {
                 store.setResourceName(body.key, typeof body.name === 'string' ? body.name.trim() : '');
                 sendJson(req, res, 200, { ok: true });
             });
+        }
+    }
+
+    if (parts[0] === 'harnesses') {
+        if (parts.length === 1 && method === 'GET') return sendJson(req, res, 200, store.listHarnesses());
+        var hid = parts[1] || null;
+        if ((parts.length === 1 && method === 'POST') || (parts.length === 2 && method === 'PUT')) {
+            return readJson(req).then(function (body) {
+                if (!body || typeof body.name !== 'string' || !body.name.trim()) throw new HttpError(400, 'name is required');
+                if (!body.data || !Array.isArray(body.data.connectors) || !Array.isArray(body.data.splices)) {
+                    throw new HttpError(400, 'data must be a harness model');
+                }
+                var saved = store.saveHarness(hid, body.name.trim(), body.data, typeof body.note === 'string' ? body.note : '');
+                if (!saved) throw new HttpError(404, 'Harness not found');
+                sendJson(req, res, hid ? 200 : 201, saved);
+            });
+        }
+        if (parts.length === 2 && method === 'GET') {
+            var rev = url.searchParams.has('revision') ? parseInt(url.searchParams.get('revision'), 10) : 0;
+            var harness = store.getHarness(hid, rev || 0);
+            if (!harness) throw new HttpError(404, 'Harness not found');
+            return sendJson(req, res, 200, harness);
+        }
+        if (parts.length === 2 && method === 'DELETE') {
+            if (!store.deleteHarness(hid)) throw new HttpError(404, 'Harness not found');
+            res.writeHead(204); return res.end();
         }
     }
 

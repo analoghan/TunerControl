@@ -92,6 +92,59 @@ test('re-parses packages stored with an older parser version', function () {
     assert.strictEqual(store.getPackage(sha(V1)).items.length, parser.parseM1Pkg(V1).items.length);
 });
 
+test('stores harness revisions and deletes them with the harness', function () {
+    var store = new TuneStore(':memory:');
+    var model = { name: 'H', sheets: [], connectors: [{ id: 'X1', pins: [] }], splices: [] };
+    var a = store.saveHarness(null, 'Engine', model, 'import');
+    model.connectors.push({ id: 'X2', pins: [] });
+    var b = store.saveHarness(a.id, 'Engine harness', model, 'added X2');
+    assert.deepStrictEqual([a.revision, b.revision], [1, 2]);
+    var latest = store.getHarness(a.id);
+    assert.strictEqual(latest.name, 'Engine harness');
+    assert.strictEqual(latest.data.connectors.length, 2);
+    assert.deepStrictEqual(latest.revisions.map(function (r) { return r.note; }), ['added X2', 'import']);
+    assert.strictEqual(store.getHarness(a.id, 1).data.connectors.length, 1);
+    assert.strictEqual(store.saveHarness('missing', 'x', model, ''), null);
+    assert.strictEqual(store.deleteHarness(a.id), true);
+    assert.strictEqual(store.db.prepare('SELECT COUNT(*) AS n FROM harness_revisions').get().n, 0);
+});
+
+test('HTTP API: harnesses', function () {
+    var server = createServer(new TuneStore(':memory:'));
+    return new Promise(function (resolve) { server.listen(0, '127.0.0.1', resolve); }).then(function () {
+        var base = 'http://127.0.0.1:' + server.address().port + '/api/harnesses';
+        var headers = { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' };
+        var model = { name: 'H', sheets: [], connectors: [], splices: [] }, id;
+        return fetch(base, { method: 'POST', headers: headers, body: JSON.stringify({ name: 'Engine', data: model, note: 'new' }) })
+            .then(function (r) { assert.strictEqual(r.status, 201); return r.json(); })
+            .then(function (j) {
+                id = j.id;
+                return fetch(base + '/' + id, { method: 'PUT', headers: headers, body: JSON.stringify({ name: 'Engine', data: model }) });
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                assert.strictEqual(j.revision, 2);
+                return fetch(base, { method: 'POST', headers: headers, body: JSON.stringify({ name: 'Bad', data: {} }) });
+            })
+            .then(function (r) {
+                assert.strictEqual(r.status, 400);
+                return fetch(base + '/' + id + '?revision=1', { headers: headers });
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (h) {
+                assert.deepStrictEqual([h.revision, h.latest, h.revisions.length], [1, 2, 2]);
+                return fetch(base + '/' + id, { method: 'DELETE', headers: headers });
+            })
+            .then(function (r) {
+                assert.strictEqual(r.status, 204);
+                return fetch(base, { headers: headers });
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (list) { assert.deepStrictEqual(list, []); })
+            .finally(function () { server.close(); });
+    });
+});
+
 test('HTTP API: token, upload, list and private paths', function () {
     var server = createServer(new TuneStore(':memory:'));
     return new Promise(function (resolve) { server.listen(0, '127.0.0.1', resolve); }).then(function () {

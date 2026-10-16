@@ -79,6 +79,9 @@
   <script src="../m1-config/resource-names.js"></script>
   <script src="../ve-table/m1pkg-ve.js"></script>
   <script src="../transient-fuel/m1pkg-film.js"></script>
+  <script src="../lib/xlsx.js"></script>
+  <script src="../harness/harness-model.js"></script>
+  <script src="../harness/harness-tune.js"></script>
 
   <!-- Load fast-check from CDN -->
   <script src="https://cdn.jsdelivr.net/npm/fast-check@3.22.0/lib/bundle.js"></script>
@@ -370,6 +373,7 @@
         'test-m1-resource-names.js',
         'test-ve-m1pkg.js',
         'test-transient-m1pkg.js',
+        'test-harness.js',
       ];
 
       for (const mod of testModules) {

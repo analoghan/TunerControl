@@ -1,13 +1,14 @@
 # TunerControl Server
 
-Optional backend that serves the TunerControl web app and stores the M1 Config Viewer's tune history in a
-SQLite database, so every browser sees the same history and the data can be queried with SQL.
+Optional backend that serves the TunerControl web app and stores the M1 Config Viewer's tune history and the
+Harness Builder's harnesses (every saved revision) in a SQLite database, so every browser sees the same data
+and it can be queried with SQL.
 
 - No npm dependencies — Node's built-in HTTP server and `node:sqlite`.
 - Uploaded `.m1pkg` files are parsed on the server (`lib/m1pkg-parser.js`) and the original file is kept, so
   stored tunes are re-parsed automatically when the parser improves.
-- When the M1 Config Viewer is opened from this server it uses the server; opened any other way (GitHub
-  Pages, a local file) it falls back to browser storage as before.
+- When the M1 Config Viewer or Harness Builder is opened from this server it uses the server; opened any
+  other way (GitHub Pages, a local file) it falls back to browser storage as before.
 
 **Requires Node.js 22.13 or newer** (Node 24 LTS recommended). Check with `node --version`.
 
@@ -135,6 +136,9 @@ are stored on the server. Keep `TUNERCONTROL_TOKEN` set even behind HTTPS.
 
 Packages restored from a backup have no original file, so they are not re-parsed on parser updates —
 re-import the `.m1pkg` files instead if you still have them.
+
+Harnesses from browser storage: open each one in the Harness Builder the old way, click **Export .xlsx**,
+then import that file in the Harness Builder opened from the server.
 
 ## Backups
 

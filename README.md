@@ -47,6 +47,16 @@ Import MoTeC M1 Tune packages (`.m1pkg`) directly — no export step needed — 
 - Tune history stored in the browser (IndexedDB) with JSON backup export/restore, or on the optional TunerControl server (SQLite) when served from it
 - Compare any two versions: changed values, table cells (with axis breakpoints), I/O assignments, calibration selections and save notes
 
+### Harness Builder
+Design and check wiring harnesses built around the M1 ECU.
+
+**Features:**
+- Imports harness spreadsheets (`.xlsx`) laid out as one block per connector or splice: CONNECTOR/BOOT/MATE CONN/MATE PIN/NOTES rows, then a Location header row and one row per cavity (Remote Connection = `CONNECTOR.CAVITY` or a splice name)
+- Edit connectors, cavities, wires and splices in the browser; renaming a connector updates every connection that refers to it
+- Checks every connection at both ends: references to nothing (with "did you mean" fixes), ends that disagree, splices that don't list their wires, chained splices, wire part numbers that differ between ends
+- Compares the ECU (M142) and E888 pins against the I/O assignments in a tune from the M1 Config Viewer, and harness pin labels against the M142 datasheet pinout
+- Every save is a revision (server or browser storage); export back to `.xlsx` in the same layout
+
 ### Calculators
 Quick bidirectional unit conversions for tuning:
 - kPa ↔ PSI ↔ Bar (gauge and absolute with 102 kPa atmospheric reference)
@@ -76,8 +86,8 @@ python3 -m http.server 8080
 
 ### Optional server (shared tune history)
 
-`server/server.js` serves the same files plus an API that stores the M1 Config Viewer's tune history in
-SQLite, so it persists on a server and is shared between browsers. It has no npm dependencies and needs
+`server/server.js` serves the same files plus an API that stores the M1 Config Viewer's tune history and
+the Harness Builder's harnesses in SQLite, so they persist on a server and are shared between browsers. It has no npm dependencies and needs
 Node.js 22.13+. See [server/README.md](server/README.md) for systemd and Docker setup.
 
 ---
@@ -114,10 +124,13 @@ calculators/                — Unit Conversion Calculators
 m1-config/                  — M1 Config Viewer (.m1pkg import, tune history, compare)
   index.html, app.js, format.js, resource-names.js, tune-db.js, tune-api.js, worker.js, styles.css
 
-lib/                        — Vendored libraries (Chart.js, zoom plugin, Hammer.js) and shared parsers
-                              (ld-parser.js, m1pkg-parser.js, xz-decoder.js)
+harness/                    — Harness Builder (.xlsx import/export, editor, checks, tune comparison)
+  index.html, app.js, harness-model.js, harness-tune.js, harness-store.js, styles.css
 
-server/                     — Optional Node server: static files + SQLite tune history API (see server/README.md)
+lib/                        — Vendored libraries (Chart.js, zoom plugin, Hammer.js) and shared parsers
+                              (ld-parser.js, m1pkg-parser.js, xz-decoder.js, xlsx.js)
+
+server/                     — Optional Node server: static files + SQLite API for tunes and harnesses (see server/README.md)
 deploy/                     — systemd unit for the server (Dockerfile at the repo root)
 
 tests/                      — Browser-based test suite

@@ -9,6 +9,8 @@
  *   items          one row per parameter/table/IO resource per package (full parsed item as JSON)
  *   cells          one row per individual value (scalar, axis site or table cell) for SQL queries
  *   resource_names user names for I/O resources, key = 'HARDWARE|signature'
+ *   harnesses      wiring harness designs (harness/ page); id is a random UUID
+ *   harness_revisions every saved version of a harness (full model as JSON), newest = harnesses.revision
  * View
  *   cell_values    cells joined with tune and item names — the easiest table for ad-hoc SQL
  */
@@ -20,7 +22,7 @@ var path = require('path');
 var DatabaseSync = require('node:sqlite').DatabaseSync;
 var parser = require('../lib/m1pkg-parser.js');
 
-var SCHEMA_VERSION = 1;
+var SCHEMA_VERSION = 2;
 var SCHEMA = [
     'CREATE TABLE IF NOT EXISTS packages (' +
     '  pk INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, file_name TEXT, file_size INTEGER, imported_at TEXT NOT NULL,' +
@@ -43,6 +45,11 @@ var SCHEMA = [
     'CREATE INDEX IF NOT EXISTS cells_by_item ON cells (name_id, cell_key)',
     'CREATE INDEX IF NOT EXISTS packages_by_modified ON packages (modified)',
     'CREATE TABLE IF NOT EXISTS resource_names (key TEXT PRIMARY KEY, name TEXT NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS harnesses (' +
+    '  id TEXT PRIMARY KEY, name TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL, revision INTEGER NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS harness_revisions (' +
+    '  harness_id TEXT NOT NULL REFERENCES harnesses(id) ON DELETE CASCADE, revision INTEGER NOT NULL,' +
+    '  saved TEXT NOT NULL, note TEXT, data_json TEXT NOT NULL, PRIMARY KEY (harness_id, revision))',
     'CREATE VIEW IF NOT EXISTS cell_values AS' +
     '  SELECT p.id AS package_id, p.tune_name, p.modified, n.name AS item_name, c.cell_key, c.value, c.text_value' +
     '  FROM cells c JOIN packages p ON p.pk = c.package_pk JOIN item_names n ON n.id = c.name_id'
@@ -221,6 +228,52 @@ TuneStore.prototype.setResourceName = function (key, name) {
 };
 
 /** Same format as the browser's Export backup. */
+// ---------------------------------------------------------------------------
+// Wiring harnesses
+// ---------------------------------------------------------------------------
+
+TuneStore.prototype.listHarnesses = function () {
+    return this.db.prepare('SELECT id, name, created, updated, revision FROM harnesses ORDER BY updated DESC').all()
+        .map(function (r) { return Object.assign({}, r); });
+};
+
+/** Latest (or a given) revision: { id, name, created, updated, revision, saved, note, data, revisions }. */
+TuneStore.prototype.getHarness = function (id, revision) {
+    var h = this.db.prepare('SELECT id, name, created, updated, revision FROM harnesses WHERE id = ?').get(id);
+    if (!h) return null;
+    var rev = this.db.prepare('SELECT revision, saved, note, data_json FROM harness_revisions WHERE harness_id = ? AND revision = ?')
+        .get(id, revision || h.revision);
+    if (!rev) return null;
+    var revisions = this.db.prepare('SELECT revision, saved, note FROM harness_revisions WHERE harness_id = ? ORDER BY revision DESC')
+        .all(id).map(function (r) { return Object.assign({}, r); });
+    return Object.assign({}, h, { revision: rev.revision, saved: rev.saved, note: rev.note,
+        data: JSON.parse(rev.data_json), revisions: revisions, latest: h.revision });
+};
+
+/** Save a new revision (creating the harness when id is null). Returns { id, revision }. */
+TuneStore.prototype.saveHarness = function (id, name, data, note) {
+    var self = this, now = new Date().toISOString();
+    return this.transaction(function () {
+        var h = id ? self.db.prepare('SELECT revision FROM harnesses WHERE id = ?').get(id) : null;
+        if (id && !h) return null;
+        var rev = h ? h.revision + 1 : 1;
+        if (!h) {
+            id = require('crypto').randomUUID();
+            self.db.prepare('INSERT INTO harnesses (id, name, created, updated, revision) VALUES (?, ?, ?, ?, ?)')
+                .run(id, name, now, now, rev);
+        } else {
+            self.db.prepare('UPDATE harnesses SET name = ?, updated = ?, revision = ? WHERE id = ?').run(name, now, rev, id);
+        }
+        self.db.prepare('INSERT INTO harness_revisions (harness_id, revision, saved, note, data_json) VALUES (?, ?, ?, ?, ?)')
+            .run(id, rev, now, note || '', JSON.stringify(data));
+        return { id: id, revision: rev, saved: now };
+    });
+};
+
+TuneStore.prototype.deleteHarness = function (id) {
+    return this.db.prepare('DELETE FROM harnesses WHERE id = ?').run(id).changes > 0;
+};
+
 TuneStore.prototype.exportBackup = function () {
     var self = this;
     return {

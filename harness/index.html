@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Harness Builder — TunerControl</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css">
+  <link rel="stylesheet" href="../m1-config/styles.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html" aria-label="Back to MoTeC M1 Tuning">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Harness Builder</h1>
+    <p class="subtitle">Design and check wiring harnesses: connectors, cavities, wires and splices. Import an existing harness spreadsheet, edit it here, check every connection end to end, and compare the ECU pins against the I/O assignments in an M1 tune.</p>
+
+    <!-- Open / import -->
+    <section class="form-section" aria-label="Harnesses">
+      <div class="file-row">
+        <label for="xlsx-input">Import spreadsheet (.xlsx):</label>
+        <input type="file" id="xlsx-input" accept=".xlsx">
+      </div>
+      <div class="compare-row">
+        <label for="harness-select">Saved harnesses</label>
+        <select id="harness-select" aria-label="Saved harnesses"></select>
+        <button id="open-btn" class="btn btn-secondary">Open</button>
+        <button id="new-btn" class="btn btn-secondary">New harness</button>
+      </div>
+      <p class="hint" id="storage-hint">Harnesses are stored in this browser only.</p>
+      <div id="status" class="import-status" role="status" aria-live="polite" hidden></div>
+      <div id="error" class="error-banner" role="alert" hidden></div>
+    </section>
+
+    <!-- Open harness -->
+    <div id="editor" hidden>
+      <section class="report-block harness-bar" aria-label="Harness">
+        <div class="compare-row">
+          <label for="name-input">Name</label>
+          <input type="text" id="name-input" class="text-input name-input" aria-label="Harness name">
+          <label for="revision-select">Revision</label>
+          <select id="revision-select" aria-label="Revision"></select>
+          <span id="dirty-flag" class="dirty-flag" hidden>Unsaved changes</span>
+          <span class="spacer"></span>
+          <button id="save-btn" class="btn">Save</button>
+          <button id="export-btn" class="btn btn-secondary">Export .xlsx</button>
+          <button id="delete-btn" class="btn btn-danger">Delete</button>
+        </div>
+        <p class="hint" id="revision-hint" hidden></p>
+      </section>
+
+      <div class="tabs" role="tablist" aria-label="Harness views">
+        <button class="tab active" role="tab" aria-selected="true" data-tab="connectors">Connectors <span class="count" id="count-connectors"></span></button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="splices">Splices <span class="count" id="count-splices"></span></button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="checks">Checks <span class="count" id="count-checks"></span></button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="tune">Tune comparison</button>
+      </div>
+
+      <div id="panel-connectors" class="panel" role="tabpanel">
+        <div class="split">
+          <aside class="block-list" aria-label="Connectors">
+            <input type="search" id="connector-filter" class="text-input" placeholder="Filter connectors…" aria-label="Filter connectors">
+            <ul id="connector-list"></ul>
+            <button id="add-connector-btn" class="btn btn-secondary btn-small">Add connector</button>
+          </aside>
+          <div id="connector-editor" class="block-editor"></div>
+        </div>
+      </div>
+
+      <div id="panel-splices" class="panel" role="tabpanel" hidden>
+        <div class="split">
+          <aside class="block-list" aria-label="Splices">
+            <input type="search" id="splice-filter" class="text-input" placeholder="Filter splices…" aria-label="Filter splices">
+            <ul id="splice-list"></ul>
+            <button id="add-splice-btn" class="btn btn-secondary btn-small">Add splice</button>
+          </aside>
+          <div id="splice-editor" class="block-editor"></div>
+        </div>
+      </div>
+
+      <div id="panel-checks" class="panel" role="tabpanel" hidden>
+        <h2>Checks</h2>
+        <p class="panel-desc">Every remote connection is followed to the other end: references that point nowhere, ends that disagree, splices that don't list their wires, and wire part numbers that differ between ends.</p>
+        <div id="checks"></div>
+      </div>
+
+      <div id="panel-tune" class="panel" role="tabpanel" hidden>
+        <h2>Tune comparison</h2>
+        <p class="panel-desc">ECU and E888 pins used by the tune's I/O assignments, against what the harness wires to each pin. Uses the tunes imported in the <a href="../m1-config/index.html">M1 Config Viewer</a>; names you give I/O resources there are used here too.</p>
+        <div class="compare-row">
+          <label for="tune-select">Tune</label>
+          <select id="tune-select" aria-label="Tune"></select>
+          <div class="filter-group" role="group" aria-label="Show">
+            <button class="filter-btn active" data-show="problems">Problems</button>
+            <button class="filter-btn" data-show="all">All pins</button>
+          </div>
+        </div>
+        <div id="tune-result"></div>
+      </div>
+    </div>
+
+    <div id="empty-state" class="empty-state">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5" aria-hidden="true">
+        <path d="M4 7h4v10H4zM16 7h4v10h-4zM8 10h8M8 14h8"/>
+      </svg>
+      <p>Import a harness spreadsheet, open a saved harness, or start a new one.</p>
+      <p class="hint">Spreadsheets use one block per connector: a title row, CONNECTOR / BOOT / MATE CONN / MATE PIN / NOTES rows, then a Location header row and one row per cavity. Splices use a SPLICE row instead.</p>
+    </div>
+  </div>
+
+  <script src="../lib/xlsx.js"></script>
+  <script src="../m1-config/resource-names.js"></script>
+  <script src="../m1-config/tune-db.js"></script>
+  <script src="../m1-config/tune-api.js"></script>
+  <script src="harness-model.js"></script>
+  <script src="harness-tune.js"></script>
+  <script src="harness-store.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
