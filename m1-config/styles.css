@@ -87,6 +87,17 @@ tr.grid-row > td { background: #0d0d0d; padding: 10px; }
 .link-btn { background: none; border: none; color: #ff5a6e; cursor: pointer; padding: 0; font: inherit; text-align: left; }
 .link-btn:hover { text-decoration: underline; }
 
+/* Follow: references between settings */
+.link-btn.follow-name { color: inherit; }
+.link-btn.follow-name:hover { color: #ff5a6e; }
+.follow-dialog { width: min(900px, 96vw); }
+.follow-body { max-height: 70vh; overflow-y: auto; }
+.follow-trail { margin: 4px 0; }
+.follow-h { font-size: 0.9rem; margin: 14px 0 6px; color: #fff; }
+.follow-table td { vertical-align: top; }
+.follow-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.follow-chip { border: 1px solid #333; border-radius: 4px; padding: 2px 8px !important; background: #222 !important; }
+
 /* Empty state */
 .empty-state { text-align: center; padding: 48px 16px; color: #888; }
 .empty-state p { margin: 10px 0 0; }

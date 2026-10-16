@@ -146,6 +146,18 @@
       <div id="hist-table"></div>
     </dialog>
 
+    <!-- Follow: references between settings -->
+    <dialog id="follow-dialog" class="hist-dialog follow-dialog" aria-labelledby="follow-title">
+      <div class="hist-head">
+        <button id="follow-back" class="btn btn-secondary btn-small" disabled>&larr; Back</button>
+        <h2 id="follow-title">Follow</h2>
+        <form method="dialog"><button class="btn btn-secondary btn-small">Close</button></form>
+      </div>
+      <p id="follow-trail" class="hint follow-trail"></p>
+      <p id="follow-crumbs" class="hint"></p>
+      <div id="follow-body" class="follow-body"></div>
+    </dialog>
+
     <!-- Empty state -->
     <div id="empty-state" class="empty-state">
       <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5" aria-hidden="true">
@@ -167,6 +179,7 @@
   <script src="format.js"></script>
   <script src="history.js"></script>
   <script src="resource-names.js"></script>
+  <script src="links.js"></script>
   <script src="tune-db.js"></script>
   <script src="tune-api.js"></script>
   <script src="app.js"></script>

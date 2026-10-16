@@ -43,6 +43,7 @@
       <li><a href="#storage">Where tunes are stored</a></li>
       <li><a href="#history">Tune history and comparing</a></li>
       <li><a href="#browse">Browsing parameters and tables</a></li>
+      <li><a href="#follow">Following settings</a></li>
       <li><a href="#value-history">Value history across versions</a></li>
       <li><a href="#units">Units</a></li>
       <li><a href="#io">I/O resources, names and pins</a></li>
@@ -95,6 +96,24 @@
       Use the search box to filter by name and the <strong>All / Parameters / Tables / I/O Resources</strong> buttons to filter by type.</p>
     <p>Tables show their size (e.g. <em>20 × 24</em>, or <em>20 × 24 of 36 × 24</em> when not every axis site is used). Click
       <strong>Show</strong> to expand the grid with its axis breakpoints.</p>
+
+    <h2 id="follow">Following settings</h2>
+    <p>Click a setting's <strong>name</strong> to open its group (e.g. <em>Driver.Switch 8</em>), or a <strong>value</strong> shown as a
+      link to open what it points at. The Follow window shows:</p>
+    <ul>
+      <li><strong>Referenced by</strong> — every setting elsewhere that points at this group or resource: an enum value naming it
+        (<em>Brake Switch Index = Driver Switch 8</em>), an I/O assignment, or a table axis reading its channel
+        (<em>Fuel Mixture Aim Main, Z axis: Driver Fuel Mixture Aim Main Switch</em>).</li>
+      <li><strong>Uses</strong> — what the group's own settings point at (<em>Input Resource → FIRMWARE5</em>).</li>
+      <li><strong>Settings</strong> — the group's values, with their links, and the groups inside it.</li>
+    </ul>
+    <p>For an I/O resource such as <em>FIRMWARE5</em> it lists every assignment and every enum value that selects it — e.g. the driver
+      switch reading it and the CAN receive signal writing it. Keep clicking to follow the chain; the trail at the top shows the path
+      (<em>Brake.Switch.Index → Driver.Switch 8 → FIRMWARE5 → CAN.Receive.Custom.Message 1.Signal 2</em>), <strong>Back</strong> steps
+      back, the <em>In …</em> line opens the parent groups, and <strong>Find</strong> shows a setting in the All Parameters table.</p>
+    <p class="hint">Links are worked out from the names in the package: an enum value links when it names a group (spacing and dots
+      ignored, or its words in order, e.g. <em>Driver Keypad Button 7 → Driver.CAN Keypad.Button 7</em>) or a resource
+      (<em>Firmware 5 = FIRMWARE5</em>). Values that name nothing in the tune, such as <em>On</em> or a sensor type, are not links.</p>
 
     <h2 id="value-history">Value history across versions</h2>
     <p>With two or more tunes imported, you can see how any value changed over every saved version:</p>

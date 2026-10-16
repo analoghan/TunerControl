@@ -29,8 +29,39 @@ var state = {
     filter: 'all',
     search: '',
     resourceNames: {},    // 'HARDWARE|signature' → user-entered I/O resource name
-    pkgCache: {}          // id → loaded package, for value histories from browser storage
+    pkgCache: {},         // id → loaded package, for value histories from browser storage
+    links: null,          // cross-reference index of the current package (links.js), built on first use
+    followTrail: []       // entity keys followed in the Follow dialog, newest last
 };
+
+/** Cross-reference index of the current package (links.js), using the same resource names as the tables. */
+function links() {
+    if (!state.links && state.current) {
+        var hw = hardwareOf(state.current);
+        state.links = m1lBuildIndex(state.current.items, function (ids) {
+            var n = m1cResourceName(ids, hw, state.resourceNames);
+            return n ? n.name : null;
+        });
+    }
+    return state.links;
+}
+
+/**
+ * A button that opens the Follow dialog on an entity key, around already-escaped html. `from` (an entity key) starts the
+ * trail there, so following a value from the table shows where it came from.
+ */
+function followLink(key, html, cls, from) {
+    return '<button class="link-btn' + (cls ? ' ' + cls : '') + '" data-follow="' + esc(key) + '"' +
+        (from ? ' data-follow-from="' + esc(from) + '"' : '') + ' title="Follow ' +
+        esc(m1lTitle(links(), key)) + '">' + html + '</button>';
+}
+
+/** The entity an axis of a table reads (e.g. a driver switch), or null. */
+function axisTarget(item, axis) {
+    var refs = links().byItem[item.name] || [];
+    for (var i = 0; i < refs.length; i++) if (refs[i].kind === 'axis' && refs[i].text.indexOf(axis + ' axis:') === 0) return refs[i].to;
+    return null;
+}
 
 function hardwareOf(pkg) {
     return pkg && pkg.meta ? pkg.meta['Summary.Hardware'] || '' : '';
@@ -288,6 +319,7 @@ function previousPackageId(id) {
 function viewPackage(id) {
     return storeLoad(id).then(function (pkg) {
         state.current = pkg;
+        state.links = null;
         state.index = pkg.items.map(function (item) {
             return { item: item, cats: m1cCategories(item), lname: item.name.toLowerCase() };
         });
@@ -366,6 +398,7 @@ function paramRow(item, idx) {
             '" aria-expanded="false">Show</button>';
     } else if (item.type === 'io_resource') {
         value = esc(resourceLabel(item.value, state.current));
+        if (m1lValueTarget(links(), item)) value = followLink(m1lValueTarget(links(), item), value, '', 'g:' + m1lGroupOf(item.name));
         pin = esc(resourcePin(item.value, state.current) || '');
         if (m1cResourceAssigned(item.value)) {
             value += ' <button class="btn btn-small btn-secondary" data-name-res="' + idx + '" aria-label="Name resource for ' +
@@ -373,11 +406,12 @@ function paramRow(item, idx) {
         }
     } else {
         value = esc(m1cFormatValue(item, item.value, item.label));
+        if (m1lValueTarget(links(), item)) value = followLink(m1lValueTarget(links(), item), value, '', 'g:' + m1lGroupOf(item.name));
     }
     if (!item.axes && state.packages.length > 1) {
         value += ' <button class="btn btn-small btn-secondary" data-history="' + idx + '" aria-label="History of ' + esc(item.name) + '">History</button>';
     }
-    return '<tr><td class="param-name">' + esc(item.name) + '</td><td class="num">' + value + '</td>' +
+    return '<tr><td class="param-name">' + followLink('g:' + m1lGroupOf(item.name), esc(item.name), 'follow-name') + '</td><td class="num">' + value + '</td>' +
         '<td class="param-pin">' + pin + '</td><td>' + esc(m1cUnit(item)) + '</td><td class="param-kind">' + esc(item.kind) + '</td></tr>';
 }
 
@@ -386,8 +420,9 @@ function gridHtml(item, idx) {
     item.axes.forEach(function (a) { axes[a.axis] = a; });
     function axisLabel(a) {
         if (!a) return '';
-        var u = m1cUnit(a);
-        return esc((a.input || a.axis) + (u ? ' (' + u + ')' : ''));
+        var u = m1cUnit(a), text = esc((a.input || a.axis) + (u ? ' (' + u + ')' : ''));
+        var to = axisTarget(item, a.axis);
+        return to ? followLink(to, text) : text;
     }
     function num(v, src) { return esc(m1cFormatNumber(v, m1cConvert(0, src).dps)); }
     var hist = state.packages.length > 1;
@@ -501,7 +536,8 @@ var MAX_CELLS_SHOWN = 40;
 
 function changeHtml(ch, item) {
     var cls = ch.change === 'added' ? ' change-added' : ch.change === 'removed' ? ' change-removed' : '';
-    var html = '<div class="change-item' + cls + '"><h3><span class="param-name">' + esc(ch.name) + '</span>' +
+    var html = '<div class="change-item' + cls + '"><h3><span class="param-name">' +
+        (links().groups[m1lGroupOf(ch.name)] ? followLink('g:' + m1lGroupOf(ch.name), esc(ch.name), 'follow-name') : esc(ch.name)) + '</span>' +
         '<span class="param-kind">' + esc(ch.change === 'changed' ? (item ? item.kind : '') : ch.change) + '</span></h3>';
     if (ch.change !== 'changed') return html + '</div>';
     var unit = item ? m1cUnit(item) : '';
@@ -641,6 +677,110 @@ $('main-content').addEventListener('click', function (e) {
 });
 
 // =========================================================================
+// Follow: what a setting group or I/O resource uses and what references it
+// =========================================================================
+
+/** Open the Follow dialog on an entity; push (default) adds it to the trail, 'new' starts a new trail (at `from` if given). */
+function openFollow(key, mode, from) {
+    if (mode === 'new' || !$('follow-dialog').open) state.followTrail = from && from !== key ? [from] : [];
+    if (state.followTrail[state.followTrail.length - 1] !== key) state.followTrail.push(key);
+    renderFollow();
+    if (!$('follow-dialog').open) $('follow-dialog').showModal();
+    $('follow-body').scrollTop = 0;
+}
+
+/** Display value of an item in the Follow dialog, linked when it points at another entity. */
+function followValue(item) {
+    if (item.axes) return esc(m1cTableSize(item)) + ' table';
+    var text = item.type === 'io_resource' ? resourceLabelWithPin(item.value, state.current) : m1cFormatValue(item, item.value, item.label);
+    var to = m1lValueTarget(links(), item);
+    return to ? followLink(to, esc(text)) : esc(text);
+}
+
+/** How a reference reads: "= Driver Switch 8", "assigned FIRMWARE5", "Z axis: …". */
+function refHow(r) {
+    return r.kind === 'value' ? '= ' + r.text : r.kind === 'resource' ? 'assigned ' + r.text : r.text;
+}
+
+function renderFollow() {
+    var ix = links(), key = state.followTrail[state.followTrail.length - 1], e = m1lEntity(ix, key);
+    $('follow-back').disabled = state.followTrail.length < 2;
+    $('follow-title').textContent = (key.indexOf('r:') === 0 ? 'I/O resource ' : '') + m1lTitle(ix, key);
+    $('follow-trail').innerHTML = state.followTrail.length > 1 ? 'Followed: ' + state.followTrail.map(function (k, i) {
+        var t = esc(m1lTitle(ix, k));
+        return i === state.followTrail.length - 1 ? '<strong>' + t + '</strong>' : '<button class="link-btn" data-trail="' + i + '">' + t + '</button>';
+    }).join(' → ') : '';
+    if (!e) {
+        $('follow-crumbs').innerHTML = '';
+        $('follow-body').innerHTML = '<p class="muted">Not in this tune.</p>';
+        return;
+    }
+    $('follow-crumbs').innerHTML = e.parents.length ? 'In ' + e.parents.map(function (p) {
+        return followLink(p.key, esc(p.title.split('.').pop()));
+    }).join(' › ') : '';
+
+    var html = '';
+    function section(title, n, body, empty) {
+        html += '<h3 class="follow-h">' + esc(title) + ' <span class="muted">(' + n + ')</span></h3>' + (n ? body : '<p class="muted">' + esc(empty) + '</p>');
+    }
+    function table(head, rows) {
+        return '<div class="table-scroll"><table class="event-table data-table follow-table"><thead><tr>' +
+            head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
+    }
+    function findBtn(name) {
+        return '<button class="btn btn-small btn-secondary" data-find="' + esc(name) + '" title="Show ' + esc(name) + ' in the table">Find</button>';
+    }
+
+    section(e.kind === 'resource' ? 'Assigned or selected by' : 'Referenced by', e.usedBy.length, table(['Setting', 'How', ''], e.usedBy.map(function (r) {
+        return '<tr><td class="param-name">' + followLink('g:' + m1lGroupOf(r.from), esc(r.from)) + '</td><td>' + esc(refHow(r)) +
+            '</td><td class="num">' + findBtn(r.from) + '</td></tr>';
+    })), e.kind === 'resource' ? 'Nothing in this tune uses it.' : 'Nothing else in this tune points at ' + e.title + '.');
+
+    if (e.kind === 'group') {
+        section('Uses', e.uses.length, table(['Setting', 'Points at'], e.uses.map(function (r) {
+            return '<tr><td class="param-name">' + esc(r.from.slice(e.title.length + 1)) + '</td><td>' +
+                followLink(r.to, esc(m1lTitle(ix, r.to))) + (r.kind === 'axis' ? ' <span class="muted">(' + esc(r.text.split(':')[0]) + ')</span>' : '') + '</td></tr>';
+        })), 'Its settings do not point at other groups or resources.');
+
+        section('Settings', e.memberCount, table(['Name', 'Value', 'Unit', ''], e.members.map(function (it) {
+            return '<tr><td class="param-name">' + esc(it.name.slice(e.title.length + 1)) + '</td><td class="num">' + followValue(it) +
+                '</td><td>' + esc(m1cUnit(it)) + '</td><td class="num">' + findBtn(it.name) + '</td></tr>';
+        })) + (e.memberCount > e.members.length ? '<div class="more">… and ' + (e.memberCount - e.members.length) + ' more</div>' : ''),
+            'No settings directly in this group.');
+
+        if (e.subgroups.length) {
+            html += '<h3 class="follow-h">Groups inside <span class="muted">(' + e.subgroups.length + ')</span></h3><div class="follow-chips">' +
+                e.subgroups.map(function (g) { return followLink(g.key, esc(g.title) + ' <span class="muted">' + g.count + '</span>', 'follow-chip'); }).join('') + '</div>';
+        }
+    }
+    $('follow-body').innerHTML = html;
+}
+
+/** Show one item in the All tab: search for its exact name. */
+function findInTable(name) {
+    $('follow-dialog').close();
+    searchInput.value = name;
+    state.search = name.toLowerCase();
+    selectTab('all');
+}
+
+document.addEventListener('click', function (e) {
+    var f = e.target.closest('[data-follow]');
+    if (f && state.current) {
+        e.preventDefault();
+        openFollow(f.getAttribute('data-follow'), e.target.closest('#follow-dialog') ? 'push' : 'new', f.getAttribute('data-follow-from'));
+        return;
+    }
+    var t = e.target.closest('[data-trail]');
+    if (t) { state.followTrail = state.followTrail.slice(0, parseInt(t.getAttribute('data-trail'), 10) + 1); renderFollow(); return; }
+    var fd = e.target.closest('[data-find]');
+    if (fd) findInTable(fd.getAttribute('data-find'));
+});
+$('follow-back').addEventListener('click', function () {
+    if (state.followTrail.length > 1) { state.followTrail.pop(); renderFollow(); }
+});
+
+// =========================================================================
 // Value history across tune versions
 // =========================================================================
 
@@ -713,6 +853,7 @@ function nameResource(item) {
     name = name.trim();
     storeSaveResourceName(key, name).then(function () {
         if (name) state.resourceNames[key] = name; else delete state.resourceNames[key];
+        state.links = null;
         renderActiveTab();
     }).catch(function (err) { showError('Could not save the resource name: ' + err.message); });
 }
