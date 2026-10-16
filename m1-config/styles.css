@@ -49,6 +49,7 @@
 /* Parameter tables */
 .param-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; color: #ddd; word-break: break-word; }
 .param-kind { color: #888; font-size: 0.75rem; }
+.param-pin { white-space: nowrap; }
 .muted { color: #666; }
 tr.grid-row > td { background: #0d0d0d; padding: 10px; }
 .grid-wrap { overflow-x: auto; }

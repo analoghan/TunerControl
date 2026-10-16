@@ -39,6 +39,16 @@ function resourceLabel(ids, pkg) {
     return m1cResourceLabel(ids, hardwareOf(pkg), state.resourceNames);
 }
 
+function resourcePin(ids, pkg) {
+    return m1cResourcePinFor(ids, hardwareOf(pkg), state.resourceNames);
+}
+
+/** Assignment with its pin, for places without a Pin column: "AVI2 (0x6201) · M142 pin C15". */
+function resourceLabelWithPin(ids, pkg) {
+    var pin = resourcePin(ids, pkg);
+    return resourceLabel(ids, pkg) + (pin ? ' · ' + pin : '');
+}
+
 // =========================================================================
 // Helpers
 // =========================================================================
@@ -344,17 +354,18 @@ function renderParams(tab) {
     $('tbl-' + tab).innerHTML = shown
         ? '<div class="result-count">' + shown.toLocaleString() + ' item' + (shown === 1 ? '' : 's') + '</div>' +
           '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Name</th><th>Value</th>' +
-          '<th>Unit</th><th>Type</th></tr></thead><tbody>' + rows.join('') + '</tbody></table></div>'
+          '<th>Pin</th><th>Unit</th><th>Type</th></tr></thead><tbody>' + rows.join('') + '</tbody></table></div>'
         : '<p class="muted">No matching parameters.</p>';
 }
 
 function paramRow(item, idx) {
-    var value;
+    var value, pin = '';
     if (item.axes) {
         value = esc(m1cTableSize(item)) + ' <button class="btn btn-small btn-secondary" data-grid="' + idx +
             '" aria-expanded="false">Show</button>';
     } else if (item.type === 'io_resource') {
         value = esc(resourceLabel(item.value, state.current));
+        pin = esc(resourcePin(item.value, state.current) || '');
         if (m1cResourceAssigned(item.value)) {
             value += ' <button class="btn btn-small btn-secondary" data-name-res="' + idx + '" aria-label="Name resource for ' +
                 esc(item.name) + '">Name</button>';
@@ -363,7 +374,7 @@ function paramRow(item, idx) {
         value = esc(m1cFormatValue(item, item.value, item.label));
     }
     return '<tr><td class="param-name">' + esc(item.name) + '</td><td class="num">' + value + '</td>' +
-        '<td>' + esc(m1cUnit(item)) + '</td><td class="param-kind">' + esc(item.kind) + '</td></tr>';
+        '<td class="param-pin">' + pin + '</td><td>' + esc(m1cUnit(item)) + '</td><td class="param-kind">' + esc(item.kind) + '</td></tr>';
 }
 
 function gridHtml(item) {
@@ -401,7 +412,7 @@ function toggleGrid(btn) {
     var item = state.index[parseInt(btn.getAttribute('data-grid'), 10)].item;
     var row = document.createElement('tr');
     row.className = 'grid-row';
-    row.innerHTML = '<td colspan="4">' + gridHtml(item) + '</td>';
+    row.innerHTML = '<td colspan="5">' + gridHtml(item) + '</td>';
     tr.parentNode.insertBefore(row, tr.nextSibling);
     btn.textContent = 'Hide';
     btn.setAttribute('aria-expanded', 'true');
@@ -485,8 +496,8 @@ function changeHtml(ch, item) {
     var unit = item ? m1cUnit(item) : '';
     if (item.type === 'io_resource') {
         var r0 = ch.cells[0];
-        return html + '<div><span class="change-from">' + esc(resourceLabel(r0.from, state.compare.a)) +
-            '</span> &rarr; <span class="change-to">' + esc(resourceLabel(r0.to, state.compare.b)) + '</span></div></div>';
+        return html + '<div><span class="change-from">' + esc(resourceLabelWithPin(r0.from, state.compare.a)) +
+            '</span> &rarr; <span class="change-to">' + esc(resourceLabelWithPin(r0.to, state.compare.b)) + '</span></div></div>';
     }
     if (!item.axes) {
         var c0 = ch.cells[0];

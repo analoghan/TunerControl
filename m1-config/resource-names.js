@@ -159,23 +159,24 @@ function m1cResourceName(ids, hardware, userNames) {
     return null;
 }
 
-/**
- * Display text: "AVI2 · M142 pin C15 (0x6201)", "E888 AVI7 · E888 pin A32 (0x654c)", "FIRMWARE4 (0x6524)",
- * raw IDs when unnamed, or "Not assigned".
- */
+/** Display text: "FIRMWARE4 (0x6524)", raw IDs when unnamed, or "Not assigned". */
 function m1cResourceLabel(ids, hardware, userNames) {
     if (!m1cResourceAssigned(ids)) return 'Not assigned';
     var raw = ids.filter(function (id) { return id !== '0x0000'; }).join(', ');
     var n = m1cResourceName(ids, hardware, userNames);
-    if (!n) return raw;
-    var pin = m1cResourcePin(n.name, hardware);
-    return n.name + (pin ? ' · ' + pin : '') + ' (' + raw + ')';
+    return n ? n.name + ' (' + raw + ')' : raw;
+}
+
+/** Connector pin of an assignment ("M142 pin C15", "E888 pin A32"), or null when unnamed or unknown. */
+function m1cResourcePinFor(ids, hardware, userNames) {
+    var n = m1cResourceName(ids, hardware, userNames);
+    return n ? m1cResourcePin(n.name, hardware) : null;
 }
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         m1cResourceKey: m1cResourceKey, m1cResourceName: m1cResourceName,
         m1cResourceLabel: m1cResourceLabel, m1cResourceAssigned: m1cResourceAssigned,
-        m1cResourcePin: m1cResourcePin, m1cPinKey: m1cPinKey
+        m1cResourcePin: m1cResourcePin, m1cResourcePinFor: m1cResourcePinFor, m1cPinKey: m1cPinKey
     };
 }
