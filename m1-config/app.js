@@ -51,9 +51,82 @@ function links() {
  * trail there, so following a value from the table shows where it came from.
  */
 function followLink(key, html, cls, from) {
+    var label = /follow-crumb/.test(cls || '') ? null : labelFor(key);
     return '<button class="link-btn' + (cls ? ' ' + cls : '') + '" data-follow="' + esc(key) + '"' +
         (from ? ' data-follow-from="' + esc(from) + '"' : '') + ' title="Follow ' +
-        esc(m1lTitle(links(), key)) + '">' + html + '</button>';
+        esc(m1lTitle(links(), key)) + '">' + html + '</button>' + (label ? labelBadge(label) : '');
+}
+
+// =========================================================================
+// Your labels: free text on a setting group or I/O resource, keyed by its name ('g:Auxiliary.Output 3',
+// 'r:firmware5') so it carries across tune versions and firmware revisions. Stored with the user resource names
+// under 'label|<key>' (server, browser storage and backups).
+// =========================================================================
+
+var LABEL_PREFIX = 'label|';
+
+/** The label set on exactly this entity, or ''. */
+function labelOf(key) { return state.resourceNames[LABEL_PREFIX + key] || ''; }
+
+/**
+ * The label for an entity: its own, or for a group the nearest labelled group above it — so a label on
+ * Auxiliary.Output 3 also shows on Auxiliary.Output 3.Activate.Switch. Returns { text, from } or null.
+ */
+function labelFor(key) {
+    if (!key) return null;
+    var k = key;
+    for (;;) {
+        var t = labelOf(k);
+        if (t) return { text: t, from: k };
+        if (k.indexOf('g:') !== 0 || k.indexOf('.') < 0) return null;
+        k = 'g:' + m1lGroupOf(k.slice(2));
+    }
+}
+
+function labelBadge(label) {
+    return ' <span class="user-label" title="Your label' + (label.from ? ' on ' + esc(label.from.slice(2)) : '') + '">' + esc(label.text) + '</span>';
+}
+
+/** Label text an item is searchable by (its group's label, and that of the entity its value points at). */
+function itemLabelText(item) {
+    var a = labelFor('g:' + m1lOwnerGroup(item.name)), to = m1lValueTarget(links(), item), b = to ? labelFor(to) : null;
+    return ((a ? a.text : '') + ' ' + (b ? b.text : '')).toLowerCase();
+}
+
+function saveLabel(key, text) {
+    text = (text || '').trim();
+    return storeSaveResourceName(LABEL_PREFIX + key, text).then(function () {
+        if (text) state.resourceNames[LABEL_PREFIX + key] = text; else delete state.resourceNames[LABEL_PREFIX + key];
+        if ($('follow-dialog').open) renderFollow();
+        renderActiveTab();
+    }).catch(function (err) { showError('Could not save the label: ' + err.message); });
+}
+
+/** All labels as [{ key, text, inTune }], sorted by name. */
+function allLabels() {
+    var ix = state.current ? links() : null;
+    return Object.keys(state.resourceNames).filter(function (k) { return k.indexOf(LABEL_PREFIX) === 0; }).map(function (k) {
+        var key = k.slice(LABEL_PREFIX.length);
+        var inTune = !!(ix && (key.indexOf('g:') === 0 ? ix.groups[key.slice(2)] : ix.resources[key]));
+        return { key: key, text: state.resourceNames[k], inTune: inTune };
+    }).sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
+}
+
+function renderLabels() {
+    var list = allLabels().filter(function (l) {
+        return !state.search || (l.key + ' ' + l.text).toLowerCase().indexOf(state.search) >= 0;
+    });
+    $('tbl-labels').innerHTML = list.length
+        ? '<div class="result-count">' + list.length + ' label' + (list.length === 1 ? '' : 's') + '</div>' +
+          '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Setting</th><th>Label</th><th></th></tr></thead><tbody>' +
+          list.map(function (l) {
+              var title = l.key.indexOf('r:') === 0 ? (links().resources[l.key] ? links().resources[l.key].name : l.key.slice(2).toUpperCase()) : l.key.slice(2);
+              return '<tr' + (l.inTune ? '' : ' class="fw-unused-row"') + '><td class="param-name">' +
+                  (l.inTune ? followLink(l.key, esc(title), 'follow-crumb') : esc(title) + ' <span class="muted">(not in this tune)</span>') +
+                  '</td><td><span class="user-label">' + esc(l.text) + '</span></td><td class="num"><button class="btn btn-small btn-secondary" data-label-edit="' +
+                  esc(l.key) + '">Edit</button></td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<p class="muted">' + (state.search ? 'No labels match the search.' : 'No labels yet. Open a setting (click its name), then use Add label in the Follow window.') + '</p>';
 }
 
 /** The entity an axis of a table reads (e.g. a driver switch), or null. */
@@ -371,6 +444,7 @@ function renderActiveTab() {
     if (!state.current) return;
     if (state.tab === 'changes') renderChanges();
     else if (state.tab === 'fwio') renderFirmwareIo();
+    else if (state.tab === 'labels') renderLabels();
     else if (state.tab === 'calibrations') renderCalibrations();
     else renderParams(state.tab);
 }
@@ -381,7 +455,7 @@ function renderParams(tab) {
         var e = state.index[i];
         if (e.cats.indexOf(tab) < 0) continue;
         if (state.filter !== 'all' && e.item.kind !== state.filter) continue;
-        if (state.search && e.lname.indexOf(state.search) < 0) continue;
+        if (state.search && e.lname.indexOf(state.search) < 0 && itemLabelText(e.item).indexOf(state.search) < 0) continue;
         rows.push(paramRow(e.item, i));
         shown++;
     }
@@ -715,7 +789,8 @@ function renderFirmwareIo() {
                 then.push(followLink('g:' + owner, esc(owner)) + ' <span class="fw-detail-inline">' + esc(refHow(u)) + '</span>');
             });
         });
-        return { text: (r.title + ' ' + [r.sources, r.targets].map(function (l) { return l.map(function (x) { return x.ref.from; }).join(' '); }).join(' ') +
+        return { text: (r.title + ' ' + labelOf(r.key) + ' ' + r.targets.map(function (t) { var l = labelFor('g:' + m1lOwnerGroup(t.ref.from)); return l ? l.text : ''; }).join(' ') +
+                    ' ' + [r.sources, r.targets].map(function (l) { return l.map(function (x) { return x.ref.from; }).join(' '); }).join(' ') +
                     ' ' + then.join(' ')).toLowerCase(),
                  html: '<tr' + (r.sources.length || r.targets.length ? '' : ' class="fw-unused-row"') + '><td class="param-name">' +
                     followLink(r.key, esc(r.title)) + '</td><td>' + (from || '<span class="muted">—</span>') + '</td><td>' +
@@ -756,12 +831,38 @@ function refHow(r) {
     return r.kind === 'value' ? '= ' + r.text : r.kind === 'resource' ? 'assigned ' + r.text : r.text;
 }
 
+/** The label row of the Follow window: the label with Edit, or Add label; `editing` shows the editor. */
+function renderFollowLabel(key, editing) {
+    var own = labelOf(key), inherited = own ? null : labelFor(key);
+    if (editing) {
+        $('follow-label').innerHTML = '<input type="text" id="follow-label-input" class="label-input" maxlength="200" placeholder="What this is for, e.g. Brake light from chassis CAN" value="' +
+            esc(own) + '"> <button class="btn btn-small" id="follow-label-save">Save</button> ' +
+            (own ? '<button class="btn btn-small btn-danger" id="follow-label-remove">Remove</button> ' : '') +
+            '<button class="btn btn-small btn-secondary" id="follow-label-cancel">Cancel</button>';
+        var input = $('follow-label-input');
+        input.focus();
+        input.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter') { ev.preventDefault(); saveLabel(key, input.value); }
+            if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); renderFollowLabel(key, false); }
+        });
+        $('follow-label-save').onclick = function () { saveLabel(key, input.value); };
+        if (own) $('follow-label-remove').onclick = function () { saveLabel(key, ''); };
+        $('follow-label-cancel').onclick = function () { renderFollowLabel(key, false); };
+        return;
+    }
+    $('follow-label').innerHTML = (own ? '<span class="user-label user-label-big">' + esc(own) + '</span> ' : '') +
+        (inherited ? '<span class="muted">Label of ' + esc(inherited.from.slice(2)) + ':</span> <span class="user-label">' + esc(inherited.text) + '</span> ' : '') +
+        '<button class="btn btn-small btn-secondary" id="follow-label-edit">' + (own ? 'Edit label' : 'Add label') + '</button>';
+    $('follow-label-edit').onclick = function () { renderFollowLabel(key, true); };
+}
+
 function renderFollow() {
     var ix = links(), key = state.followTrail[state.followTrail.length - 1], e = m1lEntity(ix, key);
     $('follow-back').disabled = state.followTrail.length < 2;
     $('follow-title').textContent = (key.indexOf('r:') === 0 ? 'I/O resource ' : '') + m1lTitle(ix, key);
+    renderFollowLabel(key, false);
     $('follow-trail').innerHTML = state.followTrail.length > 1 ? 'Followed: ' + state.followTrail.map(function (k, i) {
-        var t = esc(m1lTitle(ix, k));
+        var t = esc(m1lTitle(ix, k)) + (labelOf(k) ? ' <span class="user-label">' + esc(labelOf(k)) + '</span>' : '');
         return i === state.followTrail.length - 1 ? '<strong>' + t + '</strong>' : '<button class="link-btn" data-trail="' + i + '">' + t + '</button>';
     }).join(' → ') : '';
     if (!e) {
@@ -770,7 +871,7 @@ function renderFollow() {
         return;
     }
     $('follow-crumbs').innerHTML = e.parents.length ? 'In ' + e.parents.map(function (p) {
-        return followLink(p.key, esc(p.title.split('.').pop()));
+        return followLink(p.key, esc(p.title.split('.').pop()), 'follow-crumb') + (labelOf(p.key) ? labelBadge({ text: labelOf(p.key), from: p.key }) : '');
     }).join(' › ') : '';
 
     var html = '';
@@ -829,6 +930,8 @@ document.addEventListener('click', function (e) {
     if (t) { state.followTrail = state.followTrail.slice(0, parseInt(t.getAttribute('data-trail'), 10) + 1); renderFollow(); return; }
     var fd = e.target.closest('[data-find]');
     if (fd) findInTable(fd.getAttribute('data-find'));
+    var le = e.target.closest('[data-label-edit]');
+    if (le && state.current) { openFollow(le.getAttribute('data-label-edit'), 'new'); renderFollowLabel(le.getAttribute('data-label-edit'), true); }
 });
 $('follow-back').addEventListener('click', function () {
     if (state.followTrail.length > 1) { state.followTrail.pop(); renderFollow(); }

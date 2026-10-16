@@ -8,7 +8,8 @@
  *   item_names     item name ↔ integer id, so the large tables don't repeat long names
  *   items          one row per parameter/table/IO resource per package (full parsed item as JSON)
  *   cells          one row per individual value (scalar, axis site or table cell) for SQL queries
- *   resource_names user names for I/O resources, key = 'HARDWARE|signature'
+ *   resource_names user names for I/O resources, key = 'HARDWARE|signature', and Config Viewer labels,
+ *                  key = 'label|<entity key>' (e.g. 'label|g:Auxiliary.Output 3')
  *   harnesses      wiring harness designs (harness/ page); id is a random UUID; revision = highest revision
  *                  number ever saved (numbers are not reused after a revision is deleted)
  *   harness_revisions every saved version of a harness (full model as JSON), newest = harnesses.revision

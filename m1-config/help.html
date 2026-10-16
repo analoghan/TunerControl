@@ -44,6 +44,7 @@
       <li><a href="#history">Tune history and comparing</a></li>
       <li><a href="#browse">Browsing parameters and tables</a></li>
       <li><a href="#follow">Following settings</a></li>
+      <li><a href="#labels">Your labels</a></li>
       <li><a href="#firmware-io">Firmware I/O channels</a></li>
       <li><a href="#value-history">Value history across versions</a></li>
       <li><a href="#units">Units</a></li>
@@ -115,6 +116,17 @@
     <p class="hint">Links are worked out from the names in the package: an enum value links when it names a group (spacing and dots
       ignored, or its words in order, e.g. <em>Driver Keypad Button 7 → Driver.CAN Keypad.Button 7</em>) or a resource
       (<em>Firmware 5 = FIRMWARE5</em>). Values that name nothing in the tune, such as <em>On</em> or a sensor type, are not links.</p>
+
+    <h2 id="labels">Your labels</h2>
+    <p>Settings such as auxiliary inputs and outputs only say <em>what</em> they are, not what you use them for. Open one in the Follow
+      window (click its name) and press <strong>Add label</strong> to give it free text — e.g. <em>Auxiliary Output 3 = intercooler pump
+      relay</em> or <em>FIRMWARE5 = brake light from chassis CAN</em>. The label then shows as a green tag wherever that setting or
+      resource appears: next to its settings in every table, on values that point at it, in the Follow window and on the Firmware I/O tab.
+      A label on a group also shows on the groups inside it.</p>
+    <p>Labels belong to the setting's <em>name</em>, not to a tune, so they carry across tune versions and firmware revisions until you
+      edit or remove them (a firmware that renames the setting would need it again). The search box finds labels too, and the
+      <strong>My Labels</strong> tab lists them all, including any for settings not in the tune you are viewing. Labels are stored with your
+      I/O resource names — on the server, or in this browser — and are included in Export backups.</p>
 
     <h2 id="firmware-io">Firmware I/O channels</h2>
     <p>The <strong>Firmware I/O</strong> tab lists the ECU's virtual I/O channels FIRMWARE0–FIRMWARE31. For each it shows what

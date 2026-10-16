@@ -8,7 +8,8 @@
  *   items    : { id, items }  — the full parsed item list for that package
  *   files    : { id, name, data }  — the original file bytes, so packages can be re-parsed
  *              when the parser improves (see parserVersion)
- *   resourceNames : { key, name }  — user names for I/O resources, key = 'HARDWARE|signature'
+ *   resourceNames : { key, name }  — user names for I/O resources, key = 'HARDWARE|signature', and the Config Viewer's
+ *              labels, key = 'label|<entity key>' (e.g. 'label|g:Auxiliary.Output 3')
  * Data stays in this browser; exportTuneDb/importTuneDb give JSON backups.
  */
 

@@ -89,6 +89,7 @@
         <button class="tab"        role="tab" aria-selected="false" data-tab="engine">Engine Setup</button>
         <button class="tab"        role="tab" aria-selected="false" data-tab="vehicle">Vehicle Setup</button>
         <button class="tab"        role="tab" aria-selected="false" data-tab="all">All Parameters</button>
+        <button class="tab"        role="tab" aria-selected="false" data-tab="labels">My Labels</button>
       </div>
 
       <!-- Panels -->
@@ -123,6 +124,14 @@
           <strong>Then used by</strong> lists the settings that point at that input. Click anything to follow it.</p>
         <label class="fw-unused"><input type="checkbox" id="fw-show-unused"> Show unused channels</label>
         <div id="tbl-fwio"></div>
+      </div>
+
+      <div id="panel-labels" class="panel" role="tabpanel" hidden>
+        <h2>My Labels</h2>
+        <p class="panel-desc">Your own notes on settings and I/O resources — what an auxiliary output, driver switch or FIRMWARE channel is
+          used for. A label belongs to the setting's name, so it shows on every tune version and firmware revision that has it until you change it.
+          Add or edit one from the Follow window (click a setting's name).</p>
+        <div id="tbl-labels"></div>
       </div>
 
       <div id="panel-engine" class="panel" role="tabpanel" hidden>
@@ -163,6 +172,7 @@
         <h2 id="follow-title">Follow</h2>
         <form method="dialog"><button class="btn btn-secondary btn-small">Close</button></form>
       </div>
+      <div id="follow-label" class="follow-label"></div>
       <p id="follow-trail" class="hint follow-trail"></p>
       <p id="follow-crumbs" class="hint"></p>
       <div id="follow-body" class="follow-body"></div>
