@@ -15,10 +15,57 @@ logInput.addEventListener('change', function() {
     analyzeBtn.disabled = !file;
 });
 
+var ffFromPkg = null;   // fuel film table read from a selected .m1pkg (null for CSV or no file)
+
 ffTableInput.addEventListener('change', function() {
     var file = ffTableInput.files[0];
-    document.getElementById('ff-filename').textContent = file ? file.name : 'No file selected';
+    var label = document.getElementById('ff-filename');
+    ffFromPkg = null;
+    errorContainer.hidden = true;
+    if (!file || !file.name.toLowerCase().endsWith('.m1pkg')) {
+        label.textContent = file ? file.name : 'No file selected';
+        return;
+    }
+    // Read the table and the scale/offset/time-constant settings from the tune package.
+    label.textContent = 'Reading ' + file.name + '…';
+    var reader = new FileReader();
+    reader.onload = function() {
+        if (ffTableInput.files[0] !== file) return; // a different file was picked meanwhile
+        try {
+            var film = m1pkgFuelFilm(parseM1Pkg(reader.result));
+            ffFromPkg = film.table;
+            applyTuneSettings(film);
+            label.textContent = file.name + ' — ' + (film.tuneName || 'tune') + ', Fuel Film Primary Main (' +
+                film.table.breakpoints.length + ' sites); scale, offset and time constants filled from the tune' +
+                (film.notes.length ? '. ' + film.notes.join(' ') : '');
+        } catch (err) {
+            label.textContent = 'No file selected';
+            ffTableInput.value = '';
+            errorContainer.textContent = 'Could not read the fuel film table from "' + file.name + '": ' + err.message;
+            errorContainer.hidden = false;
+        }
+    };
+    reader.onerror = function() {
+        label.textContent = 'No file selected';
+        errorContainer.textContent = 'Could not read: ' + file.name;
+        errorContainer.hidden = false;
+    };
+    reader.readAsArrayBuffer(file);
 });
+
+/** Fills the scale, offset and time-constant inputs with the values read from a tune package. */
+function applyTuneSettings(film) {
+    function set(id, value, dps) {
+        if (typeof value === 'number' && isFinite(value)) document.getElementById(id).value = +value.toFixed(dps);
+    }
+    set('ff-scale', film.ffScale, 1);
+    set('ff-offset', film.ffOffset, 2);
+    set('fast-pct', film.timeConstants.fastPct, 1);
+    set('fast-increase', film.timeConstants.fastIncrease, 3);
+    set('fast-decrease', film.timeConstants.fastDecrease, 3);
+    set('slow-increase', film.timeConstants.slowIncrease, 3);
+    set('slow-decrease', film.timeConstants.slowDecrease, 3);
+}
 
 analyzeBtn.addEventListener('click', function() {
     var file = logInput.files[0];
@@ -53,7 +100,7 @@ analyzeBtn.addEventListener('click', function() {
     } else {
         filesToRead.push({ key: 'log', file: file, mode: 'text' });
     }
-    if (ffFile) filesToRead.push({ key: 'ff', file: ffFile, mode: 'text' });
+    if (ffFile && !ffFromPkg) filesToRead.push({ key: 'ff', file: ffFile, mode: 'text' });
 
     var fileResults = {};
     var remaining = filesToRead.length;
@@ -85,8 +132,8 @@ function runAnalysis(logFile, files, settings) {
         }
 
         // If fuel film table was provided, compute corrections
-        if (files.ff) {
-            result.ffTable = parseFuelFilmTable(files.ff);
+        if (ffFromPkg || files.ff) {
+            result.ffTable = ffFromPkg || parseFuelFilmTable(files.ff);
             result.ffCorrected = computeFuelFilmCorrections(result, settings);
         }
 

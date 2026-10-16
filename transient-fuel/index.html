@@ -24,8 +24,8 @@
       </div>
 
       <div class="file-row">
-        <label for="ff-table-input">Fuel Film Primary Table (.csv, optional):</label>
-        <input type="file" id="ff-table-input" accept=".csv" />
+        <label for="ff-table-input">Fuel Film Primary (.m1pkg or .csv, optional):</label>
+        <input type="file" id="ff-table-input" accept=".m1pkg,.csv" />
         <span id="ff-filename" class="filename-display">No file selected</span>
       </div>
 
@@ -147,6 +147,9 @@
   </div>
 
   <script src="../lib/ld-parser.js"></script>
+  <script src="../lib/xz-decoder.js"></script>
+  <script src="../lib/m1pkg-parser.js"></script>
+  <script src="m1pkg-film.js"></script>
   <script src="worker.js"></script>
   <script src="app.js"></script>
 </body>
