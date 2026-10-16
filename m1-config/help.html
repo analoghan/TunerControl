@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>M1 Config Viewer — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content h3 { color: #fff; margin-top: 16px; margin-bottom: 4px; font-size: 1rem; }
+    .help-content p, .help-content li, .help-content td { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #ff9800; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255,152,0,0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .example-box { background: #111; border: 1px solid #333; border-radius: 6px; padding: 16px; margin: 12px 0; }
+    .help-content .example-box p { margin: 4px 0; }
+    .help-content table { border-collapse: collapse; margin: 10px 0; width: 100%; }
+    .help-content th, .help-content td { border: 1px solid #333; padding: 6px 10px; text-align: left; vertical-align: top; }
+    .help-content th { background: #222; color: #fff; font-size: 0.85rem; }
+    .help-content a { color: #ff5a6e; }
+    .help-content .top-nav a { color: #E31837; }
+    .help-content .toc { columns: 2; }
+    @media (max-width: 600px) { .help-content .toc { columns: 1; } }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to M1 Config Viewer</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>M1 Config Viewer — Help</h1>
+    <p>Reads MoTeC M1 Tune packages (<code>.m1pkg</code>) directly — no export step — so you can browse every parameter, table,
+      I/O assignment and calibration selection, and see exactly what changed between two saved versions of a tune. The viewer only
+      reads packages; it never changes them.</p>
+
+    <ul class="toc">
+      <li><a href="#import">Importing tunes</a></li>
+      <li><a href="#storage">Where tunes are stored</a></li>
+      <li><a href="#history">Tune history and comparing</a></li>
+      <li><a href="#browse">Browsing parameters and tables</a></li>
+      <li><a href="#units">Units</a></li>
+      <li><a href="#io">I/O resources, names and pins</a></li>
+      <li><a href="#backup">Backups</a></li>
+      <li><a href="#other">Used by other tools</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+    </ul>
+
+    <h2 id="import">Importing tunes</h2>
+    <ol>
+      <li>Save the tune in M1 Tune. Each save is a <code>.m1pkg</code> file (M1 Tune names them with a long ID, e.g.
+        <code>A9FCB7F0-….m1pkg</code>).</li>
+      <li>Click <strong>Choose Files</strong> and select one or more packages. Each one is read and added to the Tune History.</li>
+      <li>Importing the same file again is detected and skipped — a package is identified by its exact contents, not its file name.</li>
+    </ol>
+    <p>The viewer reads the <strong>working</strong> copy of the calibration in the package — the values you were tuning when you
+      saved, the same values M1 Tune shows.</p>
+    <div class="tip"><strong>Tip:</strong> Import every saved version (V54, V55, …) to build up a history you can compare.</div>
+
+    <h2 id="storage">Where tunes are stored</h2>
+    <p>The line under the import button says where imported tunes are kept:</p>
+    <table>
+      <tr><th>Message</th><th>Meaning</th></tr>
+      <tr><td>Stored on the TunerControl server</td><td>The page was opened from a TunerControl server. Every browser that uses that server sees the same tunes, and the data can be queried with SQL (see <code>server/README.md</code>).</td></tr>
+      <tr><td>Stored in this browser only</td><td>Tunes are kept in this browser's storage. Another browser or computer won't see them — use <a href="#backup">backups</a> to move them.</td></tr>
+      <tr><td>Kept only until the page is closed</td><td>The browser blocks storage (e.g. a private window). Nothing is saved.</td></tr>
+    </table>
+    <p>When the package reader improves, tunes imported earlier are re-read automatically from their original files, so they pick up the
+      improvements without importing them again.</p>
+
+    <h2 id="history">Tune history and comparing</h2>
+    <p>The <strong>Tune History</strong> table lists every imported tune with its name, save time, firmware version and the last note in
+      its save comments. <strong>View</strong> shows that tune below; <strong>Delete</strong> removes it from the history.</p>
+    <h3>Comparing two versions</h3>
+    <ol>
+      <li>Pick the older tune in the first <strong>Compare</strong> list and the newer one in the second.</li>
+      <li>Click <strong>Compare</strong>. The <strong>Changes</strong> tab lists everything that differs:</li>
+    </ol>
+    <ul>
+      <li><strong>Parameters</strong> — old → new value.</li>
+      <li><strong>Tables</strong> — each changed cell with its axis breakpoints (e.g. <em>3000 rpm, 80 kPa</em>), including changed axis sites.</li>
+      <li><strong>I/O assignments</strong> — the resource and pin before and after.</li>
+      <li><strong>Calibration selections</strong> — sensor, injector and fuel calibrations chosen from the M1 Tune library.</li>
+      <li><strong>Save notes</strong> added since the older version.</li>
+    </ul>
+
+    <h2 id="browse">Browsing parameters and tables</h2>
+    <p>The tabs group the tune: <strong>Calibrations</strong> (library selections), <strong>Firmware Features</strong>,
+      <strong>Driver Switches</strong>, <strong>Engine Setup</strong>, <strong>Vehicle Setup</strong> and <strong>All Parameters</strong>.
+      Use the search box to filter by name and the <strong>All / Parameters / Tables / I/O Resources</strong> buttons to filter by type.</p>
+    <p>Tables show their size (e.g. <em>20 × 24</em>, or <em>20 × 24 of 36 × 24</em> when not every axis site is used). Click
+      <strong>Show</strong> to expand the grid with its axis breakpoints.</p>
+
+    <h2 id="units">Units</h2>
+    <p>Packages store values in base units (deg/s, Pa, seconds, ratios). The viewer converts them to the units M1 Tune shows — rpm, kPa,
+      ms, %, °C — so values match what you see in M1 Tune.</p>
+    <div class="warning"><strong>Angles:</strong> ignition timing in dBTDC is converted. A few other angle references (dADV, dATDC, dRTD)
+      are shown as stored, because their sign convention hasn't been confirmed yet — check those against M1 Tune.</div>
+
+    <h2 id="io">I/O resources, names and pins</h2>
+    <p>A package stores each I/O assignment as resource IDs, not as the name M1 Tune shows. The viewer turns the IDs it knows into names —
+      <code>AVI2</code>, <code>UDIG7 Hybrid B</code>, <code>Direct Injector 1A-</code>, <code>E888 Output 8</code>, <code>PDM Byte 0, Mask 01</code>,
+      <code>FIRMWARE4</code> — and shows the connector pin in the <strong>Pin</strong> column:</p>
+    <div class="example-box">
+      <p><strong>M142 pin C15</strong> — pin C15 on the ECU's connector C (from the M142 datasheet)</p>
+      <p><strong>E888 pin A32</strong> — pin A32 on the E888 expander's connector A (from the E888 manual)</p>
+      <p><strong>M142 pin A06 (+ A07)</strong> — direct injector: the − pin M1 Tune assigns, then its + pin</p>
+      <p><strong>M142 pin C18 / C01</strong> — bridge output: both half-bridge pins</p>
+    </div>
+    <p>PDM and FIRMWARE resources have no physical pin, so their Pin column is empty.</p>
+    <h3>Naming an unknown resource</h3>
+    <p>If a value shows only raw IDs (e.g. <code>0x6554</code>), check the assignment in M1 Tune, click <strong>Name</strong> next to it and
+      enter the name M1 Tune shows. The name applies to every tune and item using that assignment on the same ECU hardware, and is also used
+      by the <a href="../harness/help.html">Harness Builder</a>.</p>
+    <div class="tip"><strong>Tip:</strong> Enter the name as M1 Tune or the datasheet writes it — e.g. <code>UDIG2</code>,
+      <code>Universal Digital Input 2</code>, <code>Half Bridge Output 4</code>, <code>Knock Input 1</code>, <code>E888 AVI3</code> — and the pin is
+      filled in automatically.</div>
+
+    <h2 id="backup">Backups</h2>
+    <p><strong>Export backup</strong> saves every imported tune and your resource names to a JSON file. <strong>Restore backup</strong> loads
+      one — use it to move tunes to another browser, or from browser storage onto a TunerControl server. Tunes restored from a backup don't
+      include their original files, so they aren't re-read when the package reader improves; re-import the <code>.m1pkg</code> files if you
+      still have them.</p>
+
+    <h2 id="other">Used by other tools</h2>
+    <ul>
+      <li><strong><a href="../ve-table/index.html">VE Table Tuning</a></strong> reads Engine Efficiency Main straight from a <code>.m1pkg</code>.</li>
+      <li><strong><a href="../transient-fuel/index.html">Transient Fuel Analyzer</a></strong> reads Fuel Film Primary and its scale, offset and time constants.</li>
+      <li><strong><a href="../harness/index.html">Harness Builder</a></strong> compares tunes stored here with your wiring harness, pin by pin.</li>
+    </ul>
+
+    <h2 id="troubleshooting">Troubleshooting</h2>
+    <ul>
+      <li><strong>"Could not read" on import</strong> — make sure the file is an M1 Tune package (<code>.m1pkg</code>), not an exported CSV or a
+        log. Packages from other M1 firmware or hardware may use layouts the viewer hasn't seen.</li>
+      <li><strong>Tunes disappeared</strong> — browser storage is per browser and per address. Opening the page from a different address (or a
+        private window) shows a different, empty history. Use a TunerControl server, or Export/Restore backup.</li>
+      <li><strong>An I/O value shows only IDs</strong> — the resource isn't known yet; name it with the <strong>Name</strong> button.</li>
+      <li><strong>A value looks wrong</strong> — compare it with M1 Tune and note the item name and unit; the conversion for that unit may need
+        adjusting.</li>
+    </ul>
+  </div>
+</body>
+</html>

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Harness Builder — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content h3 { color: #fff; margin-top: 16px; margin-bottom: 4px; font-size: 1rem; }
+    .help-content p, .help-content li, .help-content td { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #ff9800; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255,152,0,0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .example-box { background: #111; border: 1px solid #333; border-radius: 6px; padding: 16px; margin: 12px 0; overflow-x: auto; }
+    .help-content .example-box p { margin: 4px 0; }
+    .help-content table { border-collapse: collapse; margin: 10px 0; width: 100%; }
+    .help-content th, .help-content td { border: 1px solid #333; padding: 6px 10px; text-align: left; vertical-align: top; }
+    .help-content th { background: #222; color: #fff; font-size: 0.85rem; }
+    .help-content pre { margin: 0; color: #ddd; font-size: 0.8rem; }
+    .help-content a { color: #ff5a6e; }
+    .help-content .top-nav a { color: #E31837; }
+    .help-content .toc { columns: 2; }
+    .help-content .key { display: inline-block; min-width: 18px; text-align: center; border: 1px solid #555; border-radius: 3px; padding: 0 4px; font-size: 0.8rem; color: #fff; }
+    @media (max-width: 600px) { .help-content .toc { columns: 1; } }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Harness Builder</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Harness Builder — Help</h1>
+    <p>Design and check wiring harnesses: connectors, cavities, wires and splices. Import a harness spreadsheet, edit it here, check every
+      connection from end to end, draw wiring diagrams, join harnesses that plug into each other, and compare the ECU pins with the I/O
+      assignments in an M1 tune.</p>
+
+    <ul class="toc">
+      <li><a href="#start">Getting started</a></li>
+      <li><a href="#layout">Spreadsheet layout</a></li>
+      <li><a href="#connections">How connections are written</a></li>
+      <li><a href="#saving">Saving, revisions and export</a></li>
+      <li><a href="#editing">Editing connectors and splices</a></li>
+      <li><a href="#images">Connector images</a></li>
+      <li><a href="#checks">Checks</a></li>
+      <li><a href="#diagrams">Diagrams and tracing</a></li>
+      <li><a href="#systems">Systems: harnesses that plug together</a></li>
+      <li><a href="#tune">Tune comparison</a></li>
+      <li><a href="#workflow">Suggested workflow</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+    </ul>
+
+    <h2 id="start">Getting started</h2>
+    <ul>
+      <li><strong>Import spreadsheet (.xlsx)</strong> reads a harness workbook and saves it as revision 1.</li>
+      <li><strong>Saved harnesses</strong> + <strong>Open</strong> opens one you saved before.</li>
+      <li><strong>New harness</strong> starts an empty one; add connectors and splices, then <strong>Save</strong>.</li>
+    </ul>
+    <p>The line under these says where harnesses are stored: on the TunerControl server (shared by every browser that uses it) or in this
+      browser only. In browser-only mode, <strong>Export .xlsx</strong> is your backup.</p>
+
+    <h2 id="layout">Spreadsheet layout</h2>
+    <p>Each connector or splice is a block of rows. Blocks are separated by blank rows and can be spread over several sheets — the sheet a
+      block is on is kept and used to group the connector list.</p>
+    <div class="example-box"><pre>X160
+CONNECTOR   33472-1206
+BOOT        N/A
+MATE CONN   33482-6201
+MATE PIN    33000-1002
+NOTES       MX150
+Location | Pin        | Conductor Part Number | Conductor Description | Engine Function     | Notes      | Remote Connection | Status
+1        | 33012-3002 | M22759/32-18-9PK      | 18 AWG White/Pink     | Direct Injector 1 + | M142 DI 1A+ | M142.A.7          |
+…</pre></div>
+    <ul>
+      <li>The first row is the block's name. MoTeC ECU and expander titles are shortened for connections:
+        <code>MoTeC M142 A - 34 Way</code> → <code>M142.A</code>, <code>MoTeC E888 B - 26 Way</code> → <code>E888.B</code>.</li>
+      <li>A splice block has a <code>SPLICE</code> row (the splice type) instead of <code>CONNECTOR</code>, and its table is
+        <em>Location | Conductor Part Number | Conductor Description | Function</em> — one row per wire end joined in the splice.</li>
+      <li>Column headings can be named however you like (e.g. <em>MoTeC Function</em> instead of <em>Notes</em>); they are kept and written
+        back on export.</li>
+      <li>Pictures placed beside a block (to its right, at or below its title row) are imported as that block's
+        <a href="#images">images</a>.</li>
+    </ul>
+
+    <h2 id="connections">How connections are written</h2>
+    <p>The <strong>Remote Connection</strong> column (or a splice's <strong>Location</strong>) says where each wire goes:</p>
+    <table>
+      <tr><th>Written as</th><th>Means</th></tr>
+      <tr><td><code>M142.C.14</code>, <code>CHAS.A.f</code></td><td>Cavity <code>14</code> of connector <code>M142.C</code> — the connector name, a dot, then the cavity.</td></tr>
+      <tr><td><code>M142.SPL.5VA1</code></td><td>A splice, by its name.</td></tr>
+      <tr><td><code>CHASSIS</code>, <code>Cylinder Head</code>, <code>C0635-5G</code></td><td>Something outside this harness (no dot): a ground point, the vehicle's own wiring, … Shown as a warning, not an error.</td></tr>
+      <tr><td><code>N/A</code>, <code>Empty</code>, <code>Unused</code>, <code>Unterminated</code>, blank</td><td>No connection.</td></tr>
+    </table>
+    <p>Every wire should be listed at both ends: if <code>M142.C.14</code> goes to <code>PEDAL.1</code>, then <code>PEDAL.1</code> should go to
+      <code>M142.C.14</code>; a wire into a splice should appear in that splice's list. The <a href="#checks">checks</a> verify this.</p>
+
+    <h2 id="saving">Saving, revisions and export</h2>
+    <ul>
+      <li><strong>Save</strong> stores a new revision with an optional note. <em>Unsaved changes</em> appears until you do; the browser warns
+        before you leave with unsaved changes.</li>
+      <li><strong>Revision</strong> opens any earlier revision. Saving while viewing an old one makes it the newest revision (a restore);
+        exporting it changes nothing.</li>
+      <li><strong>Delete revision</strong> deletes only the revision you're viewing (after confirming). Revision numbers are never reused. The
+        last remaining revision can't be deleted — use <strong>Delete</strong> to remove the whole harness.</li>
+      <li><strong>Export .xlsx</strong> writes the harness in the same block layout, pictures included, so it can be re-imported or edited in
+        Excel.</li>
+    </ul>
+
+    <h2 id="editing">Editing connectors and splices</h2>
+    <p>The <strong>Connectors</strong> and <strong>Splices</strong> tabs list blocks grouped by sheet, with their row count and a red (errors)
+      or orange (warnings) badge. Type in <em>Filter…</em> to find one; <strong>Add connector</strong> / <strong>Add splice</strong> creates one.</p>
+    <ul>
+      <li><strong>Header fields</strong> — name, title, sheet, part numbers, boot, notes. Changing the <strong>name</strong> offers to update
+        every connection that refers to it.</li>
+      <li><strong>Rows</strong> — every cell is editable; changes are checked as you type.</li>
+      <li><span class="key">!</span> / <span class="key">?</span> — an error or warning on that row. Hover for the message, click to open the
+        details under the row with <strong>Use …</strong> (suggested fix) and <strong>Go to …</strong> buttons.</li>
+      <li><span class="key">&rarr;</span> — jump to the other end of the wire. If the connection points nowhere, the problem is shown instead.</li>
+      <li><span class="key">&#x2933;</span> — trace the whole circuit from this row (see <a href="#diagrams">tracing</a>).</li>
+      <li><span class="key">&times;</span> — remove the row (asks first). <strong>Add cavity</strong> / <strong>Add wire</strong> adds one.</li>
+      <li><strong>Wiring diagram</strong> — this connector's diagram. <strong>Delete connector</strong> removes the block (asks first).</li>
+    </ul>
+
+    <h2 id="images">Connector images</h2>
+    <p>Each connector and splice has an <strong>Images</strong> section — connector faces, pinout drawings, photos. Click a thumbnail for full
+      size, type a caption under it, <strong>Add image</strong> for PNG/JPEG/GIF files, <strong>×</strong> to remove one. Images appear under the
+      connector in its wiring diagram and are written back on export.</p>
+    <p>Each picture is stored once, however many revisions or connectors use it, so saving revisions doesn't copy them.</p>
+
+    <h2 id="checks">Checks</h2>
+    <p>The <strong>Checks</strong> tab lists every problem; click <em>Where</em> to go to the row, or <strong>Use …</strong> to apply a suggested fix.</p>
+    <table>
+      <tr><th>Message</th><th>What to do</th></tr>
+      <tr><td>Goes to "…", which is not a connector pin or splice in this harness — did you mean …?</td><td>Usually a typo (<code>M152.SPL…</code>, <code>M142.D15</code>). Use the suggestion or correct it.</td></tr>
+      <tr><td>Goes to X, but X goes to "…"</td><td>The two ends disagree. Decide which end is right and fix the other.</td></tr>
+      <tr><td>Goes to splice X, but the splice does not list …</td><td>Add the wire to the splice's list, or correct the connection.</td></tr>
+      <tr><td>Goes to X, but X has no cavity "…"</td><td>The connector exists but not that cavity — check the cavity name, or add the cavity.</td></tr>
+      <tr><td>Only matches ignoring upper/lower case</td><td>Works, but write the name exactly (<code>COIL1.3</code>, not <code>Coil1.3</code>).</td></tr>
+      <tr><td>Extra text "(…)" after the connection was ignored</td><td>Move the extra text to the Notes column.</td></tr>
+      <tr><td>Wire part number differs from the other end</td><td>The same wire is listed with different part numbers at its two ends.</td></tr>
+      <tr><td>Has a wire but no remote connection / has a remote connection but no wire listed</td><td>Fill in the missing column, or clear the row.</td></tr>
+      <tr><td>Goes to "…", which is not defined in this harness</td><td>A warning for points outside the harness (ground lugs, vehicle wiring). Fine if intended.</td></tr>
+      <tr><td>Cavity appears more than once / name is used more than once</td><td>Rename or remove the duplicate.</td></tr>
+    </table>
+    <p>Two splices may be chained: a splice can list another splice as one of its ends, as long as both list each other.</p>
+
+    <h2 id="diagrams">Diagrams and tracing</h2>
+    <p>The <strong>Diagram</strong> tab draws diagrams from the harness itself — they update as you edit. Choose what to show:</p>
+    <ul>
+      <li><strong>A connector or splice</strong> — its cavities on the left with each wire's gauge and colour, every wire drawn in its real
+        colour (striped for two-colour wires, thicker for heavier gauge) to the pins it reaches, and splices followed through to their far ends.
+        References to nothing appear as red <em>Not in this harness</em> boxes. Pictures are shown under the connector.</li>
+      <li><strong>Overview</strong> — every connector and splice (ECU, splices, other connectors), joined by wire bundles with wire counts.
+        Hover a box to highlight its bundles; click it to open its diagram.</li>
+      <li><strong>System overview</strong> — each harness of the <a href="#systems">system</a> with its mated connectors.</li>
+      <li><strong>Circuit from …</strong> — after <span class="key">&#x2933;</span> on a row: every endpoint connected to it, through splices and
+        across mated connectors into other harnesses, coloured by harness. Mated joins are drawn as ⇄.</li>
+    </ul>
+    <p>Click a pin or endpoint to edit that row (opening the other harness if needed). <strong>Download SVG</strong> saves the diagram, with
+      pictures, for printing or sharing.</p>
+
+    <h2 id="systems">Systems: harnesses that plug together</h2>
+    <p>A <strong>system</strong> groups harnesses that connect to each other — e.g. an engine harness, a chassis harness and a transmission
+      sub-harness. Each harness keeps its own revisions; the system ties them together.</p>
+    <h3>How joins are found</h3>
+    <p>Give both halves of a mating pair the <strong>same name</strong> in each harness (e.g. <code>CHAS.A</code>) and fill in their part numbers:
+      the two are joined automatically when one's <strong>CONNECTOR</strong> part is the other's <strong>MATE CONN</strong>. Cavity
+      <code>A</code> on one side then joins cavity <code>A</code> on the other.</p>
+    <div class="example-box">
+      <p>Engine harness <code>CHAS.A</code>: CONNECTOR <code>MS3476L22-95S</code>, MATE CONN <code>MS3474L22-95P</code></p>
+      <p>Chassis harness <code>CHAS.A</code>: CONNECTOR <code>MS3474L22-95P</code>, MATE CONN <code>MS3476L22-95S</code> → joined</p>
+    </div>
+    <p>Connections are always resolved within their own harness first, so <code>CHAS.A.R</code> in the chassis harness means the chassis side.</p>
+    <h3>Setting up a system</h3>
+    <ul>
+      <li>Use the <strong>System</strong> list on the harness bar: pick a system, <strong>New system…</strong>, or <strong>None</strong>. The harness
+        must be saved first.</li>
+      <li>When you import a workbook that plugs into a saved harness, you're offered to add it to that harness's system (or create one).</li>
+      <li>If one workbook holds both halves of a pair on different sheets (e.g. a <em>TRANS Subharness</em> sheet with its own <code>TRANS</code>
+        plug), import offers to make that sheet a separate harness in the same system.</li>
+    </ul>
+    <h3>The System tab</h3>
+    <ul>
+      <li><strong>Harnesses</strong> — members with <strong>Open</strong> and <strong>Remove</strong> (the harness itself is kept), <strong>Add to
+        system</strong>, <strong>Rename system</strong>, <strong>Delete system</strong> (harnesses are kept).</li>
+      <li><strong>Mated connectors</strong> — every join, marked <em>automatic</em>, <em>manual</em> or <em>parts don't mate</em>.
+        <strong>Unlink</strong> removes a join; <em>Same name, not joined</em> lists pairs you unlinked or whose parts don't mate, with
+        <strong>Link</strong>. <strong>Link manually</strong> joins any two connectors, e.g. ones with different names.</li>
+      <li><strong>Checks across joins</strong> — a cavity wired on one side but not the other, a cavity defined on only one side, functions that
+        disagree across the join, and linked connectors whose part numbers don't mate.</li>
+    </ul>
+    <p>The system tab and diagrams use each other harness's <strong>latest saved revision</strong>, and the open harness as you're editing it.</p>
+
+    <h2 id="tune">Tune comparison</h2>
+    <p>Pick a tune imported in the <a href="../m1-config/index.html">M1 Config Viewer</a>. Every I/O assignment in the tune is turned into its ECU
+      or E888 pin and compared with what the harness wires there. In a system, choose <strong>Whole system</strong> (all harnesses — e.g. E888
+      pins in the chassis harness) or <strong>This harness only</strong>.</p>
+    <table>
+      <tr><th>Status</th><th>Meaning</th></tr>
+      <tr><td><strong>OK</strong> (Match)</td><td>The harness function describes the same thing as the tune assignment.</td></tr>
+      <tr><td><strong>Check</strong></td><td>The names don't look alike — e.g. tune <em>Transmission Temperature</em> on a pin the harness calls <em>Inlet Air Temp</em>. Often a real mismatch, sometimes just different wording (<em>Auxiliary Output 2</em> vs <em>IC Pump</em>).</td></tr>
+      <tr><td><strong>No wire</strong></td><td>The tune uses the pin, but the harness has no wire there or marks it as spare.</td></tr>
+      <tr><td><strong>Not matched</strong></td><td>The harness wires an ECU input/output that no named tune assignment uses — a function the tune doesn't use, something the package doesn't store (e.g. the crank reference), or an assignment that isn't named yet.</td></tr>
+      <tr><td><strong>Not in harness</strong></td><td>The pin's connector isn't in this harness (e.g. the E888 when comparing the engine harness alone).</td></tr>
+    </table>
+    <ul>
+      <li><strong>Problems</strong> / <strong>All pins</strong> switches between problems first and every pin.</li>
+      <li><em>Harness labels that don't match the pinout</em> — the harness's MoTeC label column (e.g. <code>AT6</code>) disagrees with the datasheet
+        pinout for that cavity.</li>
+      <li><em>Tune assignments without a known pin</em> — I/O resources the viewer can't name yet. Name them with the <strong>Name</strong>
+        button in the M1 Config Viewer and they're compared here too.</li>
+      <li>Direct injectors and bridge outputs use two pins; both are checked.</li>
+    </ul>
+
+    <h2 id="workflow">Suggested workflow</h2>
+    <ol>
+      <li>Import the harness workbook(s). Accept the system and sub-harness offers if they apply.</li>
+      <li>Work through the <strong>Checks</strong> tab: apply the suggested fixes, then the remaining errors. Save.</li>
+      <li>Check the <strong>System</strong> tab's <em>Checks across joins</em>.</li>
+      <li>Import the current tune in the M1 Config Viewer and open <strong>Tune comparison</strong>. Resolve every <em>Check</em> and
+        <em>No wire</em> — either the harness document or the tune is out of date.</li>
+      <li>Use the diagrams and circuit traces to confirm signals end to end; download SVGs for the build or the car's documentation.</li>
+      <li>Save with a note after each round of changes; export <code>.xlsx</code> to share.</li>
+    </ol>
+
+    <h2 id="troubleshooting">Troubleshooting</h2>
+    <ul>
+      <li><strong>"No connector or splice blocks found"</strong> — each block needs a title row, then a row starting <code>CONNECTOR</code> or
+        <code>SPLICE</code>, and a header row starting <code>Location</code>.</li>
+      <li><strong>An image is on the wrong connector</strong> — pictures belong to the nearest block title at or above them. Move it with
+        <strong>×</strong> and <strong>Add image</strong>, or move the picture in the spreadsheet and re-import.</li>
+      <li><strong>Two harnesses don't join</strong> — the connectors need the same name and mating part numbers. Otherwise use
+        <strong>Link manually</strong> on the System tab.</li>
+      <li><strong>The arrow doesn't move</strong> — the connection points nowhere; the problem opens under the row.</li>
+      <li><strong>Harnesses missing on another computer</strong> — browser storage is per browser. Use a TunerControl server, or export and
+        re-import the <code>.xlsx</code>.</li>
+    </ul>
+  </div>
+</body>
+</html>
