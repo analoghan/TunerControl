@@ -339,7 +339,8 @@ LogPanel.prototype._overlays = function () {
                 var tipIn = e.type === 'tip-in';
                 markers.push({ t: e.time, t1: e.windowEnd, color: tipIn ? '#4dd0e1' : '#ffb74d',
                     fill: e === self.selEvent ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.035)',
-                    label: (tipIn ? 'tip-in ' + e.leanSpike + '% lean' : 'tip-out ' + e.richOvershoot + '% rich') });
+                    label: (tipIn ? 'tip-in ' + (e.richBefore > 3 ? e.richBefore + '% rich, then ' : '') + e.leanSpike + '% lean'
+                        : 'tip-out ' + e.richOvershoot + '% rich') });
             });
             a.tf.skipped.forEach(function (e) { markers.push({ t: e.time, t1: e.endTime, color: '#777', fill: 'rgba(120,120,120,0.08)', label: 'skipped' }); });
         }
@@ -355,15 +356,16 @@ LogPanel.prototype._eventTable = function () {
         .concat(a.tf.skipped.map(function (e) { return { e: e, skipped: true }; }))
         .sort(function (x, y) { return x.e.time - y.e.time; });
     this.el.events.hidden = !rows.length;
-    this.el.events.innerHTML = '<table><thead><tr><th>Time</th><th>Event</th><th>MAP</th><th>Lean</th><th>Rich</th><th>Recovery</th></tr></thead><tbody>' +
+    this.el.events.innerHTML = '<table><thead><tr><th>Time</th><th>Event</th><th>MAP</th><th>Rich first</th><th>Lean</th><th>Rich</th><th>Recovery</th></tr></thead><tbody>' +
         rows.map(function (row, i) {
             var e = row.e;
             if (row.skipped) {
                 return '<tr class="skipped" data-i="' + i + '"><td>' + lcClock(e.time) + '</td><td>' + e.type + ' — skipped (overrun / fuel cut)</td>' +
-                    '<td></td><td></td><td></td><td></td></tr>';
+                    '<td></td><td></td><td></td><td></td><td></td></tr>';
             }
             return '<tr data-i="' + i + '"' + (e === self.selEvent ? ' class="sel"' : '') + '><td>' + lcClock(e.time) + '</td><td>' + e.type + '</td><td>' +
-                e.mapFrom + '→' + e.mapTo + ' kPa</td><td>' + (e.type === 'tip-in' ? e.leanSpike.toFixed(1) + '%' : '') + '</td><td>' +
+                e.mapFrom + '→' + e.mapTo + ' kPa' + (e.type === 'tip-in' && e.mapPeak - e.mapTo >= 5 ? ' (peak ' + e.mapPeak + ')' : '') + '</td><td>' +
+                (e.type === 'tip-in' ? (e.richBefore || 0).toFixed(1) + '%' : '') + '</td><td>' + (e.type === 'tip-in' ? e.leanSpike.toFixed(1) + '%' : '') + '</td><td>' +
                 e.richOvershoot.toFixed(1) + '%</td><td>' + (e.settled === false ? '&gt; ' : '') + e.recoveryTime + ' ms</td></tr>';
         }).join('') + '</tbody></table>';
     this.el.events.querySelectorAll('tbody tr').forEach(function (tr) {

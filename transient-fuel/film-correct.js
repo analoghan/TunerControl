@@ -61,6 +61,7 @@ function computeFuelFilmCorrections(result, settings) {
     for (var e = 0; e < tipIns.length; e++) {
         var evt = tipIns[e];
         if (evt.leanSpike <= 2) continue;
+        if ((evt.richBefore || 0) > 3) continue;   // rich before the lean peak: not a shortage of film (see generateRecommendations)
 
         var bestIdx = 0;
         var bestDist = Math.abs(evt.mapTo - ffTable.breakpoints[0]);

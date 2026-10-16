@@ -113,9 +113,10 @@
 
     <h3>How each event is measured</h3>
     <p>Lambda is followed from the moment MAP starts to change until 1.5 s after it settles, as measured ÷ target lambda (so
-      a target that changes during the event, e.g. into boost, is accounted for). Excursions are measured against where lambda
-      <strong>settles</strong> at the end of that window: any steady error at the new load is a VE-table matter, so it is not
-      blamed on the fuel film.</p>
+      a target that changes during the event, e.g. into boost, is accounted for). Excursions are measured against two levels: where
+      lambda was in the half second <strong>before</strong> the event, and where it <strong>settles</strong> at the end of the window.
+      A spike or dip only counts beyond both, so a steady difference between the starting and destination loads (a VE-table matter)
+      is not blamed on the fuel film.</p>
     <p>Events overlapping overrun or a fuel cut — <strong>Engine Overrun State</strong> or <strong>Fuel Output Cut Count</strong>
       within the second before or during the event, or lambda above 1.5 — are skipped, because the sensor is reading the cut,
       not combustion. A tip-in straight out of a coast therefore can't be measured. The summary shows how many were skipped.</p>
@@ -123,7 +124,8 @@
     <h3>Tip-In Events (Lean Spikes)</h3>
     <p>Each row represents a detected throttle-opening event. Key columns:</p>
     <ul>
-      <li><strong>Lean Spike %</strong> — How far lambda went lean of its settled value during the transient. This is the primary indicator that fuel film primary values are too low.</li>
+      <li><strong>Rich First %</strong> — How far lambda went rich <em>before</em> the lean peak. A lean spike after a rich dip (marked *) is not a shortage of fuel film: too much fuel arrived up front, often because MAP overshot (shown as <em>peak</em> in the MAP column).</li>
+      <li><strong>Lean Spike %</strong> — How far lambda went lean of its starting and settled levels during the transient. Without a rich dip first, this is the primary indicator that fuel film primary values are too low.</li>
       <li><strong>Rich Overshoot %</strong> — How far lambda went rich of its settled value after the lean peak. Lean then rich means the compensation arrived late and lasted too long; rich without a lean spike means too much film.</li>
       <li><strong>Recovery Time</strong> — Milliseconds from the start of the event until lambda is back within 2% of its settled value after its largest deviation.</li>
       <li><strong>MAP Change</strong> — The transition zone (e.g., 40→80 kPa). Maps directly to which cells in the fuel film primary table need adjustment.</li>
@@ -160,6 +162,12 @@
     <h3>"Fuel Film Primary too high at X-Y kPa"</h3>
     <p>Tip-ins into that range go rich without a lean spike first: there is more film compensation than the engine needs.
       Reduce the table there.</p>
+
+    <h3>"RICH, THEN LEAN"</h3>
+    <p>Tip-ins dip rich before the lean spike. These events are left out of the "too low" advice and the table corrections. When MAP
+      overshoots where it settles (the throttle opens past its final position, or boost overshoots), the film model adds fuel for the
+      peak and takes it back as MAP falls, so fix the overshoot first. Without an overshoot, the first part of the compensation is
+      too strong: lower the Fast Percentage or lengthen the Fast Increase time constant.</p>
 
     <h3>"TIMING MISMATCH"</h3>
     <p>Tip-ins go lean and then rich: the amount of compensation is about right but it arrives too late and lasts too long.

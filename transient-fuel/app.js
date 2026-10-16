@@ -249,6 +249,7 @@ function renderSummary(r) {
         stat((r.unsettledTipIns ? '≥ ' : '') + Math.round(r.avgRecoveryTime) + 'ms', 'Avg Recovery Time' +
             (r.unsettledTipIns ? ' (' + r.unsettledTipIns + ' never settled)' : '')) +
         stat(r.skippedFuelCut || 0, 'Skipped (overrun/fuel cut)') +
+        stat(r.richFirstTipIns || 0, 'Tip-ins rich, then lean') +
         '</div>';
 }
 
@@ -257,6 +258,11 @@ function stat(value, label) {
 }
 
 /** Recovery time, or "> window" for an event whose lambda never settled within the measuring window. */
+/** "52→60 kPa", plus the peak when MAP overshot where it settled. */
+function fmtMapChange(e) {
+    return e.mapFrom + '→' + e.mapTo + ' kPa' + (mapOvershoot(e) >= TF_MAP_OVERSHOOT_KPA ? ' <span style="color:#ff9800">(peak ' + e.mapPeak + ')</span>' : '');
+}
+
 function fmtRecovery(e) {
     return (e.settled === false ? '&gt; ' : '') + e.recoveryTime + 'ms';
 }
@@ -287,16 +293,18 @@ function renderTipInTable(events) {
     var c = document.getElementById('tipin-content');
     if (events.length === 0) { c.innerHTML = '<p style="color:#888;">No tip-in events detected.</p>'; return; }
 
-    var html = '<table class="event-table lv-clickable"><thead><tr><th>Time</th><th>RPM</th><th>MAP Change</th><th>Rate</th><th>Lean Spike</th><th>Rich Overshoot</th><th>Recovery</th></tr></thead><tbody>';
+    var html = '<table class="event-table lv-clickable"><thead><tr><th>Time</th><th>RPM</th><th>MAP Change</th><th>Rate</th><th title="Rich before the lean peak">Rich First</th><th>Lean Spike</th><th title="Rich after the lean peak">Rich Overshoot</th><th>Recovery</th></tr></thead><tbody>';
     var limit = Math.min(events.length, 30);
     for (var i = 0; i < limit; i++) {
         var e = events[i];
         var leanCls = e.leanSpike > 10 ? 'severity-high' : e.leanSpike > 5 ? 'severity-med' : 'severity-low';
+        var firstCls = e.richBefore > 10 ? 'severity-high' : e.richBefore > 3 ? 'severity-med' : 'severity-low';
         var richCls = e.richOvershoot > 10 ? 'severity-high' : e.richOvershoot > 5 ? 'severity-med' : 'severity-low';
         var recCls = e.recoveryTime > 800 ? 'severity-high' : e.recoveryTime > 500 ? 'severity-med' : 'severity-low';
-        html += '<tr data-time="' + e.time + '" title="Show in the log"><td>' + e.time.toFixed(2) + 's</td><td>' + e.rpm + '</td><td>' + e.mapFrom + '→' + e.mapTo + ' kPa</td><td>' + e.mapRate + ' kPa/s</td><td class="' + leanCls + '">' + e.leanSpike.toFixed(1) + '%</td><td class="' + richCls + '">' + e.richOvershoot.toFixed(1) + '%</td><td class="' + recCls + '">' + fmtRecovery(e) + '</td></tr>';
+        html += '<tr data-time="' + e.time + '" title="Show in the log"><td>' + e.time.toFixed(2) + 's</td><td>' + e.rpm + '</td><td>' + fmtMapChange(e) + '</td><td>' + e.mapRate + ' kPa/s</td><td class="' + firstCls + '">' + (e.richBefore || 0).toFixed(1) + '%</td><td class="' + leanCls + '">' + e.leanSpike.toFixed(1) + '%' + (isRichFirst(e) ? ' <span title="Follows a rich dip: not counted as a shortage of fuel film">*</span>' : '') + '</td><td class="' + richCls + '">' + e.richOvershoot.toFixed(1) + '%</td><td class="' + recCls + '">' + fmtRecovery(e) + '</td></tr>';
     }
     html += '</tbody></table>';
+    if (events.some(isRichFirst)) html += '<p style="color:#888;font-size:0.8rem;">* Lean spike after a rich dip: not counted as a shortage of fuel film.</p>';
     if (events.length > limit) html += '<p style="color:#888;font-size:0.8rem;">Showing top ' + limit + ' of ' + events.length + ' events.</p>';
     c.innerHTML = html;
 }

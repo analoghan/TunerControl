@@ -16,13 +16,32 @@ function tfLog(lambdaAt, extra) {
 var TF_SETTINGS = { mapRateThreshold: 200, minMapChange: 20, mapWindow: 500, lambdaTarget: 1.0 };
 
 describe('Transient Fuel — lambda excursions', function () {
-  it('measures a tip-in lean spike against where lambda settles, not the target', function () {
+  it('measures a tip-in lean spike beyond both the starting and the settled lambda, not the target', function () {
     // Settles 3% rich of target at the new load (a VE matter); spikes to 1.07 just after the step.
     var events = detectTransientEvents(tfLog(function (t) { return t < 2 ? 1.0 : t < 2.3 ? 1.07 : 0.97; }), TF_SETTINGS);
     assert.equal(events.length, 1);
     assert.equal(events[0].type, 'tip-in');
-    assert.closeTo(events[0].leanSpike, (1.07 / 0.97 - 1) * 100, 0.1);
+    assert.closeTo(events[0].leanSpike, 7, 0.1, 'beyond the higher (starting) level');
     assert.equal(events[0].richOvershoot, 0);
+    assert.equal(events[0].richBefore, 0);
+  });
+
+  it('does not count a steady difference between the start and end loads as a spike or dip', function () {
+    var richStart = detectTransientEvents(tfLog(function (t) { return t < 2.1 ? 0.88 : 1.0; }), TF_SETTINGS)[0];
+    assert.equal(richStart.richBefore, 0);
+    assert.equal(richStart.leanSpike, 0);
+    var leanStart = detectTransientEvents(tfLog(function (t) { return t < 2.1 ? 1.06 : 1.0; }), TF_SETTINGS)[0];
+    assert.equal(leanStart.leanSpike, 0);
+  });
+
+  it('measures a rich dip before the lean peak, and MAP overshoot', function () {
+    var events = detectTransientEvents(tfLog(function (t) {
+      return t < 2 ? 1 : t < 2.2 ? 0.9 : t < 2.5 ? 1.06 : 1.0;
+    }, function (t) { return t >= 2.1 && t < 2.3 ? { map: 95 } : {}; }), TF_SETTINGS);
+    assert.closeTo(events[0].richBefore, 10, 0.1);
+    assert.closeTo(events[0].leanSpike, 6, 0.1);
+    assert.equal(events[0].mapPeak, 95);
+    assert.equal(mapOvershoot(events[0]), 15);
   });
 
   it('measures the spike from the start of the event, while MAP is still rising', function () {
@@ -55,8 +74,9 @@ describe('Transient Fuel — lambda excursions', function () {
 });
 
 describe('Transient Fuel — recommendations', function () {
-  function tipIn(lean, rich, mapTo, recovery) {
-    return { type: 'tip-in', leanSpike: lean, richOvershoot: rich, leanAfter: 0, mapTo: mapTo || 90, recoveryTime: recovery || 300 };
+  function tipIn(lean, rich, mapTo, recovery, richBefore, mapPeak) {
+    return { type: 'tip-in', leanSpike: lean, richOvershoot: rich, leanAfter: 0, mapTo: mapTo || 90, recoveryTime: recovery || 300,
+             richBefore: richBefore || 0, mapPeak: mapPeak || mapTo || 90 };
   }
   function tipOut(rich, leanAfter) {
     return { type: 'tip-out', leanSpike: 0, richOvershoot: rich, leanAfter: leanAfter || 0, mapTo: 30, recoveryTime: 300 };
@@ -68,6 +88,15 @@ describe('Transient Fuel — recommendations', function () {
     var t = texts(generateRecommendations([tipIn(8, 0), tipIn(9, 1), tipIn(7, 0), tipIn(8, 0)], TC));
     assert.ok(/Fuel Film Primary too low at 80-100 kPa/.test(t));
     assert.ok(!/Suggested time constants/.test(t));
+  });
+
+  it('reports rich-then-lean tip-ins and keeps them out of the "too low" advice', function () {
+    var events = [tipIn(8, 0, 90, 300, 9), tipIn(7, 0, 90, 300, 9), tipIn(8, 1, 90, 300, 7), tipIn(9, 0, 90, 300, 8, 105), tipIn(1, 1)];
+    var t = texts(generateRecommendations(events, TC));
+    assert.ok(/RICH, THEN LEAN on 4 of 5 tip-ins/.test(t), t);
+    assert.ok(/In 1 of them MAP overshoots its final value by 15 kPa/.test(t), t);
+    assert.ok(!/Fuel Film Primary too low/.test(t));
+    assert.ok(/Fast Increase: 0.1s → 0.13s/.test(t) && /Fast Percentage: 30% → 20%/.test(t), 'up-front compensation too strong');
   });
 
   it('flags rich-only tip-ins as too much film', function () {
@@ -115,6 +144,10 @@ describe('Transient Fuel — table corrections', function () {
     // At 1% scale the 160-unit cell is only 1.6 ul of film: the step it asks for exceeds +50%.
     var capped = run(1, 0, [{ mapTo: 90, leanSpike: 25 }]);
     assert.equal(capped.corrected[2], 240, '+50% cap');
+  });
+
+  it('leaves out lean spikes that follow a rich dip', function () {
+    assert.deepEqual(run(26, 30, [{ mapTo: 90, leanSpike: 10, richBefore: 8 }]).corrected, [20, 100, 160]);
   });
 
   it('ignores small spikes', function () {

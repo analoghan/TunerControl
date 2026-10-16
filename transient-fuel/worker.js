@@ -213,7 +213,9 @@ function detectTransientEvents(samples, settings) {
                     lambdaTarget: target,
                     leanSpike: excursion.leanSpike,
                     richOvershoot: excursion.richOvershoot,
+                    richBefore: excursion.richBefore,
                     leanAfter: excursion.leanAfter,
+                    mapPeak: Math.round(isTipIn ? peakMap : troughMap),
                     recoveryTime: excursion.recoveryTime,
                     settled: excursion.settled,
                     peakError: excursion.peakError,
@@ -242,6 +244,8 @@ var TF_CUT_LAMBDA = 1.5;
 var TF_CUT_HOLDOFF_S = 1.0;
 /** Seconds at the end of the window used as the settled lambda (the reference for the excursion). */
 var TF_SETTLE_S = 0.5;
+/** Seconds before an event used as the level lambda starts from. */
+var TF_PRE_S = 0.5;
 /** Seconds after the MAP change ends that lambda is followed. */
 var TF_WINDOW_S = 1.5;
 /** Lambda within this fraction of the baseline counts as recovered. */
@@ -279,21 +283,35 @@ function measureLambdaExcursion(samples, startIdx, endIdx, isTipIn, defaultTarge
     var settled = raw.filter(function (p) { return p.t >= tEnd - TF_SETTLE_S; }).map(function (p) { return p.r; }).sort(function (a, b) { return a - b; });
     var base = settled.length ? settled[Math.floor(settled.length / 2)] : 1;
     var pts = raw.map(function (p) { return { t: p.t, r: p.r / base }; });
+
+    // Where lambda was just before the event, relative to where it settles. A spike or dip only counts beyond both
+    // levels, so a steady difference between the start and end loads (a VE matter) is not mistaken for one.
+    var pre = [];
+    for (k = startIdx - 1; k >= 0 && samples[k].time >= t0 - TF_PRE_S; k--) {
+        var pr = tfRatio(samples[k], defaultTarget);
+        if (!isNaN(pr)) pre.push(pr / base);
+    }
+    pre.sort(function (a, b) { return a - b; });
+    var preLevel = pre.length ? pre[Math.floor(pre.length / 2)] : 1;
+    var hi = Math.max(preLevel, 1), lo = Math.min(preLevel, 1);
     if (!pts.length) {
-        return { leanSpike: 0, richOvershoot: 0, leanAfter: 0, recoveryTime: Math.round((tEnd - t0) * 1000), settled: false, peakError: 0,
+        return { leanSpike: 0, richOvershoot: 0, richBefore: 0, leanAfter: 0, recoveryTime: Math.round((tEnd - t0) * 1000), settled: false, peakError: 0,
                  baseline: base, windowEnd: tEnd };
     }
 
     var iMax = 0, iMin = 0;
     pts.forEach(function (p, i) { if (p.r > pts[iMax].r) iMax = i; if (p.r < pts[iMin].r) iMin = i; });
-    var lean = Math.max(0, (pts[iMax].r - 1) * 100), rich, leanAfter = 0;
+    var lean = Math.max(0, (pts[iMax].r / hi - 1) * 100), rich, leanAfter = 0, richBefore = 0;
     if (isTipIn) {
+        // Rich before the lean peak: the compensation came in too strongly at first (or MAP overshot), so the
+        // lean spike that follows is not a shortage of fuel film.
+        for (k = 0; k < iMax; k++) richBefore = Math.max(richBefore, (1 - pts[k].r / lo) * 100);
         // Rich overshoot = going rich after the lean peak (compensation arriving late and staying too long).
         var minAfter = Infinity;
         for (k = iMax + 1; k < pts.length; k++) if (pts[k].r < minAfter) minAfter = pts[k].r;
         rich = minAfter < Infinity ? Math.max(0, (1 - minAfter) * 100) : 0;
     } else {
-        rich = Math.max(0, (1 - pts[iMin].r) * 100);
+        rich = Math.max(0, (1 - pts[iMin].r / lo) * 100);
         for (k = iMin + 1; k < pts.length; k++) leanAfter = Math.max(leanAfter, (pts[k].r - 1) * 100);
     }
     // Recovery: from the event start until lambda is back within TF_SETTLED after its largest deviation.
@@ -307,6 +325,7 @@ function measureLambdaExcursion(samples, startIdx, endIdx, isTipIn, defaultTarge
     return {
         leanSpike: r1(isTipIn ? lean : 0),
         richOvershoot: r1(rich),
+        richBefore: r1(richBefore),
         leanAfter: r1(leanAfter),
         recoveryTime: recovery !== null ? recovery : Math.round((tEnd - t0) * 1000),   // not settled: the window length
         settled: recovery !== null,
@@ -320,15 +339,40 @@ function measureLambdaExcursion(samples, startIdx, endIdx, isTipIn, defaultTarge
 // Recommendations Generator
 // ---------------------------------------------------------------------------
 
+/** A tip-in that went rich (> TF_RICH_FIRST %) before its lean peak. */
+var TF_RICH_FIRST = 3;
+/** MAP rising this far past where it settles counts as an overshoot. */
+var TF_MAP_OVERSHOOT_KPA = 5;
+
+function isRichFirst(e) { return e.type === 'tip-in' && (e.richBefore || 0) > TF_RICH_FIRST; }
+function mapOvershoot(e) { return e.mapPeak !== undefined ? Math.max(0, e.mapPeak - e.mapTo) : 0; }
+
 function generateRecommendations(events, settings) {
     var recs = [];
     var tipIns = events.filter(function (e) { return e.type === 'tip-in'; });
     var tipOuts = events.filter(function (e) { return e.type === 'tip-out'; });
     function avg(list, f) { return list.length ? list.reduce(function (a, e) { return a + f(e); }, 0) / list.length : 0; }
 
+    // Tip-ins that go rich before their lean peak: the lean spike follows too much fuel up front (or a MAP
+    // overshoot), so they say nothing about the film being too low and are left out of the zone and table advice.
+    var richFirst = tipIns.filter(isRichFirst);
+    var overshoot = richFirst.filter(function (e) { return mapOvershoot(e) >= TF_MAP_OVERSHOOT_KPA; });
+    if (richFirst.length >= 2) {
+        var rfRich = avg(richFirst, function (e) { return e.richBefore; }), rfLean = avg(richFirst, function (e) { return e.leanSpike; });
+        recs.push({ severity: 'warning',
+            text: 'RICH, THEN LEAN on ' + richFirst.length + ' of ' + tipIns.length + ' tip-ins: lambda first goes rich (' + rfRich.toFixed(1) +
+                '% on average) and only then lean (' + rfLean.toFixed(1) + '%). The lean spike follows too much fuel up front, so it is not a ' +
+                'shortage of fuel film; these events are left out of the "too low" advice and the table corrections. ' +
+                (overshoot.length ? 'In ' + overshoot.length + ' of them MAP overshoots its final value by ' +
+                    avg(overshoot, mapOvershoot).toFixed(0) + ' kPa on average: the film model adds fuel for the peak and takes it back as MAP ' +
+                    'falls, so look at the throttle (or boost) overshoot first. ' : '') +
+                'If MAP does not overshoot, the first part of the compensation is too strong: lower the Fast Percentage or lengthen the ' +
+                'Fast Increase time constant.' });
+    }
+
     // Tip-in error by destination MAP zone (20 kPa bands).
     var zones = {};
-    tipIns.forEach(function (e) {
+    tipIns.filter(function (e) { return !isRichFirst(e); }).forEach(function (e) {
         var z = Math.floor(e.mapTo / 20) * 20;
         (zones[z] = zones[z] || []).push(e);
     });
@@ -356,6 +400,8 @@ function generateRecommendations(events, settings) {
     var tipOutRich = avg(tipOuts, function (e) { return e.richOvershoot; });
     var tipOutLean = avg(tipOuts, function (e) { return e.leanAfter || 0; });
     var mismatch = tipIns.length > 3 && avgLean > 3 && avgRichTipIn > 3;
+    // Mostly rich-then-lean without MAP overshoot: the up-front compensation is too strong.
+    var tooStrongFirst = !mismatch && tipIns.length > 3 && richFirst.length - overshoot.length >= tipIns.length / 2;
 
     if (mismatch) {
         recs.unshift({ severity: avgLean > 8 && avgRichTipIn > 8 ? 'critical' : 'warning',
@@ -388,6 +434,7 @@ function generateRecommendations(events, settings) {
                     slowDec: tc.slowDecrease || 0.3, fastPct: tc.fastPct || 30 };
         var sug = Object.assign({}, cur);
         if (mismatch) { sug.fastInc = cur.fastInc * 0.7; sug.slowInc = cur.slowInc * 0.7; sug.fastPct = Math.min(60, cur.fastPct + 10); }
+        if (tooStrongFirst) { sug.fastInc = cur.fastInc * 1.3; sug.fastPct = Math.max(0, cur.fastPct - 10); }
         if (avgLean > 3 && avgRecovery > 800) sug.slowInc = Math.min(sug.slowInc, cur.slowInc * 0.5);
         else if (avgLean > 3 && avgRecovery > 500) sug.slowInc = Math.min(sug.slowInc, cur.slowInc * 0.7);
         if (tipOuts.length && tipOutRich > 5) { sug.fastDec = cur.fastDec * 0.7; sug.slowDec = cur.slowDec * 0.7; }
@@ -513,6 +560,7 @@ function analyzeTransientSamples(samples, settings) {
         skippedFuelCut: events.skippedFuelCut || 0,
         skipped: events.skipped || [],
         unsettledTipIns: tipIns.filter(function(e) { return e.settled === false; }).length,
+        richFirstTipIns: tipIns.filter(isRichFirst).length,
         tipInCount: tipIns.length,
         tipOutCount: tipOuts.length,
         avgLeanSpike: tipIns.length > 0 ? tipIns.reduce(function(a, e) { return a + e.leanSpike; }, 0) / tipIns.length : 0,
