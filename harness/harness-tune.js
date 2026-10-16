@@ -51,10 +51,17 @@ function htSameFunction(tuneNames, harnessText) {
     });
 }
 
-/** "M142 pin A06 (+ A07)" → { unit: 'M142', connector: 'A', cavity: '6' }. */
+/**
+ * "M142 pin A06 (+ A07)" → { unit: 'M142', connector: 'A', cavity: '6', second: { connector: 'A', cavity: '7', kind: '+' } }.
+ * A second pin is the '+' side of a direct injector or the other half bridge of a bridge output ("C18 / C01").
+ */
 function htParsePin(text) {
-    var m = String(text || '').match(/^(\S+) pin ([A-Z])(\d+)/);
-    return m ? { unit: m[1], connector: m[2], cavity: String(parseInt(m[3], 10)) } : null;
+    var m = String(text || '').match(/^(\S+) pin ([A-Z])(\d+)(?: \(\+ ([A-Z])(\d+)\)| \/ ([A-Z])(\d+))?/);
+    if (!m) return null;
+    var p = { unit: m[1], connector: m[2], cavity: String(parseInt(m[3], 10)), second: null };
+    if (m[4]) p.second = { connector: m[4], cavity: String(parseInt(m[5], 10)), kind: '+' };
+    if (m[6]) p.second = { connector: m[6], cavity: String(parseInt(m[7], 10)), kind: '/' };
+    return p;
 }
 
 /** Short tune item name for display: drop trailing ".Resource.Value" style suffixes. */
@@ -66,6 +73,7 @@ function htItemName(name) {
 function htCavityKeys(unit) {
     var pins = (typeof M1C_PINOUTS !== 'undefined' ? M1C_PINOUTS : {})[unit] || {}, out = {};
     Object.keys(pins).forEach(function (key) {
+        if (/^bridge/.test(key)) return;   // bridge outputs reuse the half-bridge pins (hbN)
         var m = pins[key].match(/^([A-Z])(\d+)(?: \(([+-]|TX|LO) ([A-Z])(\d+)\))?/);
         if (!m) return;
         var di = /^di\d/.test(key);
@@ -97,23 +105,37 @@ function harnessTuneCompare(model, pkg, hardware, userNames) {
             (unnamed[ids] = unnamed[ids] || { ids: ids, tune: [] }).tune.push(htItemName(item.name));
         }
         if (!p) return;
-        var key = p.unit + '.' + p.connector + '.' + p.cavity;
-        if (!byPin[key]) {
-            byPin[key] = { pin: p.unit + ' ' + p.connector + String(p.cavity).padStart(2, '0'),
-                           connectorId: p.unit + '.' + p.connector, cavity: p.cavity, resource: n.name, tune: [] };
+        function add(connector, cavity, resource, partnerNote) {
+            var key = p.unit + '.' + connector + '.' + cavity;
+            if (!byPin[key]) {
+                byPin[key] = { pin: p.unit + ' ' + connector + String(cavity).padStart(2, '0'), connectorId: p.unit + '.' + connector,
+                               cavity: cavity, resource: resource, tune: [], partnerNote: partnerNote || '' };
+            }
+            byPin[key].tune.push(htItemName(item.name));
         }
-        byPin[key].tune.push(htItemName(item.name));
+        add(p.connector, p.cavity, n.name);
+        if (p.second) {
+            var main = p.unit + ' ' + p.connector + String(p.cavity).padStart(2, '0');
+            add(p.second.connector, p.second.cavity, p.second.kind === '+' ? n.name.replace(/-$/, '+') : n.name + ' (2nd pin)',
+                (p.second.kind === '+' ? 'Supply side of ' : 'Other half of ') + n.name + ' (' + main + ').');
+        }
     });
 
     Object.keys(byPin).forEach(function (key) {
         var r = byPin[key], entry = index.connectors[r.connectorId];
         r.harness = entry ? entry.pins[r.cavity] || null : null;
         if (!entry) { r.status = 'no-connector'; r.note = r.connectorId + ' is not in this harness.'; }
-        else if (!r.harness || !harnessHasWire(r.harness) || /^(spare|unused)$/i.test(harnessText(r.harness.function))) {
+        else if (!r.harness || !harnessHasWire(r.harness)) {
             r.status = 'missing'; r.note = 'The tune uses this pin but the harness has no wire on it.';
-        } else if (htSameFunction(r.tune, r.harness.function + ' ' + r.harness.note)) r.status = 'ok';
+        } else if (/^(spare|unused)$/i.test(harnessText(r.harness.function))) {
+            r.status = 'missing';
+            r.note = 'The tune uses this pin but the harness marks it as ' + harnessText(r.harness.function).toLowerCase() +
+                (harnessText(r.harness.remote) && !/^n\/a$/i.test(harnessText(r.harness.remote)) ? ' (wired to ' + harnessText(r.harness.remote) + ')' : '') + '.';
+        } else if (htSameFunction(r.tune, r.harness.function)) r.status = 'ok';
         else { r.status = 'check'; r.note = 'The harness function does not look like the tune assignment.'; }
         if (r.tune.length > 1) r.note = (r.note ? r.note + ' ' : '') + 'The tune assigns ' + r.tune.length + ' items to this pin.';
+        if (r.partnerNote) r.note = r.partnerNote + (r.note ? ' ' + r.note : '');
+        delete r.partnerNote;
         rows.push(r);
     });
 
@@ -130,20 +152,6 @@ function harnessTuneCompare(model, pkg, hardware, userNames) {
                 labelIssues.push({ where: c.id + '.' + p.cavity, label: p.note, expected: expected });
             }
             if (byPin[hardware + '.' + m[2] + '.' + cav] || !harnessHasWire(p)) return;
-            // Direct injector '+' pins belong to the output M1 Tune assigns by its '-' pin.
-            if (expected && /^di\d.\+$/.test(expected)) {
-                var minus = expected.replace(/\+$/, '-'), partner = null;
-                Object.keys(keys).forEach(function (k) {
-                    if (keys[k] === minus) partner = byPin[hardware + '.' + k];
-                });
-                if (partner) {
-                    rows.push({ pin: hardware + ' ' + m[2] + cav.padStart(2, '0'), connectorId: c.id, cavity: cav,
-                                resource: partner.resource.replace(/-$/, '+'), tune: partner.tune, harness: p,
-                                status: htSameFunction(partner.tune, p.function + ' ' + p.note) ? 'ok' : 'check',
-                                note: 'Supply side of ' + partner.resource + ' (' + partner.pin + ').' });
-                    return;
-                }
-            }
             if (HT_NOT_SIGNAL.test(harnessText(p.function)) || !expected || /^(can|rs232|lin)/.test(expected)) return;
             rows.push({ pin: hardware + ' ' + m[2] + cav.padStart(2, '0'), connectorId: c.id, cavity: cav, resource: null,
                         tune: [], harness: p, status: 'not-in-tune',

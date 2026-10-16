@@ -186,7 +186,8 @@ describe('Harness — tune comparison', function () {
     io('Transmission.Temperature.Sensor Resource', slot2('0x6211')),           // AT1 → D03
     io('Fuel.Pressure.Sensor.Resource.Value', slot2('0x6203')),                // AVI4 → C17 (not wired)
     io('Throttle.Pedal.Sensor Main Resource', slot2('0x654c')),                // E888 AVI7
-    io('Knock.Cylinder 1.Resource.Value', slot2('0x6100')),                    // unnamed
+    io('Knock.Cylinder 1.Resource.Value', slot2('0x6100')),                    // Knock Input 1 → D07 (not wired)
+    io('Fuel.Temperature.Sensor.Resource.Value', slot2('0x6480')),             // unnamed
     io('Coolant.Fan 2.Output Resource.Value', ['0x0000', '0x0000', '0x0000', '0x0000', '0x0000'])
   ] };
   var m = harnessFromWorkbook(hxWorkbook(), 'Test');
@@ -202,7 +203,15 @@ describe('Harness — tune comparison', function () {
   it('flags different functions, missing wires and connectors not in the harness', function () {
     assert.equal(row('M142 D03').status, 'check', 'transmission temp vs IAT');
     assert.equal(row('M142 C17').status, 'missing');
+    assert.equal(row('M142 D07').status, 'missing', 'Knock Input 1 = D07, not wired');
     assert.equal(row('E888 A32').status, 'no-connector');
+  });
+
+  it('says when the tune uses a pin the harness marks as spare', function () {
+    var sp = harnessTuneCompare(m, { items: [io('Fuel.Pressure.Sensor.Resource.Value', slot2('0x6202'))] }, 'M142', {});
+    var x = sp.rows.filter(function (y) { return y.pin === 'M142 C16'; })[0];
+    assert.equal(x.status, 'missing');
+    assert.ok(x.note.indexOf('marks it as spare (wired to SPARE.1)') >= 0, x.note);
   });
 
   it('lists wired ECU inputs no tune assignment uses, but not power or spares', function () {
@@ -216,13 +225,13 @@ describe('Harness — tune comparison', function () {
   });
 
   it('lists unnamed tune assignments separately', function () {
-    assert.deepEqual(r.unnamed, [{ ids: '0x6100', tune: ['Knock.Cylinder 1'] }]);
+    assert.deepEqual(r.unnamed, [{ ids: '0x6480', tune: ['Fuel.Temperature.Sensor'] }]);
   });
 
   it('uses user-entered resource names', function () {
-    var named = harnessTuneCompare(m, pkg, 'M142', { 'M142|0x0000,0x0000,0x6100,0x0000,0x0000': 'Knock Input 1' });
+    var named = harnessTuneCompare(m, pkg, 'M142', { 'M142|0x0000,0x0000,0x6480,0x0000,0x0000': 'AT4' });
     assert.equal(named.unnamed.length, 0);
-    assert.equal(named.rows.filter(function (x) { return x.pin === 'M142 D07'; })[0].status, 'missing', 'Knock Input 1 = D07, not wired');
+    assert.equal(named.rows.filter(function (x) { return x.pin === 'M142 D06'; })[0].status, 'missing', 'AT4 = D06, not in harness');
   });
 
   it('treats direct injector + pins as part of the assigned - output and checks harness labels', function () {
@@ -237,6 +246,18 @@ describe('Harness — tune comparison', function () {
     assert.equal(plus.status, 'ok');
     assert.equal(plus.resource, 'Direct Injector 1A+');
     assert.deepEqual(res.labelIssues, [{ where: 'M142.A.1', label: 'AT6', expected: 'at5' }]);
+  });
+
+  it('compares both half bridges of a bridge output', function () {
+    var motor = { items: [io('Throttle.Servo.Bank 1 Motor Output Resource.Value', ['0x0000', '0x645b', '0x0000', '0x0000', '0x0000'])] };
+    var model = { name: 'x', sheets: [], splices: [], connectors: [{ id: 'M142.C', sheet: 's', columns: [], pins: [
+      { cavity: '18', wirePn: 'P', wire: 'W', function: 'DBW Motor -', note: 'Half Bridge Output 1', remote: '', status: '' },
+      { cavity: '1', wirePn: 'P', wire: 'W', function: 'DBW Motor +', note: 'Half Bridge Output 2', remote: '', status: '' }
+    ] }] };
+    var res = harnessTuneCompare(model, motor, 'M142', {});
+    assert.deepEqual(res.rows.map(function (x) { return x.pin + ' ' + x.resource + ' ' + x.status; }),
+      ['M142 C01 Bridge Output 1 (2nd pin) ok', 'M142 C18 Bridge Output 1 ok']);
+    assert.deepEqual(res.labelIssues, [], 'HB1/HB2 labels still match the datasheet');
   });
 
   it('compares function names by what they measure', function () {

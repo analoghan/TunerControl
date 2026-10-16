@@ -46,7 +46,20 @@ describe('M1 Config — I/O resource names', function () {
     assert.equal(m1cResourceName(udig('0x6403', '0x6466', '0x6443'), 'M142').name, 'UDIG4');
     assert.equal(m1cResourceName(udig('0x6406', '0x6469', '0x6446'), 'M142').name, 'UDIG7');
     assert.equal(m1cResourcePinFor(udig('0x6401', '0x6464', '0x6441'), 'M142'), 'M142 pin D02');
-    assert.equal(m1cResourceName(slot2('0x646e'), 'M142'), null, 'slot-2-only IDs stay unnamed');
+    assert.equal(m1cResourceName(slot2('0x646e'), 'M142').name, 'UDIG12', 'switch input: slot 2 only');
+    assert.equal(m1cResourcePinFor(slot2('0x646e'), 'M142'), 'M142 pin B07');
+  });
+
+  it('names knock inputs, low side injectors and bridge outputs', function () {
+    function slot1(a, b) { return ['0x0000', a, b || '0x0000', '0x0000', '0x0000']; }
+    assert.equal(m1cResourceName(slot2('0x6100'), 'M142').name, 'Knock Input 1');
+    assert.equal(m1cResourceName(slot2('0x6101'), 'M142').name, 'Knock Input 2');
+    assert.equal(m1cResourcePinFor(slot2('0x6101'), 'M142'), 'M142 pin D13');
+    assert.equal(m1cResourceName(slot1('0x6431', '0x6229'), 'M142').name, 'Low Side Injector 2');
+    assert.equal(m1cResourcePinFor(slot1('0x6432', '0x622a'), 'M142'), 'M142 pin B09');
+    assert.equal(m1cResourceName(slot1('0x645b'), 'M142').name, 'Bridge Output 1');
+    assert.equal(m1cResourcePinFor(slot1('0x645b'), 'M142'), 'M142 pin C18 / C01');
+    assert.equal(m1cResourceName(slot1('0x645c', '0x62a0'), 'M142').name, 'Bridge Output 2');
   });
 
   it('names PDM byte/mask outputs and E888 outputs', function () {

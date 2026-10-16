@@ -38,10 +38,18 @@ var M1C_RESOURCE_RULES = {
         // Analogue temperature inputs follow AVI17. AT1 = 0x6211 confirmed; AT2-6 inferred from the
         // contiguous block of temperature sensors at 0x6212-0x6216.
         { slot: 2, from: 0x6211, to: 0x6216, name: function (id) { return 'AT' + (id - 0x6211 + 1); } },
-        // Universal digital inputs UDIG1-12, recognised by their first ID 0x6400+n-1 (the full set is
-        // [0x6400+n-1, 0, 0x6463+n, 0, 0x6440+n-1]). UDIG2/3/4/7 confirmed (cam, throttle decode, rear
-        // wheel speed, fuel composition); slot-2-only IDs such as 0x646e are left unnamed until confirmed.
+        // Universal digital inputs UDIG1-12: frequency inputs use [0x6400+n-1, 0, 0x6462+n, 0, 0x6440+n-1]
+        // (UDIG2/3/4/7 confirmed: cam, throttle decode, rear wheel speed, fuel composition); switch inputs
+        // use slot 2 only (UDIG12 = 0x646e confirmed: Driver Switch 1).
         { slot: 0, from: 0x6400, to: 0x640b, name: function (id) { return 'UDIG' + (id - 0x6400 + 1); } },
+        { slot: 2, from: 0x6463, to: 0x646e, name: function (id) { return 'UDIG' + (id - 0x6462); } },
+        // Knock inputs 1-4 (1 and 2 confirmed: odd / even cylinders).
+        { slot: 2, from: 0x6100, to: 0x6103, name: function (id) { return 'Knock Input ' + (id - 0x6100 + 1); } },
+        // Low side injector outputs 1-6 (2 and 3 confirmed: Auxiliary Outputs 2 and 3).
+        { slot: 1, from: 0x6430, to: 0x6435, name: function (id) { return 'Low Side Injector ' + (id - 0x6430 + 1); } },
+        // Bridge outputs (Bridge Output 1 = 0x645b confirmed: throttle servo motor; 2-5 inferred — the DI pump
+        // at 0x645c is wired to HB3/HB4 = Bridge Output 2 in the Aston harness).
+        { slot: 1, from: 0x645b, to: 0x645f, name: function (id) { return 'Bridge Output ' + (id - 0x645b + 1); } },
         // PDM (CAN power distribution) outputs: 8 IDs per byte, Mask 01 at the top of each block and
         // masks 02-80 counting downward (Byte 0/1/2 Mask 01 = 0x6567/0x656f/0x6577 and
         // Byte 0 Mask 02 = 0x6566 confirmed).
@@ -80,7 +88,10 @@ var M1C_PINOUTS = {
         knock1: 'D07', knock2: 'D13', knock3: 'A13', knock4: 'A14',
         lambda1: 'A11', lambda2: 'A12',
         rs232: 'A21 (TX A22)', lin: 'A20',
-        can1: 'D17 (LO D18)', can2: 'A30 (LO A31)', can3: 'A28 (LO A29)'
+        can1: 'D17 (LO D18)', can2: 'A30 (LO A31)', can3: 'A28 (LO A29)',
+        // Bridge outputs pair two half bridges: Bridge Output 1 = HB1 + HB2 (confirmed); 2-5 follow the same
+        // pairing (HB3+HB4 …).
+        bridge1: 'C18 / C01', bridge2: 'C31 / C32', bridge3: 'C33 / C34', bridge4: 'B20 / B21', bridge5: 'B01 / B02'
     },
     E888: {
         av1: 'A22', av2: 'A23', av3: 'A24', av4: 'A25', av5: 'A30', av6: 'A31', av7: 'A32', av8: 'A33',
@@ -104,6 +115,7 @@ var M1C_PIN_PATTERNS = [
     [/^(?:low side ignition|ign_?ls) ?(\d+)$/, 'ign'],
     [/^(?:low side injector|inj_?ls) ?(\d+)$/, 'inj'],
     [/^(?:half bridge(?: output)?|out_?hb|hb) ?(\d+)$/, 'hb'],
+    [/^(?:h-?bridge|bridge)(?: output)? ?(\d+)$/, 'bridge'],
     [/^(?:universal digital(?: input)?|udig) ?(\d+)$/, 'udig'],
     [/^(?:digital input|dig) ?(\d+)$/, 'dig'],
     [/^knock(?: input)? ?(\d+)$/, 'knock'],
