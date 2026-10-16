@@ -67,7 +67,56 @@ Update by pulling, rebuilding and re-creating the container; the `tunercontrol-d
 
 ## HTTPS with a reverse proxy
 
-Caddy obtains certificates automatically. `/etc/caddy/Caddyfile`:
+Keep the server on `127.0.0.1:8080` (with Docker, publish `-p 127.0.0.1:8080:8080`) and let the proxy
+handle the public side. A single tune upload is limited to 64 MB, but a **Restore backup** JSON can be up
+to 512 MB, so the proxy's request size limit must allow that. The server already compresses its responses,
+so the proxy doesn't need to.
+
+### nginx
+
+`/etc/nginx/sites-available/tunercontrol`:
+
+```nginx
+server {
+    listen 80;
+    server_name tune.example.com;
+
+    # nginx allows only 1 MB per request by default; uploads and restores need more
+    client_max_body_size 512m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Stream uploads straight to Node, and allow time for big restores
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
+```
+
+```bash
+sudo ln -s /etc/nginx/sites-available/tunercontrol /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# HTTPS: certbot adds the 443 server block, the HTTP->HTTPS redirect and renewal
+sudo apt-get install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d tune.example.com
+```
+
+To serve it under a path instead of its own hostname, use `location /tuner/ { proxy_pass
+http://127.0.0.1:8080/; ... }` (trailing slash on both) and open `https://example.com/tuner/m1-config/`.
+The page finds the API relative to its own URL, so nothing else needs changing.
+
+### Caddy
+
+Caddy obtains certificates automatically and has no request size limit by default.
+`/etc/caddy/Caddyfile`:
 
 ```
 tune.example.com {
@@ -75,8 +124,8 @@ tune.example.com {
 }
 ```
 
-Then open `https://tune.example.com/m1-config/`. Raise any upload limit on the proxy to at least 64 MB if
-your proxy has one (Caddy has none by default; nginx needs `client_max_body_size 64m;`).
+Either way, open `https://tune.example.com/m1-config/`; the note under the import button should say tunes
+are stored on the server. Keep `TUNERCONTROL_TOKEN` set even behind HTTPS.
 
 ## Moving tunes from browser storage
 
