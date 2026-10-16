@@ -45,7 +45,7 @@ describe('M1 Config — following references', function () {
   it('follows a table axis to the setting group whose channel it reads', function () {
     var e = m1lEntity(ix, 'g:Driver.Fuel Mixture Aim Main Switch');
     assert.ok(e.usedBy.some(function (r) { return r.from === 'Fuel.Mixture Aim.Main' && r.kind === 'axis'; }));
-    assert.equal(e.subgroups[0].title, 'Index');
+    assert.deepEqual(e.members.map(function (it) { return it.name; }), ['Driver.Fuel Mixture Aim Main Switch.Index.Value'], 'the .Value item belongs to the switch');
   });
 
   it('ignores labels that name nothing and references to the item\'s own group', function () {
@@ -58,5 +58,29 @@ describe('M1 Config — following references', function () {
     assert.deepEqual(e.parents.map(function (p) { return p.title; }), ['CAN', 'CAN.Receive', 'CAN.Receive.Custom', 'CAN.Receive.Custom.Message 1']);
     assert.equal(e.memberCount, 2);
     assert.equal(m1lEntity(ix, 'g:Nope'), null);
+  });
+
+  it('puts a .Value item in the group it belongs to', function () {
+    assert.equal(m1lOwnerGroup('Brake.Switch.Index.Value'), 'Brake.Switch');
+    assert.equal(m1lOwnerGroup('Driver.Switch 8.Input Resource'), 'Driver.Switch 8');
+    assert.equal(m1lOwnerGroup('Engine.Speed'), 'Engine');
+  });
+
+  it('lists each FIRMWARE channel with the CAN signal writing it and the inputs reading it', function () {
+    var more = items.concat([
+      { name: 'CAN.Receive.Custom.Message 1.CAN Bus', kind: 'Parameter', type: 'enum', value: 2, label: 'CAN Bus 2', tags: [] },
+      { name: 'CAN.Receive.Custom.Message 1.CAN ID', kind: 'Parameter', type: 'u32', value: 690, tags: [] },
+      { name: 'CAN.Receive.Custom.Message 1.Signal 2.Length', kind: 'Parameter', type: 's32', value: 8, tags: [] }
+    ]);
+    var rows = m1lFirmwareTable(m1lBuildIndex(more, resName));
+    assert.equal(rows.length, 32);
+    var fw5 = rows[5];
+    assert.equal(fw5.sources.length, 1);
+    assert.equal(fw5.sources[0].can.bus, 'CAN Bus 2');
+    assert.equal(fw5.sources[0].can.id, 690);
+    assert.equal(fw5.sources[0].can.length, 8);
+    assert.deepEqual(fw5.targets.map(function (t) { return t.ref.from; }), ['Driver.Switch 8.Input Resource']);
+    assert.deepEqual(fw5.targets[0].usedBy.map(function (u) { return u.from; }), ['Brake.Switch.Index.Value']);
+    assert.equal(rows[6].sources.length + rows[6].targets.length, 0);
   });
 });

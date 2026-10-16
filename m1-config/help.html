@@ -44,6 +44,7 @@
       <li><a href="#history">Tune history and comparing</a></li>
       <li><a href="#browse">Browsing parameters and tables</a></li>
       <li><a href="#follow">Following settings</a></li>
+      <li><a href="#firmware-io">Firmware I/O channels</a></li>
       <li><a href="#value-history">Value history across versions</a></li>
       <li><a href="#units">Units</a></li>
       <li><a href="#io">I/O resources, names and pins</a></li>
@@ -114,6 +115,13 @@
     <p class="hint">Links are worked out from the names in the package: an enum value links when it names a group (spacing and dots
       ignored, or its words in order, e.g. <em>Driver Keypad Button 7 → Driver.CAN Keypad.Button 7</em>) or a resource
       (<em>Firmware 5 = FIRMWARE5</em>). Values that name nothing in the tune, such as <em>On</em> or a sensor type, are not links.</p>
+
+    <h2 id="firmware-io">Firmware I/O channels</h2>
+    <p>The <strong>Firmware I/O</strong> tab lists the ECU's virtual I/O channels FIRMWARE0–FIRMWARE31. For each it shows what
+      <strong>writes</strong> it — usually a CAN receive custom signal, with its bus, CAN ID, start bit, length and scaling — what
+      <strong>reads</strong> it (a driver switch, rotary or counter switch, or a sensor input whose resource is that FIRMWARE channel) and
+      what the reading input is <strong>then used by</strong> (e.g. <em>FIRMWARE5 ← CAN Message 1 Signal 2 → Driver Switch 8 → Brake Switch</em>).
+      Tick <em>Show unused channels</em> for all 32; the search box filters the rows. Every name opens the Follow window.</p>
 
     <h2 id="value-history">Value history across versions</h2>
     <p>With two or more tunes imported, you can see how any value changed over every saved version:</p>

@@ -19,6 +19,14 @@ function m1lGroupOf(name) {
     return i > 0 ? name.slice(0, i) : name;
 }
 
+/**
+ * The group an item belongs to: its parent, after dropping a trailing ".Value" — so 'Brake.Switch.Index.Value' belongs to
+ * 'Brake.Switch' and 'Wheel Speed.Rear.Right.Sensor Resource.Value' to 'Wheel Speed.Rear.Right'.
+ */
+function m1lOwnerGroup(name) {
+    return m1lGroupOf(/\.Value$/.test(name) && name.split('.').length > 2 ? name.slice(0, -6) : name);
+}
+
 /** True when a is b or one of b's ancestors ('Driver' and 'Driver.Switch 8' for 'Driver.Switch 8.Input'). */
 function m1lAncestorOrSelf(a, b) { return a === b || b.indexOf(a + '.') === 0; }
 
@@ -39,8 +47,8 @@ function m1lBuildIndex(items, resName) {
                 var toks = m1lTokens(path), last = toks[toks.length - 1];
                 (groupsByLast[last] = groupsByLast[last] || []).push(path);
             }
-            if (k === parts.length - 1) groups[path].items.push(it);
         }
+        groups[m1lOwnerGroup(it.name)].items.push(it);
     });
 
     function resourceKey(name, ids) { return name ? 'r:' + m1lNorm(name) : 'r:' + ids.filter(function (v) { return v !== '0x0000'; }).join(','); }
@@ -68,7 +76,7 @@ function m1lBuildIndex(items, resName) {
         var fw = /^firmware ?(\d+)$/i.exec(String(label).trim());
         if (fw) return addResource('r:firmware' + fw[1], 'FIRMWARE' + fw[1]).key;
         if (groupByNorm[n]) return 'g:' + groupByNorm[n];
-        var anc = m1lGroupOf(itemName);
+        var anc = m1lOwnerGroup(itemName);
         while (anc.indexOf('.') > 0) {
             anc = m1lGroupOf(anc);
             var near = groupByNorm[m1lNorm(anc) + n];
@@ -100,7 +108,7 @@ function m1lBuildIndex(items, resName) {
     var refs = [];
     function add(it, kind, to, text) {
         if (!to) return;
-        var own = m1lGroupOf(it.name);
+        var own = m1lOwnerGroup(it.name);
         if (to.indexOf('g:') === 0 && (m1lAncestorOrSelf(to.slice(2), own) || m1lAncestorOrSelf(own, to.slice(2)))) return;
         refs.push({ from: it.name, item: it, kind: kind, to: to, text: text });
     }
@@ -156,7 +164,7 @@ function m1lEntity(index, key, maxMembers) {
         var count = 0;
         Object.keys(index.groups).forEach(function (r) { if (m1lAncestorOrSelf(q, r)) count += index.groups[r].items.length; });
         return { key: 'g:' + q, title: q.slice(path.length + 1), count: count };
-    });
+    }).filter(function (s) { return s.count > 0; });
     var uses = [];
     g.items.forEach(function (it) {
         (index.byItem[it.name] || []).forEach(function (r) {
@@ -166,7 +174,7 @@ function m1lEntity(index, key, maxMembers) {
     var usedBy = [];
     Object.keys(index.byTarget).forEach(function (t) {
         if (t.indexOf('g:') === 0 && m1lAncestorOrSelf(path, t.slice(2))) {
-            index.byTarget[t].forEach(function (r) { if (!m1lAncestorOrSelf(path, m1lGroupOf(r.from))) usedBy.push(r); });
+            index.byTarget[t].forEach(function (r) { if (!m1lAncestorOrSelf(path, m1lOwnerGroup(r.from))) usedBy.push(r); });
         }
     });
     usedBy.sort(function (a, b) { return a.from < b.from ? -1 : a.from > b.from ? 1 : 0; });
@@ -181,7 +189,55 @@ function m1lValueTarget(index, item) {
     return null;
 }
 
+/** An item of the index by full name, or null. */
+function m1lItem(index, name) {
+    var g = index.groups[m1lOwnerGroup(name)];
+    if (!g) return null;
+    for (var i = 0; i < g.items.length; i++) if (g.items[i].name === name) return g.items[i];
+    return null;
+}
+
+/** Display value of an item: enum label, else the raw value. */
+function m1lText(item) { return item ? (item.label !== undefined && item.label !== null ? item.label : item.value) : null; }
+
+/**
+ * Where a CAN receive custom signal comes from: { bus, id, frame, format, type, startBit, length, multiplier, divisor, adder }
+ * read from its signal group ('CAN.Receive.Custom.Message 1.Signal 2') and message group, or null when the reference is not one.
+ */
+function m1lCanSignal(index, itemName) {
+    var signal = m1lOwnerGroup(itemName);
+    if (!/^CAN\.Receive\./.test(signal)) return null;
+    var message = m1lGroupOf(signal);
+    function v(group, name) { return m1lText(m1lItem(index, group + '.' + name)); }
+    return { signal: signal, message: message, bus: v(message, 'CAN Bus'), id: v(message, 'CAN ID'), frame: v(message, 'Frame'),
+             format: v(message, 'Format'), type: v(signal, 'Data Type'), startBit: v(signal, 'Start Bit'), length: v(signal, 'Length'),
+             multiplier: v(signal, 'Multiplier'), divisor: v(signal, 'Divisor'), adder: v(signal, 'Adder') };
+}
+
+/**
+ * The FIRMWARE0–31 resources and what feeds and reads each: rows of { n, key, title, sources: [{ ref, can }],
+ * targets: [{ ref, usedBy: [ref] }] }. Sources write the channel: CAN receive signals and outputs assigned to it; targets
+ * read it: inputs assigned to it (switches, sensors), each with the settings that in turn reference that input's group.
+ */
+function m1lFirmwareTable(index, count) {
+    var rows = [];
+    for (var n = 0; n < (count || 32); n++) {
+        var key = 'r:firmware' + n, refs = index.byTarget[key] || [], sources = [], targets = [];
+        refs.forEach(function (r) {
+            var can = m1lCanSignal(index, r.from);
+            if (can || (r.kind === 'resource' && (r.item.tags || []).indexOf('Output') >= 0)) sources.push({ ref: r, can: can });
+            else {
+                var owner = m1lOwnerGroup(r.from), e = index.groups[owner] ? m1lEntity(index, 'g:' + owner) : null;
+                targets.push({ ref: r, usedBy: e ? e.usedBy : [] });
+            }
+        });
+        rows.push({ n: n, key: key, title: 'FIRMWARE' + n, sources: sources, targets: targets });
+    }
+    return rows;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { m1lBuildIndex: m1lBuildIndex, m1lEntity: m1lEntity, m1lValueTarget: m1lValueTarget,
-                       m1lTitle: m1lTitle, m1lGroupOf: m1lGroupOf };
+                       m1lTitle: m1lTitle, m1lGroupOf: m1lGroupOf, m1lOwnerGroup: m1lOwnerGroup,
+                       m1lFirmwareTable: m1lFirmwareTable, m1lCanSignal: m1lCanSignal };
 }

@@ -85,6 +85,7 @@
         <button class="tab"        role="tab" aria-selected="false" data-tab="calibrations">Calibrations</button>
         <button class="tab"        role="tab" aria-selected="false" data-tab="firmware">Firmware Features</button>
         <button class="tab"        role="tab" aria-selected="false" data-tab="driver">Driver Switches</button>
+        <button class="tab"        role="tab" aria-selected="false" data-tab="fwio">Firmware I/O</button>
         <button class="tab"        role="tab" aria-selected="false" data-tab="engine">Engine Setup</button>
         <button class="tab"        role="tab" aria-selected="false" data-tab="vehicle">Vehicle Setup</button>
         <button class="tab"        role="tab" aria-selected="false" data-tab="all">All Parameters</button>
@@ -113,6 +114,15 @@
         <h2>Driver Switches</h2>
         <p class="panel-desc">Configuration for the driver-accessible switches: type, storage assignment, and input wiring.</p>
         <div id="tbl-driver"></div>
+      </div>
+
+      <div id="panel-fwio" class="panel" role="tabpanel" hidden>
+        <h2>Firmware I/O Channels</h2>
+        <p class="panel-desc">FIRMWARE0–FIRMWARE31: virtual I/O channels the ECU passes values through. <strong>From</strong> writes the
+          channel (a CAN receive signal or an output); <strong>To</strong> reads it (a switch or sensor input assigned to it);
+          <strong>Then used by</strong> lists the settings that point at that input. Click anything to follow it.</p>
+        <label class="fw-unused"><input type="checkbox" id="fw-show-unused"> Show unused channels</label>
+        <div id="tbl-fwio"></div>
       </div>
 
       <div id="panel-engine" class="panel" role="tabpanel" hidden>

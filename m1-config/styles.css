@@ -87,6 +87,15 @@ tr.grid-row > td { background: #0d0d0d; padding: 10px; }
 .link-btn { background: none; border: none; color: #ff5a6e; cursor: pointer; padding: 0; font: inherit; text-align: left; }
 .link-btn:hover { text-decoration: underline; }
 
+/* Firmware I/O */
+.fw-unused { display: inline-flex; align-items: center; gap: 6px; color: #b0b0b0; font-size: 0.85rem; margin: 0 0 8px; }
+.fw-table td { vertical-align: top; }
+.fw-table td:first-child { white-space: nowrap; }
+.fw-detail { color: #888; font-size: 0.78rem; margin-top: 2px; }
+.fw-detail-inline { color: #888; font-size: 0.78rem; }
+.fw-sep { border: 0; border-top: 1px solid #2a2a2a; margin: 6px 0; }
+.fw-unused-row td { color: #666; }
+
 /* Follow: references between settings */
 .link-btn.follow-name { color: inherit; }
 .link-btn.follow-name:hover { color: #ff5a6e; }

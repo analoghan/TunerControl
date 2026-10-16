@@ -370,6 +370,7 @@ function matchesFilters(item) {
 function renderActiveTab() {
     if (!state.current) return;
     if (state.tab === 'changes') renderChanges();
+    else if (state.tab === 'fwio') renderFirmwareIo();
     else if (state.tab === 'calibrations') renderCalibrations();
     else renderParams(state.tab);
 }
@@ -398,7 +399,7 @@ function paramRow(item, idx) {
             '" aria-expanded="false">Show</button>';
     } else if (item.type === 'io_resource') {
         value = esc(resourceLabel(item.value, state.current));
-        if (m1lValueTarget(links(), item)) value = followLink(m1lValueTarget(links(), item), value, '', 'g:' + m1lGroupOf(item.name));
+        if (m1lValueTarget(links(), item)) value = followLink(m1lValueTarget(links(), item), value, '', 'g:' + m1lOwnerGroup(item.name));
         pin = esc(resourcePin(item.value, state.current) || '');
         if (m1cResourceAssigned(item.value)) {
             value += ' <button class="btn btn-small btn-secondary" data-name-res="' + idx + '" aria-label="Name resource for ' +
@@ -406,12 +407,12 @@ function paramRow(item, idx) {
         }
     } else {
         value = esc(m1cFormatValue(item, item.value, item.label));
-        if (m1lValueTarget(links(), item)) value = followLink(m1lValueTarget(links(), item), value, '', 'g:' + m1lGroupOf(item.name));
+        if (m1lValueTarget(links(), item)) value = followLink(m1lValueTarget(links(), item), value, '', 'g:' + m1lOwnerGroup(item.name));
     }
     if (!item.axes && state.packages.length > 1) {
         value += ' <button class="btn btn-small btn-secondary" data-history="' + idx + '" aria-label="History of ' + esc(item.name) + '">History</button>';
     }
-    return '<tr><td class="param-name">' + followLink('g:' + m1lGroupOf(item.name), esc(item.name), 'follow-name') + '</td><td class="num">' + value + '</td>' +
+    return '<tr><td class="param-name">' + followLink('g:' + m1lOwnerGroup(item.name), esc(item.name), 'follow-name') + '</td><td class="num">' + value + '</td>' +
         '<td class="param-pin">' + pin + '</td><td>' + esc(m1cUnit(item)) + '</td><td class="param-kind">' + esc(item.kind) + '</td></tr>';
 }
 
@@ -537,7 +538,7 @@ var MAX_CELLS_SHOWN = 40;
 function changeHtml(ch, item) {
     var cls = ch.change === 'added' ? ' change-added' : ch.change === 'removed' ? ' change-removed' : '';
     var html = '<div class="change-item' + cls + '"><h3><span class="param-name">' +
-        (links().groups[m1lGroupOf(ch.name)] ? followLink('g:' + m1lGroupOf(ch.name), esc(ch.name), 'follow-name') : esc(ch.name)) + '</span>' +
+        (links().groups[m1lOwnerGroup(ch.name)] ? followLink('g:' + m1lOwnerGroup(ch.name), esc(ch.name), 'follow-name') : esc(ch.name)) + '</span>' +
         '<span class="param-kind">' + esc(ch.change === 'changed' ? (item ? item.kind : '') : ch.change) + '</span></h3>';
     if (ch.change !== 'changed') return html + '</div>';
     var unit = item ? m1cUnit(item) : '';
@@ -677,6 +678,59 @@ $('main-content').addEventListener('click', function (e) {
 });
 
 // =========================================================================
+// Firmware I/O: FIRMWARE0–31, what writes and reads each
+// =========================================================================
+
+function fwNum(v) { return typeof v === 'number' ? String(+v.toPrecision(6)) : esc(v); }
+
+/** One CAN receive signal as "CAN Message 1 · Signal 2" plus bus, ID, bits and scaling. */
+function fwCanHtml(can) {
+    var id = typeof can.id === 'number' ? '0x' + can.id.toString(16).toUpperCase() + ' (' + can.id + ')' : esc(can.id);
+    var len = can.length, scaled = !(can.multiplier === 1 && can.divisor === 1 && can.adder === 0);
+    return followLink('g:' + can.signal, esc('CAN ' + can.message.split('.').pop() + ' · ' + can.signal.split('.').pop())) +
+        '<div class="fw-detail">' + esc(can.bus || '') + ' · ID ' + id + (can.frame && can.frame !== 'Standard' ? ' ' + esc(can.frame) : '') +
+        ' · start bit ' + fwNum(can.startBit) + ', ' + fwNum(len) + ' bit' + (len === 1 ? '' : 's') +
+        (scaled ? ' · ×' + fwNum(can.multiplier) + ' ÷ ' + fwNum(can.divisor) + ' + ' + fwNum(can.adder) : '') + '</div>';
+}
+
+function renderFirmwareIo() {
+    var ix = links(), rows = m1lFirmwareTable(ix), showUnused = $('fw-show-unused').checked;
+    var used = rows.filter(function (r) { return r.sources.length || r.targets.length; });
+    var html = '<div class="result-count">' + used.length + ' of ' + rows.length + ' FIRMWARE channels in use · ' +
+        used.filter(function (r) { return r.sources.length; }).length + ' written · ' +
+        used.filter(function (r) { return r.targets.length; }).length + ' read</div>';
+    var body = rows.filter(function (r) { return showUnused || r.sources.length || r.targets.length; }).map(function (r) {
+        var from = r.sources.map(function (s) {
+            return s.can ? fwCanHtml(s.can) : followLink('g:' + m1lOwnerGroup(s.ref.from), esc(m1lOwnerGroup(s.ref.from))) +
+                '<div class="fw-detail">' + esc(s.ref.from.split('.').pop()) + '</div>';
+        }).join('<hr class="fw-sep">');
+        var to = r.targets.map(function (t) {
+            var owner = m1lOwnerGroup(t.ref.from);
+            return followLink('g:' + owner, esc(owner)) + '<div class="fw-detail">' + esc(t.ref.from.slice(owner.length + 1)) + '</div>';
+        }).join('<hr class="fw-sep">');
+        var then = [];
+        r.targets.forEach(function (t) {
+            t.usedBy.forEach(function (u) {
+                var owner = m1lOwnerGroup(u.from);
+                then.push(followLink('g:' + owner, esc(owner)) + ' <span class="fw-detail-inline">' + esc(refHow(u)) + '</span>');
+            });
+        });
+        return { text: (r.title + ' ' + [r.sources, r.targets].map(function (l) { return l.map(function (x) { return x.ref.from; }).join(' '); }).join(' ') +
+                    ' ' + then.join(' ')).toLowerCase(),
+                 html: '<tr' + (r.sources.length || r.targets.length ? '' : ' class="fw-unused-row"') + '><td class="param-name">' +
+                    followLink(r.key, esc(r.title)) + '</td><td>' + (from || '<span class="muted">—</span>') + '</td><td>' +
+                    (to || '<span class="muted">—</span>') + '</td><td>' + (then.join('<br>') || '<span class="muted">—</span>') + '</td></tr>' };
+    }).filter(function (r) { return !state.search || r.text.indexOf(state.search) >= 0; });
+    html += body.length
+        ? '<div class="table-scroll"><table class="event-table data-table fw-table"><thead><tr><th>Channel</th><th>From (writes it)</th>' +
+          '<th>To (reads it)</th><th>Then used by</th></tr></thead><tbody>' + body.map(function (r) { return r.html; }).join('') + '</tbody></table></div>'
+        : '<p class="muted">No matching FIRMWARE channels.</p>';
+    $('tbl-fwio').innerHTML = html;
+}
+
+$('fw-show-unused').addEventListener('change', function () { if (state.tab === 'fwio') renderFirmwareIo(); });
+
+// =========================================================================
 // Follow: what a setting group or I/O resource uses and what references it
 // =========================================================================
 
@@ -732,7 +786,7 @@ function renderFollow() {
     }
 
     section(e.kind === 'resource' ? 'Assigned or selected by' : 'Referenced by', e.usedBy.length, table(['Setting', 'How', ''], e.usedBy.map(function (r) {
-        return '<tr><td class="param-name">' + followLink('g:' + m1lGroupOf(r.from), esc(r.from)) + '</td><td>' + esc(refHow(r)) +
+        return '<tr><td class="param-name">' + followLink('g:' + m1lOwnerGroup(r.from), esc(r.from)) + '</td><td>' + esc(refHow(r)) +
             '</td><td class="num">' + findBtn(r.from) + '</td></tr>';
     })), e.kind === 'resource' ? 'Nothing in this tune uses it.' : 'Nothing else in this tune points at ' + e.title + '.');
 
