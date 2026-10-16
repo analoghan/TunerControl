@@ -111,5 +111,80 @@ check('mean error and share within tolerance by rpm × MAP, cells with ≥ 20 sa
     eq(g.cells[0][1], null);
 });
 
+console.log('Rail pressure control advice:');
+const RAIL = { tuneName: 'T', pGainPctPerBar: 0.4, iGainPctPerBarS: 1.8, margin: 20, displacement: 0.885,
+    aim: { rpm: [1000, 3000], volume: [0, 400, 800], values: [[20, 40, 60], [30, 80, 150]] } };
+// 100 Hz arrays: time, rpm, press, aim (bar), error (NaN when not running), control (%), volume (per cylinder)
+function rc(n, f) {
+    const a = { time: [], rpm: [], press: [], aim: [], error: [], control: [], volume: [] };
+    for (let i = 0; i < n; i++) {
+        const s = { t: i * 0.01, rpm: 3000, aim: 80, press: 80, ctl: 20, vol: 50 };
+        if (f) f(s, i);
+        a.time.push(s.t); a.rpm.push(s.rpm); a.aim.push(s.aim); a.press.push(s.press); a.control.push(s.ctl); a.volume.push(s.vol);
+        a.error.push(s.rpm >= 400 && s.aim > 0 ? s.press - s.aim : NaN);
+    }
+    return a;
+}
+check('looks up the aim table and finds the fuel volume multiplier', function () {
+    near(F.railAimAt(RAIL.aim, 3000, 400), 80, 1e-9);
+    near(F.railAimAt(RAIL.aim, 2000, 600), (50 + 115) / 2, 1e-9);
+    // Logged volume per cylinder × 8 = volume per cycle: 50 µl × 8 = 400 → 80 bar at 3000 rpm.
+    const r = F.analyzeRailControl(rc(2000), RAIL, 100);
+    eq(r.volumeFactor, 8);
+    near(r.aimMatch, 0, 1e-9);
+});
+check('pressure on aim: no gain advice, error mapped to the table cell', function () {
+    const r = F.analyzeRailControl(rc(2000), RAIL, 100);
+    if (!/^No gain change suggested/.test(r.advice[0].text)) throw new Error(r.advice[0].text);
+    eq(r.cells[1][1].meanError, 0);
+    eq(r.cells[1][1].pctWithin, 100);
+});
+check('brief excursions (ripple, single 10 Hz readings) are ignored', function () {
+    const r = F.analyzeRailControl(rc(3000, (s, i) => { if (i % 100 < 10) s.press = 90; }), RAIL, 100);
+    eq(r.classes.steadyHigh.episodes, 0);
+});
+check('repeated overshoot while the aim rises suggests less proportional gain', function () {
+    // Eight ramps of the aim from 40 to 120 bar over 1 s; the rail runs 10 bar over for 0.4 s near the top of each.
+    const r = F.analyzeRailControl(rc(20000, (s, i) => {
+        const k = i % 2500;
+        s.aim = k < 100 ? 40 + k * 0.8 : 120;
+        s.press = s.aim + (k >= 60 && k < 100 ? 10 : 0);
+    }), RAIL, 100);
+    if (!(r.classes.riseOver.episodes >= 3)) throw new Error('episodes ' + r.classes.riseOver.episodes);
+    const t = r.advice.map(a => a.text).join('\n');
+    if (!/overshoots while the aim rises/.test(t) || !/Proportional Gain to about 0.85×/.test(t)) throw new Error(t);
+    eq(r.suggested.p, 0.85);
+});
+check('above aim with the pump off is reported, with no gain change', function () {
+    const r = F.analyzeRailControl(rc(20000, (s, i) => {
+        const k = i % 2500;
+        s.aim = k < 100 ? 120 - k * 0.8 : 40;
+        if (k < 160) { s.press = 120 - k * 0.3; s.ctl = 0; }
+        else s.press = s.aim;
+    }), RAIL, 100);
+    if (!(r.classes.bleed.seconds > 1)) throw new Error('bleed ' + r.classes.bleed.seconds);
+    const t = r.advice.map(a => a.text).join('\n');
+    if (!/pump already off/.test(t) || !/Gains cannot change this/.test(t)) throw new Error(t);
+    if (!/^No gain change suggested/.test(r.advice[0].text)) throw new Error(r.advice[0].text);
+});
+check('lag and overshoot together: one change at a time, integral first', function () {
+    const r = F.analyzeRailControl(rc(20000, (s, i) => {
+        const k = i % 2500;
+        s.aim = k < 200 ? 40 + k * 0.4 : 120;
+        s.press = k >= 20 && k < 70 ? s.aim - 10 : k >= 150 && k < 200 ? s.aim + 10 : s.aim;
+    }), RAIL, 100);
+    const t = r.advice.map(a => a.text).join('\n');
+    if (!/both lags/.test(t) || !/first reduce the Integral Gain to about 0.85×/.test(t)) throw new Error(t);
+});
+check('flags steep steps in the aim table where the engine ran', function () {
+    const r = F.analyzeRailControl(rc(2000, (s) => { s.vol = 75; s.aim = 115; s.press = 115; }), RAIL, 100);
+    eq(r.steep.map(x => x.rpm + ':' + x.from + '-' + x.to).join(','), '3000:0-400,3000:400-800');
+});
+check('without a tune: kinds of error only', function () {
+    const r = F.analyzeRailControl(rc(2000), null, 100);
+    eq(r.cells, null);
+    eq(r.volumeFactor, null);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 if (failed) process.exitCode = 1;

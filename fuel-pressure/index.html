@@ -22,6 +22,16 @@
         <label for="csv-input">MoTeC Log File:</label>
         <input type="file" id="csv-input" accept=".csv,.ld" aria-describedby="file-error">
       </div>
+      <div class="file-row">
+        <label for="pkg-input">Tune (.m1pkg, optional):</label>
+        <input type="file" id="pkg-input" accept=".m1pkg">
+      </div>
+      <div class="file-row" id="tune-row" hidden>
+        <label for="tune-select">Or a stored tune:</label>
+        <select id="tune-select" class="tune-select"><option value="">— choose a tune from the M1 Config Viewer —</option></select>
+        <span id="tune-hint" class="tune-hint"></span>
+      </div>
+      <p id="tune-status" class="tune-status">No tune chosen: choose one for advice on the rail pressure control gains and aim table.</p>
       <div class="button-row">
         <button id="analyze-btn" disabled aria-label="Analyze selected log file">Analyze</button>
         <a href="help.html" class="help-link-btn">Help</a>
@@ -57,10 +67,15 @@
         <div id="summary-content" class="report-content"></div>
       </div>
 
+      <div id="report-rail" class="report-block" hidden>
+        <h2>Rail Pressure Control</h2>
+        <div id="rail-content" class="report-content"></div>
+      </div>
+
       <div id="report-grid" class="report-block" hidden>
         <h2>Tracking by Engine Speed × MAP</h2>
         <p class="section-note">Mean error (actual − aim) and the share of samples within ±2 bar in each cell, while the engine runs.
-          Cells with fewer than 20 samples are left out.</p>
+          Cells with under 1 s of data are left out.</p>
         <div id="grid-content" class="report-content"></div>
       </div>
 
@@ -122,6 +137,12 @@
   <script src="../lib/hammer.min.js"></script>
   <script src="../lib/chart.umd.min.js"></script>
   <script src="../lib/chartjs-plugin-zoom.min.js"></script>
+  <script src="../lib/xz-decoder.js"></script>
+  <script src="../lib/m1pkg-parser.js"></script>
+  <script src="../m1-config/tune-db.js"></script>
+  <script src="../m1-config/tune-api.js"></script>
+  <script src="../m1-config/tune-source.js"></script>
+  <script src="m1pkg-rail.js"></script>
   <script src="../log-viewer/log-chart.js"></script>
   <script src="../log-viewer/log-panel.js"></script>
   <script src="charts.js"></script>

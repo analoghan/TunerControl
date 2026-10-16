@@ -60,6 +60,7 @@ function handleFileSelect(event) {
         selectedFile = file;
         analyzeBtn.disabled = false;
         fileError.hidden = true;
+        suggestStoredTune(file);
     } else {
         selectedFile = null;
         analyzeBtn.disabled = true;
@@ -118,11 +119,11 @@ function handleAnalyzeClick() {
         if (isLD) {
             lastRunFile = selectedFile;
             logPanelReady = null;
-            worker.postMessage({ type: 'analyze_ld', buffer: reader.result });
+            worker.postMessage({ type: 'analyze_ld', buffer: reader.result, rail: tuneRail });
         } else {
             lastRunFile = selectedFile;
             logPanelReady = null;
-            worker.postMessage({ type: 'analyze', logText: reader.result });
+            worker.postMessage({ type: 'analyze', logText: reader.result, rail: tuneRail });
         }
     };
 
@@ -230,6 +231,7 @@ function renderReport(analysis) {
     renderChannelMapping(analysis.channelMapping);
     renderWarnings(analysis.channelWarnings);
     renderSummary(analysis);
+    renderRailControl(analysis.railControl, analysis.tuneName);
     renderErrorGrid(analysis.errorGrid);
     renderAimSteps(analysis.transientEvents);
     renderPressurePwImpact(analysis.pressurePwImpact);
@@ -327,6 +329,129 @@ function renderSummary(analysis) {
     }
 
     content.appendChild(grid);
+}
+
+// ---------------------------------------------------------------------------
+// Tune (rail pressure aim table and control gains)
+// ---------------------------------------------------------------------------
+
+var tuneRail = null, tunePicked = false, storedTunes = [];
+var pkgInput = document.getElementById('pkg-input');
+var tuneSelect = document.getElementById('tune-select');
+var tuneHint = document.getElementById('tune-hint');
+var tuneStatus = document.getElementById('tune-status');
+
+function setTune(rail, sourceLabel) {
+    tuneRail = rail;
+    if (!rail) { tuneStatus.textContent = 'No tune chosen: choose one for advice on the rail pressure control gains and aim table.'; return; }
+    tuneStatus.textContent = sourceLabel + ': ' + (rail.tuneName || 'tune') + '. Proportional Gain ' + rail.pGainPctPerBar + ' %/bar, Integral Gain ' +
+        rail.iGainPctPerBarS + ' %/(bar·s)' + (rail.aim ? ', aim table ' + rail.aim.rpm.length + ' rpm × ' + rail.aim.volume.length + ' fuel volume sites' : '') +
+        '.' + (rail.notes.length ? ' ' + rail.notes.join(' ') : '');
+}
+
+pkgInput.addEventListener('change', function () {
+    var file = pkgInput.files[0];
+    if (!file) return;
+    tunePicked = true;
+    tuneSelect.value = '';
+    tuneHint.textContent = '';
+    file.arrayBuffer().then(function (buf) { setTune(m1pkgRail(parseM1Pkg(buf)), 'Tune file ' + file.name); })
+        .catch(function (err) { setTune(null); showErrorBanner('Could not read the rail pressure settings from ' + file.name + ': ' + err.message); });
+});
+
+function useStoredTune(id, hint, suggested) {
+    if (!id) { setTune(null); tuneHint.textContent = ''; return Promise.resolve(); }
+    tuneSelect.value = id;
+    tuneHint.textContent = 'Loading…';
+    return tsLoad(id).then(function (pkg) {
+        if (tuneSelect.value !== id) return;
+        pkgInput.value = '';
+        setTune(m1pkgRail(pkg), 'Stored tune');
+        tuneHint.textContent = hint || '';
+        tuneHint.classList.toggle('suggested', !!suggested);
+    }).catch(function (err) {
+        setTune(null);
+        tuneHint.textContent = '';
+        showErrorBanner('Could not read the rail pressure settings from the stored tune: ' + err.message);
+    });
+}
+
+tuneSelect.addEventListener('change', function () {
+    tunePicked = !!tuneSelect.value;
+    useStoredTune(tuneSelect.value, '', false);
+});
+
+function suggestStoredTune(file) {
+    if (!storedTunes.length || tunePicked || typeof tsLogInfo === 'undefined') return;
+    tsLogInfo(file).then(function (info) {
+        var sug = tsSuggest(storedTunes, info);
+        if (sug.tune) return useStoredTune(sug.tune.id, sug.reason, true);
+        tuneHint.textContent = sug.reason;
+        tuneHint.classList.remove('suggested');
+    });
+}
+
+if (typeof tsInit !== 'undefined') {
+    tsInit().then(tsList).then(function (list) {
+        storedTunes = list;
+        if (!list.length) return;
+        list.forEach(function (t) {
+            var o = document.createElement('option');
+            o.value = t.id;
+            o.textContent = tsLabel(t);
+            tuneSelect.appendChild(o);
+        });
+        document.getElementById('tune-row').hidden = false;
+        if (selectedFile) suggestStoredTune(selectedFile);
+    }).catch(function () { /* no stored tunes: the file input still works */ });
+}
+
+var RAIL_SEVERITY_CLASS = { warning: 'rail-warning', info: 'rail-info', good: 'rail-good' };
+
+function renderRailControl(rc, tuneName) {
+    var block = document.getElementById('report-rail'), content = document.getElementById('rail-content');
+    block.hidden = !rc;
+    if (!rc) return;
+    var html = '';
+    if (!tuneName) {
+        html += '<p class="section-note">Choose the tune that was in the ECU (above) to see the current gains and the errors mapped onto the ' +
+            'Fuel Pressure Direct Aim table. The kinds of error below do not need it.</p>';
+    } else {
+        html += '<p class="section-note">Tune ' + fpEsc(tuneName) + (rc.gains ? ': Proportional Gain ' + rc.gains.p + ' %/bar, Integral Gain ' + rc.gains.i +
+            ' %/(bar·s)' + (rc.gains.margin !== null ? ', margin ' + rc.gains.margin + ' bar' : '') : '') + '.' +
+            (rc.volumeFactor ? ' The aim table reproduces the logged aim to within ' + rc.aimMatch + ' bar (median), using the logged fuel volume × ' +
+                rc.volumeFactor + ' as fuel volume per cycle.' : '') + '</p>';
+    }
+    html += rc.advice.map(function (a) { return '<div class="rail-advice ' + (RAIL_SEVERITY_CLASS[a.severity] || '') + '">' + fpEsc(a.text) + '</div>'; }).join('');
+    html += '<h3>Kinds of error</h3><table class="fp-table"><thead><tr><th>Kind</th><th>Time</th><th>Episodes</th><th>Average</th><th>Share of situation</th></tr></thead><tbody>';
+    Object.keys(rc.classes).forEach(function (k) {
+        var c = rc.classes[k];
+        if (!c.seconds) return;
+        html += '<tr><td style="text-align:left">' + fpEsc(c.label) + '</td><td>' + c.seconds + ' s</td><td>' + c.episodes + '</td><td>' + c.meanEpisode +
+            ' s</td><td>' + c.share + '% of ' + (c.context === 'running' ? 'running' : 'aim ' + c.context) + '</td></tr>';
+    });
+    html += '</tbody></table><p class="section-note">Errors count beyond the larger of 2 bar and 5% of the aim, for at least 0.3 s. Time with the ' +
+        'aim steady ' + rc.context.steady + ' s, rising ' + rc.context.rising + ' s, falling ' + rc.context.falling + ' s.</p>';
+    if (rc.cells && tuneRail && tuneRail.aim) {
+        var aim = tuneRail.aim;
+        html += '<h3>Error by Fuel Pressure Direct Aim cell</h3><p class="section-note">Mean error (bar) and share within ±2 bar at each aim table ' +
+            'site (nearest), with the table\'s aim below. Cells with under 1 s of data are faded.</p><div class="fp-scroll"><table class="fp-table">' +
+            '<thead><tr><th>RPM \\ µl/cycle</th>' + aim.volume.map(function (v) { return '<th>' + v + '</th>'; }).join('') + '</tr></thead><tbody>';
+        for (var r = aim.rpm.length - 1; r >= 0; r--) {
+            html += '<tr><th>' + Math.round(aim.rpm[r]) + '</th>';
+            rc.cells[r].forEach(function (c, v) {
+                var tableAim = aim.values[r][v];
+                if (!c) { html += '<td class="empty"><small>' + Math.round(tableAim) + '</small></td>'; return; }
+                if (c.thin) { html += '<td class="thin" title="' + c.seconds + ' s of data"><small>' + Math.round(tableAim) + '</small></td>'; return; }
+                var cls = c.pctWithin >= 95 ? 'good' : c.pctWithin < 80 ? 'bad' : 'warn';
+                html += '<td class="' + cls + '" title="' + c.seconds + ' s; mostly: ' + fpEsc(c.main ? rc.classes[c.main].label : 'on aim') + '">' +
+                    (c.meanError > 0 ? '+' : '') + c.meanError.toFixed(1) + '<br><small>' + c.pctWithin + '% · ' + Math.round(tableAim) + ' bar</small></td>';
+            });
+            html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+    }
+    content.innerHTML = html;
 }
 
 var lastRunFile = null;                      // the log of the shown results, for the log panel

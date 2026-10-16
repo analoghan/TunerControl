@@ -112,8 +112,35 @@
     <p>All statistics use only samples with the engine running (400 rpm or more) and a rail pressure aim above zero:
       with the engine stopped or cranking the pump is not controlling pressure.</p>
 
+    <h2 id="rail-control">Rail Pressure Control (with a tune)</h2>
+    <p>Choose the tune that was in the ECU — a stored tune from the M1 Config Viewer (suggested from the log's date and ECU) or a
+      <code>.m1pkg</code> file. The tool reads <strong>Fuel Pressure Direct Aim</strong> (engine speed × fuel volume per cycle), the Bank 1
+      <strong>Proportional</strong> and <strong>Integral Gains</strong>, the margin and the pump displacement.</p>
+    <h3>Kinds of error</h3>
+    <p>Each stretch where pressure is off aim — by more than the larger of 2 bar and 5% of the aim, for at least 0.3 s — is sorted by what
+      the aim and pump were doing. Shorter excursions are pump-stroke ripple or a single reading of a 10 Hz channel and are ignored.</p>
+    <table>
+      <tr><th>Kind</th><th>What it means</th></tr>
+      <tr><td>Above aim, pump already off</td><td>The aim fell faster than injection can bleed the rail down. No gain can change it; it is mostly
+        harmless because M1 calculates injector flow from the measured rail pressure. Make the aim fall more gradually if it matters.</td></tr>
+      <tr><td>Overshoot while the aim rises</td><td>Too much proportional action (short overshoots) or integral wind-up (long ones).</td></tr>
+      <tr><td>Lagging a rising aim</td><td>Too little proportional action — or the pump is at its limit (see Pump control).</td></tr>
+      <tr><td>Oscillating around a steady aim</td><td>Gains too high, usually the proportional gain.</td></tr>
+      <tr><td>Steady above / below aim</td><td>The integral is slow to remove an offset.</td></tr>
+    </table>
+    <p>Gain advice needs a kind of error to repeat — at least 3 episodes, 1 s in total, and 10% of the time spent in that situation (aim
+      steady, rising or falling) — so a few odd moments in a long log don't change the gains. Suggestions are relative (for example
+      "0.85×"), so they apply whatever unit M1 Tune shows the gain in. Change one thing at a time and re-log. If gain changes don't help with
+      overshoot, check <strong>Pump Displacement</strong>: M1 uses it to work out how much of each stroke to deliver.</p>
+    <h3>Error by aim table cell</h3>
+    <p>The logged fuel volume is per cylinder; the tool finds the multiplier (8 on a V8) that makes the aim table reproduce the logged aim,
+      and shows how closely it does. Each cell shows the mean error and share within ±2 bar at that table site, with the table's aim. Cells
+      with under 1 s of data are faded. Steep steps between neighbouring cells the engine used are listed: they ask the rail to move tens of
+      bar for a small change in load.</p>
+
     <h3>Tracking by Engine Speed × MAP</h3>
-    <p>Mean error and the share of samples within ±2 bar for each 500 rpm × 20 kPa cell (cells with at least 20 samples). It shows where
+    <p>Mean error and the share of samples within ±2 bar for each 500 rpm × 20 kPa cell (cells with at least 1 s of data — rail pressure
+      is often logged at 10 Hz, so fewer samples would be just one or two readings). It shows where
       tracking is poor — for example only at high rpm and boost (capacity) or everywhere at light load (control gains).</p>
 
     <h3>Pump control</h3>

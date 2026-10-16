@@ -284,7 +284,7 @@ var CHANNEL_MAP = {
     map:                ['Inlet Manifold Pressure'],
     inj_duty:           ['Fuel Injector Primary Duty Cycle'],
     fuel_flow:          ['Fuel Flow'],
-    fuel_volume:        ['Fuel Volume'],
+    fuel_volume:        ['Fuel Volume Primary', 'Fuel Volume'],
     throttle_pedal:     ['Throttle Pedal']
 };
 
@@ -340,7 +340,8 @@ var TRANSIENT_THRESHOLD = 20;   // bar change to trigger transient detection
 var TRANSIENT_WINDOW = 0.5;     // seconds window for aim change detection
 var MAX_CHART_POINTS = 5000;
 var MIN_RUNNING_RPM = 400;      // below this the engine is cranking or stopped
-var PUMP_LIMIT_FRACTION = 0.9;  // pump control at ≥ 90 % of its highest value in the log counts as "at its limit"
+var PUMP_LIMIT_FRACTION = 0.9;
+var GRID_MIN_SECONDS = 1;       // a tracking cell needs this much running data to be shown  // pump control at ≥ 90 % of its highest value in the log counts as "at its limit"
 
 /**
  * Factor that converts a pressure channel to bar, from its unit. M1 logs rail pressure in MPa ("MPa", or "dMPa" —
@@ -694,10 +695,12 @@ function generateDiagnostics(stats, transientEvents, errorArr, rpmArr, dutyArr) 
 
 /**
  * Rail pressure tracking by engine speed (500 rpm) × MAP (20 kPa): mean error, share within tolerance, samples.
- * Only cells with at least 20 running samples are reported.
+ * Only cells with at least GRID_MIN_SECONDS of running data are reported (rail pressure is often logged at 10 Hz,
+ * so a handful of base-rate samples is only one or two real readings).
  */
-function buildErrorGrid(errorArr, rpmArr, mapArr) {
+function buildErrorGrid(errorArr, rpmArr, mapArr, sampleRate) {
     if (!mapArr) return null;
+    var minSamples = Math.max(20, Math.round((sampleRate || 100) * GRID_MIN_SECONDS));
     var cells = {};
     for (var i = 0; i < errorArr.length; i++) {
         var e = errorArr[i];
@@ -711,10 +714,10 @@ function buildErrorGrid(errorArr, rpmArr, mapArr) {
     var rpmBins = {}, mapBins = {}, out = {};
     Object.keys(cells).forEach(function (k) {
         var c = cells[k];
-        if (c.n < 20) return;
+        if (c.n < minSamples) return;
         var r = +k.split(',')[0], m = +k.split(',')[1];
         rpmBins[r] = 1; mapBins[m] = 1;
-        out[k] = { samples: c.n, meanError: Math.round(c.sum / c.n * 100) / 100, pctWithin: Math.round(c.within / c.n * 1000) / 10,
+        out[k] = { samples: c.n, seconds: Math.round(c.n / (sampleRate || 100) * 10) / 10, meanError: Math.round(c.sum / c.n * 100) / 100, pctWithin: Math.round(c.within / c.n * 1000) / 10,
                    worstUnder: Math.round(c.min * 10) / 10 };
     });
     var rpms = Object.keys(rpmBins).map(Number).sort(function (x, y) { return x - y; });
@@ -752,7 +755,268 @@ function analyzePumpLimit(controlArr, errorArr) {
              likelyLimited: under >= Math.max(20, running * 0.01) && underAtLimit / under >= 0.5 };
 }
 
-function runAnalysis(columnNames, data, sampleRate, units) {
+// ---------------------------------------------------------------------------
+// Rail pressure control advice (needs the tune's aim table and gains)
+// ---------------------------------------------------------------------------
+
+/** Aim slope (bar/s) above which the aim counts as rising or falling. */
+var RAIL_SLOPE_BAR_S = 10;
+/** Pump control at or below this (%) means the pump is delivering (almost) nothing. */
+var RAIL_PUMP_OFF_PCT = 1;
+/** A class of error needs this many separate episodes, and this much time, before gains are suggested. */
+var RAIL_MIN_EPISODES = 3, RAIL_MIN_SECONDS = 1;
+/** Neighbouring aim cells differing by more than this (bar) are a steep step. */
+var RAIL_STEEP_BAR = 40;
+/** For control advice an error counts when it is beyond the larger of TOLERANCE_BAR and this share of the aim … */
+var RAIL_BAND_PCT = 5;
+/** … for at least this long (s): shorter excursions are pump-stroke ripple or one stray 10 Hz reading. */
+var RAIL_MIN_EPISODE_S = 0.3;
+/** … and a kind of error must take up at least this share (%) of the time spent in its situation (aim steady / rising / falling). */
+var RAIL_MIN_SHARE_PCT = 10;
+var RAIL_CONTEXT = { bleed: 'running', fallLag: 'falling', riseOver: 'rising', riseLag: 'rising', oscillation: 'steady', steadyHigh: 'steady', steadyLow: 'steady' };
+
+var RAIL_CLASSES = {
+    bleed:        'Above aim, pump already off',
+    riseOver:     'Overshoot while the aim rises',
+    riseLag:      'Lagging a rising aim',
+    oscillation:  'Oscillating around a steady aim',
+    steadyHigh:   'Steady above aim',
+    steadyLow:    'Steady below aim',
+    fallLag:      'Above a falling aim (pump still delivering)'
+};
+
+/** Index of the nearest site. */
+function railNearest(sites, v) {
+    var best = 0;
+    for (var i = 1; i < sites.length; i++) if (Math.abs(sites[i] - v) < Math.abs(sites[best] - v)) best = i;
+    return best;
+}
+
+/** Bilinear lookup of the aim table (bar) at engine speed and fuel volume per cycle, clamped at the edges. */
+function railAimAt(aim, rpm, vol) {
+    function w(sites, v) {
+        if (v <= sites[0]) return [[0, 1]];
+        for (var i = 1; i < sites.length; i++) {
+            if (v <= sites[i]) { var f = (v - sites[i - 1]) / ((sites[i] - sites[i - 1]) || 1); return [[i - 1, 1 - f], [i, f]]; }
+        }
+        return [[sites.length - 1, 1]];
+    }
+    var out = 0;
+    w(aim.rpm, rpm).forEach(function (r) { w(aim.volume, vol).forEach(function (v) { out += r[1] * v[1] * aim.values[r[0]][v[0]]; }); });
+    return out;
+}
+
+/**
+ * The logged fuel volume is per cylinder (or per cycle); the aim table uses volume per engine cycle. Finds the
+ * multiplier (1–12) that best reproduces the logged aim from the table, and how closely it does.
+ */
+function railVolumeFactor(aim, rpmArr, volArr, aimArr, errorArr) {
+    var best = null, step = Math.max(1, Math.floor(rpmArr.length / 4000));
+    [1, 2, 3, 4, 5, 6, 8, 10, 12].forEach(function (f) {
+        var diffs = [];
+        for (var i = 0; i < rpmArr.length; i += step) {
+            if (isNaN(errorArr[i]) || isNaN(volArr[i])) continue;
+            diffs.push(Math.abs(railAimAt(aim, rpmArr[i], volArr[i] * f) - aimArr[i]));
+        }
+        if (!diffs.length) return;
+        diffs.sort(function (a, b) { return a - b; });
+        var med = diffs[diffs.length >> 1];
+        if (!best || med < best.medianDiff) best = { factor: f, medianDiff: med };
+    });
+    return best;
+}
+
+/**
+ * Classifies every running sample that is outside ±TOLERANCE_BAR by what the aim and pump were doing, maps the
+ * error onto the aim table's own cells, and turns the result into advice on the gains and the table.
+ *
+ * @param {Object} a - arrays { time, rpm, press, aim, error, control, volume } (bar, %, µl); error NaN when not running
+ * @param {Object} rail - from m1pkgRail
+ * @returns {Object} { volumeFactor, aimMatch, classes: {key: {seconds, episodes, label}}, cells, steep, advice: [{severity, text}] }
+ */
+function analyzeRailControl(a, rail, sampleRate) {
+    var n = a.time.length, dt = 1 / (sampleRate || 100), look = Math.max(1, Math.round(0.5 * (sampleRate || 100)));
+    var res = { volumeFactor: null, aimMatch: null, classes: {}, cells: null, steep: [], advice: [], gains: null, runningSeconds: 0 };
+    Object.keys(RAIL_CLASSES).forEach(function (k) { res.classes[k] = { label: RAIL_CLASSES[k], seconds: 0, episodes: 0, meanEpisode: 0 }; });
+    if (rail) res.gains = { p: rail.pGainPctPerBar, i: rail.iGainPctPerBarS, margin: rail.margin };
+
+    // Per-sample class, for errors beyond the band.
+    var band = function (i) { return Math.max(TOLERANCE_BAR, a.aim[i] * RAIL_BAND_PCT / 100); };
+    var cls = new Array(n), lastSteadyOut = [];   // recent steady-aim excursions { t, sign } for oscillation
+    var context = { steady: 0, rising: 0, falling: 0, running: 0 };   // running time in each aim situation (s)
+    for (var i = 0; i < n; i++) {
+        var e = a.error[i];
+        cls[i] = null;
+        if (isNaN(e)) continue;
+        res.runningSeconds += dt;
+        var j = Math.max(0, i - look), slope = (a.aim[i] - a.aim[j]) / ((a.time[i] - a.time[j]) || 1);
+        context[slope > RAIL_SLOPE_BAR_S ? 'rising' : slope < -RAIL_SLOPE_BAR_S ? 'falling' : 'steady'] += dt;
+        context.running += dt;
+        if (Math.abs(e) <= band(i)) continue;
+        var ctl = a.control ? a.control[i] : NaN;
+        var c;
+        if (e > 0 && ctl <= RAIL_PUMP_OFF_PCT) c = 'bleed';
+        else if (slope > RAIL_SLOPE_BAR_S) c = e > 0 ? 'riseOver' : 'riseLag';
+        else if (slope < -RAIL_SLOPE_BAR_S) c = e > 0 ? 'fallLag' : 'riseLag';
+        else {
+            // Steady aim: oscillating when the excursions have swung to the other side of the band at least twice in 2 s.
+            var sign = e > 0 ? 1 : -1;
+            if (!lastSteadyOut.length || lastSteadyOut[lastSteadyOut.length - 1].sign !== sign) lastSteadyOut.push({ t: a.time[i], sign: sign });
+            while (lastSteadyOut.length && a.time[i] - lastSteadyOut[0].t > 2) lastSteadyOut.shift();
+            c = lastSteadyOut.length >= 3 ? 'oscillation' : e > 0 ? 'steadyHigh' : 'steadyLow';
+        }
+        cls[i] = c;
+    }
+    // Episodes: runs of one class (gaps up to one 10 Hz reading joined); shorter than RAIL_MIN_EPISODE_S are dropped.
+    var gap = Math.round(0.1 * (sampleRate || 100)), start = -1, end = -1, cur = null;
+    function close() {
+        if (cur && (end - start + 1) * dt >= RAIL_MIN_EPISODE_S - 1e-9) {
+            res.classes[cur].episodes++;
+            res.classes[cur].seconds += (end - start + 1) * dt;
+        } else if (cur) {
+            for (var q = start; q <= end; q++) if (cls[q] === cur) cls[q] = null;   // too brief: not counted in the cells either
+        }
+        cur = null;
+    }
+    for (i = 0; i <= n; i++) {
+        var ci = i < n ? cls[i] : null;
+        if (ci && ci === cur) { end = i; continue; }
+        if (!ci && cur && i - end <= gap && i < n) continue;
+        close();
+        if (ci) { cur = ci; start = end = i; }
+    }
+    close();
+    Object.keys(res.classes).forEach(function (k) {
+        var c = res.classes[k], ctxS = context[RAIL_CONTEXT[k]];
+        c.share = ctxS > 0 ? Math.round(c.seconds / ctxS * 1000) / 10 : 0;
+        c.context = RAIL_CONTEXT[k];
+        c.seconds = Math.round(c.seconds * 10) / 10;
+        c.meanEpisode = c.episodes ? Math.round(c.seconds / c.episodes * 100) / 100 : 0;
+    });
+    res.context = { steady: Math.round(context.steady), rising: Math.round(context.rising * 10) / 10, falling: Math.round(context.falling * 10) / 10 };
+    res.runningSeconds = Math.round(res.runningSeconds);
+
+    // Map errors onto the aim table's cells (nearest site), when the tune and a fuel volume channel are there.
+    if (rail && rail.aim && a.volume) {
+        var vf = railVolumeFactor(rail.aim, a.rpm, a.volume, a.aim, a.error);
+        if (vf) {
+            res.volumeFactor = vf.factor;
+            res.aimMatch = Math.round(vf.medianDiff * 10) / 10;
+            var R = rail.aim.rpm.length, V = rail.aim.volume.length, acc = [];
+            for (var r = 0; r < R; r++) { acc.push([]); for (var v = 0; v < V; v++) acc[r].push({ n: 0, sum: 0, within: 0, cls: {} }); }
+            for (i = 0; i < n; i++) {
+                if (isNaN(a.error[i]) || isNaN(a.volume[i])) continue;
+                var cell = acc[railNearest(rail.aim.rpm, a.rpm[i])][railNearest(rail.aim.volume, a.volume[i] * vf.factor)];
+                cell.n++; cell.sum += a.error[i];
+                if (Math.abs(a.error[i]) <= TOLERANCE_BAR) cell.within++;
+                else if (cls[i]) cell.cls[cls[i]] = (cell.cls[cls[i]] || 0) + 1;
+            }
+            var minN = Math.max(20, Math.round((sampleRate || 100) * GRID_MIN_SECONDS));
+            res.cells = acc.map(function (row) {
+                return row.map(function (c) {
+                    if (c.n < minN) return c.n ? { seconds: Math.round(c.n * dt * 10) / 10, thin: true } : null;
+                    var top = null;
+                    Object.keys(c.cls).forEach(function (k) { if (!top || c.cls[k] > c.cls[top]) top = k; });
+                    return { seconds: Math.round(c.n * dt * 10) / 10, meanError: Math.round(c.sum / c.n * 10) / 10,
+                             pctWithin: Math.round(c.within / c.n * 1000) / 10, main: top };
+                });
+            });
+
+            // Steep steps in the aim table next to cells the engine used: the rail must move fast there.
+            for (r = 0; r < R; r++) {
+                for (v = 0; v < V - 1; v++) {
+                    var used = res.cells[r][v] || res.cells[r][v + 1];
+                    var step = rail.aim.values[r][v + 1] - rail.aim.values[r][v];
+                    if (used && Math.abs(step) > RAIL_STEEP_BAR) {
+                        res.steep.push({ rpm: rail.aim.rpm[r], from: rail.aim.volume[v], to: rail.aim.volume[v + 1],
+                                         aimFrom: rail.aim.values[r][v], aimTo: rail.aim.values[r][v + 1] });
+                    }
+                }
+            }
+        }
+    }
+
+    // Advice.
+    function enough(k) {
+        var c = res.classes[k];
+        return c.episodes >= RAIL_MIN_EPISODES && c.seconds >= RAIL_MIN_SECONDS && c.share >= RAIL_MIN_SHARE_PCT;
+    }
+    function desc(k) {
+        var c = res.classes[k];
+        return c.seconds + ' s in ' + c.episodes + ' episodes, ' + c.share + '% of the time ' +
+            (c.context === 'running' ? 'the engine ran' : 'the aim was ' + c.context);
+    }
+    var gainText = rail && rail.pGainPctPerBar !== null ? ' (now ' + rail.pGainPctPerBar + ' %/bar)' : '';
+    var iText = rail && rail.iGainPctPerBarS !== null ? ' (now ' + rail.iGainPctPerBarS + ' %/(bar·s))' : '';
+    var suggestedP = 1, suggestedI = 1;
+
+    var ff = rail && rail.displacement ? ' If gain changes do not help, check Pump Displacement (' + rail.displacement + ' cc): M1 uses it to ' +
+        'work out how much of each pump stroke to deliver, so a value smaller than the real pump makes it deliver too much.' : '';
+    if (enough('oscillation')) {
+        suggestedP = 0.75;
+        res.advice.push({ severity: 'warning', text: 'The rail oscillates around a steady aim (' + desc('oscillation') + '). Reduce the Proportional ' +
+            'Gain to about 0.75× its value' + gainText + '; if it still oscillates slowly, reduce the Integral Gain too.' });
+    } else if (enough('riseOver') && enough('riseLag')) {
+        suggestedP = 1.15; suggestedI = 0.85;
+        res.advice.push({ severity: 'warning', text: 'As the aim rises, pressure both lags (' + desc('riseLag') + ') and overshoots (' + desc('riseOver') +
+            '). A late response followed by an overshoot usually means the integral builds up while the pressure lags, then carries it ' +
+            'past the aim. Change one thing at a time: first reduce the Integral Gain to about 0.85×' + iText + ' and re-log; if it still lags, ' +
+            'raise the Proportional Gain to about 1.15×' + gainText + '.' + ff });
+    } else if (enough('riseOver')) {
+        var longOver = res.classes.riseOver.meanEpisode > 0.5;
+        if (longOver) suggestedI = 0.8; else suggestedP = 0.85;
+        res.advice.push({ severity: 'warning', text: 'Pressure overshoots while the aim rises (' + desc('riseOver') + ', ' +
+            res.classes.riseOver.meanEpisode + ' s each on average). ' + (longOver
+                ? 'Long overshoots point at the integral winding up during the rise: reduce the Integral Gain to about 0.8×' + iText + '.'
+                : 'Short overshoots point at too much proportional action: reduce the Proportional Gain to about 0.85×' + gainText + '.') + ff });
+    } else if (enough('riseLag')) {
+        suggestedP = 1.2;
+        res.advice.push({ severity: 'info', text: 'Pressure lags a rising aim (' + desc('riseLag') + '). If the pump control was not near its ' +
+            'maximum then, raise the Proportional Gain to about 1.2×' + gainText + '.' });
+    }
+    if (enough('steadyLow') || enough('steadyHigh')) {
+        var k2 = res.classes.steadyLow.seconds >= res.classes.steadyHigh.seconds ? 'steadyLow' : 'steadyHigh';
+        suggestedI = Math.max(suggestedI, 1.25);
+        res.advice.push({ severity: 'info', text: 'Pressure stays ' + (k2 === 'steadyLow' ? 'below' : 'above') + ' a steady aim (' + desc(k2) +
+            '): the integral is slow to remove the offset. Raise the Integral Gain to about 1.25×' + iText + '.' });
+    }
+    if (res.classes.bleed.seconds > 0) {
+        res.advice.push({ severity: 'info', text: res.classes.bleed.seconds + ' s above aim with the pump already off (' +
+            res.classes.bleed.episodes + ' episodes): the aim fell faster than injection can bleed the rail down. Gains cannot change this. ' +
+            'It is mostly harmless because M1 calculates injector flow from the measured rail pressure; if it matters, make the aim fall ' +
+            'more gradually where these happen' + (res.steep.length ? ' (see the steep steps below)' : '') + '.' });
+    }
+    if (res.steep.length) {
+        res.advice.push({ severity: 'info', text: 'Steep steps in Fuel Pressure Direct Aim where the engine ran: ' + res.steep.slice(0, 6).map(function (st) {
+            return st.rpm + ' rpm, ' + st.from + '→' + st.to + ' µl: ' + st.aimFrom + '→' + st.aimTo + ' bar';
+        }).join('; ') + '. A step this large asks the rail to move by tens of bar as the load changes slightly; spreading it over ' +
+            'more sites makes the aim easier to follow.' });
+    }
+    var anyGainAdvice = ['oscillation', 'riseOver', 'riseLag', 'steadyLow', 'steadyHigh'].some(enough);
+    if (!anyGainAdvice) {
+        res.advice.unshift({ severity: 'good', text: 'No gain change suggested: no kind of control error is common enough. Each needs ' +
+            RAIL_MIN_EPISODES + ' or more episodes of at least ' + RAIL_MIN_EPISODE_S + ' s beyond the larger of ' + TOLERANCE_BAR + ' bar and ' +
+            RAIL_BAND_PCT + '% of the aim, and at least ' + RAIL_MIN_SHARE_PCT + '% of the time spent in that situation (aim steady ' +
+            res.context.steady + ' s, rising ' + res.context.rising + ' s, falling ' + res.context.falling + ' s in this log). ' +
+            'To tune the high-load response, log several pulls — and rail pressure at 50–100 Hz if you can.' });
+    }
+    // Say plainly when the log has (almost) no time at high rail pressure: the advice above is then about light load only.
+    if (res.cells && rail && rail.aim) {
+        var highSeconds = 0, highAim = 100;
+        res.cells.forEach(function (row, r) {
+            row.forEach(function (c, v) { if (c && rail.aim.values[r][v] >= highAim) highSeconds += c.seconds; });
+        });
+        if (highSeconds < 10) {
+            res.advice.push({ severity: 'info', text: 'Only ' + (Math.round(highSeconds * 10) / 10) + ' s of this log is in aim table cells of ' + highAim +
+                ' bar or more, so it says little about high-load (boost) control; the advice above mostly reflects light load and transitions. ' +
+                'Log several full pulls to judge the high-load response.' });
+        }
+    }
+    res.suggested = { p: suggestedP, i: suggestedI };
+    return res;
+}
+
+function runAnalysis(columnNames, data, sampleRate, units, rail) {
     // Step 1: Resolve channels
     self.postMessage({ type: 'progress', phase: 'Resolving channels...', percent: 10 });
     var resolution = resolveChannels(columnNames);
@@ -822,8 +1086,11 @@ function runAnalysis(columnNames, data, sampleRate, units) {
     // Step 6: Histogram, grid, pump
     self.postMessage({ type: 'progress', phase: 'Building error histogram...', percent: 75 });
     var errorHistogram = buildErrorHistogram(errorArr);
-    var errorGrid = buildErrorGrid(errorArr, rpmArr, mapArr);
+    var errorGrid = buildErrorGrid(errorArr, rpmArr, mapArr, sampleRate);
     var pump = analyzePumpLimit(controlArr, errorArr);
+    var volArr = channels.fuel_volume !== -1 ? col(channels.fuel_volume) : null;
+    var railControl = analyzeRailControl({ time: timeArr, rpm: rpmArr, press: pressArr, aim: aimArr, error: errorArr,
+                                           control: controlArr, volume: volArr }, rail || null, sampleRate);
 
     // Step 7: Diagnostics
     self.postMessage({ type: 'progress', phase: 'Generating diagnostics...', percent: 85 });
@@ -919,6 +1186,8 @@ function runAnalysis(columnNames, data, sampleRate, units) {
             errorByFlow: errorVsFlow ? downsampleScatter(errorVsFlow, 500) : null,
             errorGrid: errorGrid,
             pump: pump,
+            railControl: railControl,
+            tuneName: rail ? rail.tuneName : null,
             pressurePwImpact: pressurePwImpact,
             diagnostics: diagnostics
         },
@@ -978,7 +1247,7 @@ if (typeof self !== 'undefined') self.onmessage = function(event) {
                 if (dt > 0) sampleRate = 1.0 / dt;
             }
 
-            runAnalysis(columnNames, data, sampleRate, unitsRow);
+            runAnalysis(columnNames, data, sampleRate, unitsRow, msg.rail);
 
         } else if (msg.type === 'analyze_ld') {
             // Binary .ld input
@@ -990,7 +1259,7 @@ if (typeof self !== 'undefined') self.onmessage = function(event) {
             });
 
             var sampleRate = result.maxFreq || 1;
-            runAnalysis(result.columnNames, result.data, sampleRate, result.units);
+            runAnalysis(result.columnNames, result.data, sampleRate, result.units, msg.rail);
         }
     } catch (err) {
         self.postMessage({ type: 'error', message: err.message || 'Unknown error during analysis.' });
@@ -999,6 +1268,6 @@ if (typeof self !== 'undefined') self.onmessage = function(event) {
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { pressureToBar: pressureToBar, computeErrorStats: computeErrorStats, detectTransientEvents: detectTransientEvents,
-        buildErrorGrid: buildErrorGrid, analyzePumpLimit: analyzePumpLimit, generateDiagnostics: generateDiagnostics, runAnalysis: runAnalysis,
+        buildErrorGrid: buildErrorGrid, analyzeRailControl: analyzeRailControl, railAimAt: railAimAt, analyzePumpLimit: analyzePumpLimit, generateDiagnostics: generateDiagnostics, runAnalysis: runAnalysis,
         resolveChannels: resolveChannels, parseLdFile: parseLdFile };
 }
