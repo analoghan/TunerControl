@@ -130,7 +130,8 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
         last remaining revision can't be deleted — use <strong>Delete</strong> to remove the whole harness.</li>
       <li><strong>Export .xlsx</strong> writes the harness in the same block layout, pictures included, so it can be re-imported or edited in
         Excel. Each block gets a dark title bar, shaded header lines and column headings, and alternating light/dark rows; pictures sit
-        in column I, scaled down to at most 320 × 240 px, with the next block starting below them.</li>
+        in column I, scaled down to at most 320 × 240 px, with the next block starting below them. Sheets with no connectors or splices left
+        on them (after moving or renaming) are not written.</li>
       <li><strong>Export PDF</strong> builds a printable report and opens the print dialog — choose <strong>Save as PDF</strong> as the
         printer. Pick what goes in: the overview and system diagrams, the checks, each connector's and splice's table (with any problems
         beside the row), a wiring diagram per connector or splice, their pictures, and the tune comparison (all pins; choose a tune on that

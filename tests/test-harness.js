@@ -579,6 +579,15 @@ describe('Harness — systems of harnesses', function () {
     assert.deepEqual(harnessToWorkbook(model).map(function (s) { return s.name; }), ['Main', 'Subharness', 'Connectors']);
   });
 
+  it('leaves sheets with no blocks out of the exported workbook', function () {
+    var model = { name: 'C', sheets: [{ name: 'Old', kind: 'connectors' }, { name: 'Main', kind: 'connectors' }, { name: 'Splices', kind: 'splices' }],
+      splices: [], connectors: [Object.assign(conn('A', '', '', []), { sheet: 'Main' })] };
+    assert.deepEqual(harnessToWorkbook(model).map(function (s) { return s.name; }), ['Main'], '"Old" (emptied by moving A) and "Splices" are gone');
+    assert.deepEqual(harnessSheetGroups(model).map(function (s) { return s.name; }), ['Old', 'Main', 'Splices'], 'the harness itself keeps them');
+    var empty = harnessToWorkbook({ name: 'New harness', sheets: [{ name: 'Old', kind: 'connectors' }], connectors: [], splices: [] });
+    assert.deepEqual(empty.map(function (s) { return [s.name, s.rows.length]; }), [['New harness', 0]], 'an empty harness still gets one sheet');
+  });
+
   it('splits a sheet that holds the other half of a mating pair into its own harness', function () {
     var model = { name: 'C', sheets: [{ name: 'Main', kind: 'connectors' }, { name: 'Sub', kind: 'connectors' }], splices: [], connectors: [
       Object.assign(conn('TRANS', 'DTM06', 'DTM04', []), { sheet: 'Main' }), Object.assign(conn('A', '', '', []), { sheet: 'Main' }),

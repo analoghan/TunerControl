@@ -206,13 +206,16 @@ function harnessSheetGroups(model) {
 var HARNESS_XLSX_IMAGE_MAX = { w: 320, h: 240 };
 
 /**
- * Sheets for writeXlsx() in the same block layout harnessFromWorkbook() reads, styled: a dark title row per block, shaded
+ * Sheets for writeXlsx() in the same block layout harnessFromWorkbook() reads (one per sheet that has blocks), styled: a dark title row per block, shaded
  * header lines, headings and alternating light/dark rows in the pin and wire tables. `imageData` maps image id → bytes
  * (Uint8Array); images without bytes there are left out. Pictures go in column I next to their block, at most
  * HARNESS_XLSX_IMAGE_MAX in size, and the next block starts below them.
  */
 function harnessToWorkbook(model, imageData) {
-    return harnessSheetGroups(model).map(function (sheet) {
+    // Sheets with no connectors or splices are left out (a workbook still needs one sheet).
+    var groups = harnessSheetGroups(model).filter(function (g) { return g.connectors.length || g.splices.length; });
+    if (!groups.length) groups = [{ name: harnessText(model.name) || 'Connectors', connectors: [], splices: [] }];
+    return groups.map(function (sheet) {
         var rows = [], bold = [], images = [], styles = {};
         function fill(style, n) { var a = []; for (var i = 0; i < n; i++) a.push(style); return a; }
         function block(title, header, columns, records, fields, blockImages) {
