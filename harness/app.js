@@ -197,11 +197,16 @@ function exportXlsx() {
 }
 
 function downloadXlsx(bytes) {
-    var blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    downloadFile(bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xlsx');
+}
+
+/** Save bytes or text as "<harness name> rev N<suffix>". */
+function downloadFile(data, type, suffix) {
+    var blob = new Blob([data], { type: type });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = ($('name-input').value.trim() || 'harness').replace(/[\\/:*?"<>|]+/g, '_') +
-        (state.revision ? ' rev ' + state.revision : '') + '.xlsx';
+        (state.revision ? ' rev ' + state.revision : '') + suffix;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
 }
@@ -276,11 +281,12 @@ function selectTab(tab) {
         t.classList.toggle('active', on);
         t.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    ['connectors', 'splices', 'diagram', 'system', 'can', 'checks', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
+    ['connectors', 'splices', 'diagram', 'system', 'can', 'checks', 'build', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
     if (tab === 'system') renderSystem();
     if (tab === 'connectors' && state.model) renderConnectorEditor();   // CAN pin tags may have changed
     if (tab === 'can') renderCan();
     if (tab === 'checks') renderChecks();
+    if (tab === 'build') renderBuild();
     if (tab === 'diagram') renderDiagram();
     if (tab === 'tune') loadTunes();
 }
@@ -297,6 +303,7 @@ function renderAll() {
     if (state.tab === 'diagram') renderDiagram();
     if (state.tab === 'system') renderSystem();
     if (state.tab === 'can') renderCan();
+    if (state.tab === 'build') renderBuild();
 }
 
 // =========================================================================
@@ -682,6 +689,7 @@ function renameBlock(block, isConnector, newId, input) {
         refs.forEach(function (r) { r[0][r[1]] = isConnector ? newId + r[2].slice(oldId.length) : newId; });
     }
     block.id = newId;
+    if (isConnector) harnessRenameLengths(state.model, oldId, newId);
     if (isConnector && state.system && canRenameConnector(canNetworks(), currentKey(), oldId, newId)) canSave();
     if (isConnector) state.selConnector = newId; else state.selSplice = newId;
     showError('');
@@ -1281,7 +1289,7 @@ var PDF_OPTIONS_KEY = 'harnessPdfOptions';
 var PDF_PARTS = [['overview', 'Overview diagram'], ['system', 'System overview diagram'], ['checks', 'Checks'],
     ['connectors', 'Connector pin tables'], ['connectorDiagrams', 'A wiring diagram for each connector'],
     ['splices', 'Splice tables'], ['spliceDiagrams', 'A wiring diagram for each splice'], ['pictures', 'Pictures'],
-    ['can', 'CAN networks (tables and diagrams)'], ['tune', 'Tune comparison (all pins)']];
+    ['can', 'CAN networks (tables and diagrams)'], ['cutlist', 'Cut list'], ['bom', 'Bill of materials'], ['tune', 'Tune comparison (all pins)']];
 
 function pdfSavedOptions() {
     try { return JSON.parse(localStorage.getItem(PDF_OPTIONS_KEY) || 'null'); } catch (e) { return null; }
@@ -1446,6 +1454,11 @@ function exportPdf() {
                 sections.push({ title: i === 0 ? 'CAN networks' : '', html: pdfCanHtml(net), newPage: sections.length > 0 });
             });
         }
+        if (opts.cutlist || opts.bom) {
+            var wires = buildWires();
+            if (opts.cutlist) sections.push({ title: 'Cut list', html: buildCutListHtml(wires, true), newPage: sections.length > 0 });
+            if (opts.bom) sections.push({ title: 'Bill of materials', html: buildBomHtml(harnessBom(state.model, wires)), newPage: sections.length > 0 });
+        }
         if (opts.tune) {
             sections.push({ title: 'Tune comparison — ' + (state.tunePkg.tuneName || state.tunePkg.fileName || ''), html: tuneCompareHtml('all'),
                             newPage: sections.length > 0 });
@@ -1461,6 +1474,100 @@ function exportPdf() {
 }
 
 $('pdf-btn').addEventListener('click', function () { if (state.model) openPdfDialog(); });
+
+// =========================================================================
+// Cut list & BOM (harness-build.js). Wire lengths are optional, saved in the model as wireLengths / lengthUnit.
+// =========================================================================
+
+/** The cut list in "from" order (natural sort, so M142.A.2 comes before M142.A.10). */
+function buildWires() {
+    return harnessCutList(state.model).sort(function (a, b) {
+        return a.from.label.localeCompare(b.from.label, undefined, { numeric: true, sensitivity: 'base' });
+    });
+}
+
+function buildEndHtml(end, forPdf) {
+    if (!end.label) return '<span class="muted">—</span>';
+    var text = esc(end.label), note = end.kind === 'outside' ? ' <span class="hint">(outside this harness)</span>' : '';
+    if (forPdf || (end.kind !== 'pin' && end.kind !== 'splice')) return text + note;
+    return '<button class="link-btn param-name" data-build-goto="' + esc(end.label) + '">' + text + '</button>' + note;
+}
+
+function buildCutListHtml(wires, forPdf) {
+    var unit = state.model.lengthUnit || 'mm';
+    return '<div class="table-scroll"><table class="event-table data-table build-table"><thead><tr><th>#</th><th>From</th><th>Terminal</th><th>To</th>' +
+        '<th>Terminal</th><th>Wire part number</th><th>Wire</th><th>Length (' + esc(unit) + ')</th><th>Function</th><th>Note</th></tr></thead><tbody>' +
+        wires.map(function (w, i) {
+            var len = forPdf ? (w.length === null ? '' : esc(w.length)) : '<input type="number" class="text-input build-length" min="0" step="any" data-key="' +
+                esc(w.key) + '" value="' + (w.length === null ? '' : esc(w.length)) + '" aria-label="Length of wire ' + (i + 1) + '" placeholder="—">';
+            return '<tr' + (w.problem ? ' class="build-problem"' : '') + '><td>' + (i + 1) + '</td><td>' + buildEndHtml(w.from, forPdf) + '</td><td>' + esc(w.from.terminal) +
+                '</td><td>' + buildEndHtml(w.to, forPdf) + '</td><td>' + esc(w.to.kind === 'terminal' ? '' : w.to.terminal) + '</td><td class="param-name">' +
+                esc(w.wirePn) + '</td><td>' + esc(w.wire) + '</td><td class="num">' + len + '</td><td>' + esc(w.function) + '</td><td>' +
+                (w.problem ? markerHtml([{ severity: 'warning', message: w.problem }]) + ' ' + esc(w.problem) : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+}
+
+function buildBomHtml(bom) {
+    var unit = bom.lengthUnit;
+    function table(title, list, withLength) {
+        if (!list.length) return '';
+        return '<h3>' + esc(title) + '</h3><div class="table-scroll"><table class="event-table data-table build-bom"><thead><tr><th>Part</th><th class="num">Quantity</th>' +
+            (withLength ? '<th class="num">Total length</th>' : '') + '<th>Used in</th></tr></thead><tbody>' + list.map(function (x) {
+                var used = x.used.slice(0, 12).join(', ') + (x.used.length > 12 ? ' and ' + (x.used.length - 12) + ' more' : '');
+                return '<tr><td class="param-name">' + esc(x.part) + '</td><td class="num">' + x.count + '</td>' + (withLength ? '<td class="num">' +
+                    (x.length ? esc(+x.length.toFixed(3) + ' ' + unit) + (x.missingLengths ? ' <span class="hint">+ ' + x.missingLengths + ' without a length</span>' : '')
+                        : '<span class="hint">—</span>') + '</td>' : '') + '<td class="hint">' + esc(used) + '</td></tr>';
+            }).join('') + '</tbody></table></div>';
+    }
+    var notes = [];
+    if (bom.unnamed.connectors) notes.push(bom.unnamed.connectors + ' connector' + (bom.unnamed.connectors === 1 ? ' has' : 's have') + ' no part number');
+    if (bom.unnamed.terminals) notes.push(bom.unnamed.terminals + ' wired cavit' + (bom.unnamed.terminals === 1 ? 'y has' : 'ies have') + ' no terminal part number');
+    return table('Connectors', bom.connectors) + table('Boots', bom.boots) + table('Splices', bom.splices) + table('Terminals', bom.terminals) +
+        table('Cavity plugs', bom.plugs) + table('Wire ends', bom.ends) + table('Wire', bom.wire, true) +
+        (notes.length ? '<p class="hint">Not counted: ' + esc(notes.join('; ')) + '.</p>' : '');
+}
+
+function buildSummaryText(wires) {
+    var withLen = wires.filter(function (w) { return w.length !== null; }).length, problems = wires.filter(function (w) { return w.problem; }).length;
+    return wires.length + ' wires · ' + (withLen ? withLen + ' with a length' : 'no lengths entered (optional)') +
+        (problems ? ' · ' + problems + ' to check' : '');
+}
+
+function renderBuild() {
+    var el = $('build');
+    if (!state.model) { el.innerHTML = ''; return; }
+    var wires = buildWires(), unit = state.model.lengthUnit || 'mm';
+    el.innerHTML = '<div class="build-bar"><span id="build-summary" class="hint">' + esc(buildSummaryText(wires)) + '</span><span class="spacer"></span>' +
+        '<label class="hint">Length unit <select id="build-unit" aria-label="Length unit">' + HB_LENGTH_UNITS.map(function (u) {
+            return '<option' + (u === unit ? ' selected' : '') + '>' + u + '</option>'; }).join('') + '</select></label>' +
+        '<button class="btn btn-small btn-secondary" id="build-cut-csv">Download cut list (.csv)</button>' +
+        '<button class="btn btn-small btn-secondary" id="build-bom-csv">Download BOM (.csv)</button></div>' +
+        '<h3>Cut list</h3>' + (wires.length ? buildCutListHtml(wires, false) : '<p class="muted">No wires yet.</p>') +
+        '<h3 class="build-bom-head">Bill of materials</h3><div id="build-bom">' + buildBomHtml(harnessBom(state.model, wires)) + '</div>';
+}
+
+$('build').addEventListener('input', function (e) {
+    var t = e.target;
+    if (!t.classList.contains('build-length')) return;
+    harnessSetLength(state.model, t.getAttribute('data-key'), t.value);
+    setDirty(true);
+    var wires = buildWires();
+    $('build-summary').textContent = buildSummaryText(wires);
+    $('build-bom').innerHTML = buildBomHtml(harnessBom(state.model, wires));
+});
+$('build').addEventListener('change', function (e) {
+    if (e.target.id !== 'build-unit') return;
+    harnessSetLengthUnit(state.model, e.target.value);
+    setDirty(true);
+    renderBuild();
+});
+$('build').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    if (b.id === 'build-cut-csv') downloadFile(harnessCutListCsv(state.model, buildWires()), 'text/csv', ' cut list.csv');
+    else if (b.id === 'build-bom-csv') downloadFile(harnessBomCsv(state.model, harnessBom(state.model, buildWires())), 'text/csv', ' BOM.csv');
+    else if (b.hasAttribute('data-build-goto')) gotoEndpoint(b.getAttribute('data-build-goto'));
+});
 $('pdf-dialog').addEventListener('close', function () {
     if ($('pdf-dialog').returnValue !== 'print') return;
     exportPdf().catch(function (err) { showError('Could not build the PDF: ' + err.message); });

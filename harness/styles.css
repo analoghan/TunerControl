@@ -174,3 +174,10 @@ tr.issue-row li.issue-warning .issue-text { color: #ffb74d; }
 }
 .user-label { display: inline-block; background: rgba(76,175,80,0.15); border: 1px solid rgba(76,175,80,0.45); color: #9be09f; border-radius: 10px;
   padding: 0 8px; font-size: 0.75rem; font-family: inherit; line-height: 1.5; white-space: normal; }
+.build-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 0 10px; }
+.build-bar .spacer { flex: 1; }
+.build-bar select { margin-left: 6px; }
+.build-table .build-length { width: 80px; padding: 2px 6px; text-align: right; }
+.build-table td { white-space: nowrap; }
+.build-table tr.build-problem td { background: rgba(255,152,0,0.06); }
+#build h3 { font-size: 0.95rem; color: #fff; margin: 16px 0 6px; }

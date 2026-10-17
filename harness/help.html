@@ -51,6 +51,7 @@
       <li><a href="#diagrams">Diagrams and tracing</a></li>
       <li><a href="#systems">Systems: harnesses that plug together</a></li>
       <li><a href="#can">CAN networks</a></li>
+      <li><a href="#build">Cut list &amp; BOM</a></li>
       <li><a href="#tune">Tune comparison</a></li>
       <li><a href="#workflow">Suggested workflow</a></li>
       <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -262,6 +263,20 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
       power feed is drawn as its own box with those two wires into its hub, or next to the device it feeds. Hub links show CAN, power or both; power
       shared with another network is a <em>Power link</em> box beside the hub (click it to go to that hub). Linked pins are written beside
       the wires (<em>H M142.D.17</em>). Click a device, feed or hub to edit it. Export PDF can include the networks' tables and diagrams.</p>
+
+    <h2 id="build">Cut list &amp; BOM</h2>
+    <p>The <strong>Cut list &amp; BOM</strong> tab lists every wire once — a cavity and the cavity or splice end it goes to are two rows of
+      the workbook but one wire — with both ends, their terminals, the wire part number and description, and the function. Wires to an
+      Eyelet, Battery, Device or Unterminated end, and wires that leave the harness, have one end. A row is marked when the two ends list
+      different wires (wording such as <em>Shielded 3</em> vs <em>3 Wire Shielded</em> doesn't count), the other end lists no wire, or the
+      other end is missing.</p>
+    <p>The bill of materials counts connector housings, boots, splices, terminals (one per wired cavity), cavity plugs (cavities whose wire
+      says <em>Sealing Pin</em> or plug), eyelets and battery terminals, and wire per part number.</p>
+    <p><strong>Wire lengths are optional.</strong> Leave them blank or fill in the ones you know; the wire totals add up only the lengths that
+      are entered and say how many are missing. Choose the unit (mm, cm, in, ft) — lengths are kept in millimetres, so changing the unit only
+      changes how they are shown. Lengths are saved with the harness revision, follow a connector rename, and are not written to the .xlsx.</p>
+    <p><strong>Download cut list</strong> and <strong>Download BOM</strong> save CSV files (they open in Excel), and Export PDF can include
+      both.</p>
 
     <h2 id="tune">Tune comparison</h2>
     <p>Pick a tune imported in the <a href="../m1-config/index.html">M1 Config Viewer</a>. Every I/O assignment in the tune is turned into its ECU

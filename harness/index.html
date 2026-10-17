@@ -68,6 +68,7 @@
         <button class="tab" role="tab" aria-selected="false" data-tab="system">System <span class="count" id="count-system"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="can">CAN networks <span class="count" id="count-can"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="checks">Checks <span class="count" id="count-checks"></span></button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="build">Cut list &amp; BOM</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="tune">Tune comparison</button>
       </div>
 
@@ -122,6 +123,14 @@
         <h2>Checks</h2>
         <p class="panel-desc">Every remote connection is followed to the other end: references that point nowhere, ends that disagree, splices that don't list their wires, and wire part numbers that differ between ends.</p>
         <div id="checks"></div>
+      </div>
+
+      <div id="panel-build" class="panel" role="tabpanel" hidden>
+        <h2>Cut list &amp; BOM</h2>
+        <p class="panel-desc">One row per wire — both ends, their terminals, the wire's part number and description — and the parts the harness needs.
+          Wire lengths are optional: leave them blank, or fill in the ones you know; totals use only the lengths that are entered. Lengths are saved
+          with the harness (not in the .xlsx).</p>
+        <div id="build"></div>
       </div>
 
       <div id="panel-tune" class="panel" role="tabpanel" hidden>
@@ -203,6 +212,7 @@
   <script src="harness-diagram.js"></script>
   <script src="harness-system.js"></script>
   <script src="harness-can.js"></script>
+  <script src="harness-build.js"></script>
   <script src="harness-store.js"></script>
   <script src="../lib/print-report.js"></script>
   <script src="app.js"></script>
