@@ -2,9 +2,12 @@
  * harness/harness-can.js — CAN data networks of a harness system: devices, hubs, terminators, checks and diagrams.
  *
  * A system keeps canNetworks: [network] next to its harnesses (harness-store.js saves them with the system).
- *   network:    { id, name, bitrate (kbit/s, '' = not set), notes, hubs, hubLinks, devices, terminators }
+ *   network:    { id, name, bitrate (kbit/s, '' = not set), notes, hubs, hubLinks, devices, terminators, feeds, powerLinks }
  *   hubs:       [{ id, name, notes }]
- *   hubLinks:   [{ a: hubId, b: hubId }]                 hubs wired to each other (order doesn't matter)
+ *   hubLinks:   [{ a: hubId, b: hubId, data, power }]    hubs wired to each other (order doesn't matter): data = CAN-H/L
+ *                                                        between them, power = +12 V / ground (both true when not stored)
+ *   powerLinks: [{ hub, net, to }]                       power shared with hub `to` of another network `net` (power hubs that
+ *                                                        split the data buses); kept on both networks
  *   devices:    [{ id, name, hub (hubId or ''), termination (true = its 120 Ω resistor is on), bitrate ('' = the network's),
  *                  power (true = powered through the CAN connection), pins, notes }]
  *   terminators:[{ id, name, hub }]                      standalone 120 Ω terminators plugged into a hub
@@ -16,7 +19,7 @@
  *
  * canNetworkChecks(net, members) → [{ severity, where, message }]; with members ([{ id, name, model }], the system's harnesses)
  *   the linked pins are checked too.
- * canNetworkDiagram(net) → { svg, width, height }: hubs in a row, their devices and terminators above and below, every
+ * canNetworkDiagram(net, nets) → { svg, width, height }: hubs in a row, their devices and terminators above and below, every
  *   connection drawn as a twisted pair (CAN-H / CAN-L), power wires (+12 V / ground) alongside where a connection carries power. Uses the SVG helpers of harness-diagram.js.
  */
 
@@ -54,13 +57,63 @@ function canHub(net, id) {
     return id ? net.hubs.filter(function (h) { return h.id === id; })[0] || null : null;
 }
 
-function canHubLinked(net, a, b) {
-    return net.hubLinks.some(function (l) { return (l.a === a && l.b === b) || (l.a === b && l.b === a); });
+function canHubLink(net, a, b) {
+    return net.hubLinks.filter(function (l) { return (l.a === a && l.b === b) || (l.a === b && l.b === a); })[0] || null;
 }
 
-function canSetHubLink(net, a, b, on) {
-    net.hubLinks = net.hubLinks.filter(function (l) { return !((l.a === a && l.b === b) || (l.a === b && l.b === a)); });
-    if (on && a !== b) net.hubLinks.push({ a: a, b: b });
+/** CAN data between two hubs. */
+function canHubLinked(net, a, b) {
+    var l = canHubLink(net, a, b);
+    return !!l && l.data !== false;
+}
+
+/** Power between two hubs. */
+function canHubPowerLinked(net, a, b) {
+    var l = canHubLink(net, a, b);
+    return !!l && l.power !== false;
+}
+
+/** Wire two hubs together, or unwire them: what = 'data', 'power' or (not given) both. A link with neither goes. */
+function canSetHubLink(net, a, b, on, what) {
+    if (a === b) return;
+    var l = canHubLink(net, a, b);
+    if (!l) {
+        if (!on) return;
+        l = { a: a, b: b, data: false, power: false };
+        net.hubLinks.push(l);
+    }
+    if (what !== 'power') l.data = !!on;
+    if (what !== 'data') l.power = !!on;
+    if (l.data === false && l.power === false) net.hubLinks = net.hubLinks.filter(function (x) { return x !== l; });
+}
+
+/** Power links of a network to hubs of other networks (older networks have none stored). */
+function canPowerLinks(net) {
+    if (!net.powerLinks) net.powerLinks = [];
+    return net.powerLinks;
+}
+
+function canPowerLinked(net, hubId, other, otherHub) {
+    return canPowerLinks(net).some(function (l) { return l.hub === hubId && l.net === other.id && l.to === otherHub; });
+}
+
+/** Share power between a hub of one network and a hub of another (stored on both). */
+function canSetPowerLink(net, hubId, other, otherHub, on) {
+    if (net === other) return;
+    function set(n, h, o, oh) {
+        n.powerLinks = canPowerLinks(n).filter(function (l) { return !(l.hub === h && l.net === o.id && l.to === oh); });
+        if (on) n.powerLinks.push({ hub: h, net: o.id, to: oh });
+    }
+    set(net, hubId, other, otherHub);
+    set(other, otherHub, net, hubId);
+}
+
+/** Drop the other networks' power links to a network (or to one of its hubs) that is being removed. */
+function canForgetPowerLinks(nets, netId, hubId) {
+    nets.forEach(function (n) {
+        if (!n.powerLinks) return;
+        n.powerLinks = n.powerLinks.filter(function (l) { return !(l.net === netId && (!hubId || l.to === hubId)); });
+    });
 }
 
 /** Power feeds (older networks have none stored). */
@@ -78,9 +131,14 @@ function canFeedTarget(net, feed) {
     return d ? { device: d } : null;
 }
 
-/** Remove a hub and everything that pointed at it (links; devices, terminators and feeds become unconnected). */
-function canRemoveHub(net, id) {
+/**
+ * Remove a hub and everything that pointed at it (links, and power links from other networks when nets is given; devices,
+ * terminators and feeds become unconnected).
+ */
+function canRemoveHub(net, id, nets) {
     net.hubs = net.hubs.filter(function (h) { return h.id !== id; });
+    if (net.powerLinks) net.powerLinks = net.powerLinks.filter(function (l) { return l.hub !== id; });
+    if (nets) canForgetPowerLinks(nets, net.id, id);
     net.hubLinks = net.hubLinks.filter(function (l) { return l.a !== id && l.b !== id; });
     net.devices.concat(net.terminators).forEach(function (d) { if (d.hub === id) d.hub = ''; });
     canFeeds(net).forEach(function (f) { if (f.to === 'hub:' + id) f.to = ''; });
@@ -93,23 +151,46 @@ function canRemoveDevice(net, id) {
 }
 
 /**
- * Which hub groups and devices have power: power entering a hub reaches every hub wired to it and every powered device
- * on them; power fed into a device reaches its hub's group when the device is powered through its CAN connection.
- * Returns { groups: { groupIndex: true }, devices: { id: true } }.
+ * Which hubs and devices have power. Power entering a hub reaches every hub joined to it by power — hub links that carry
+ * power and, given nets (all the system's networks), power links to hubs of other networks — and every powered device on
+ * them. Power fed into a device reaches its hub when the device is powered through its CAN connection.
+ * Returns { hubs: { hubId: true }, devices: { id: true } } for this network.
  */
-function canPowered(net) {
-    var groups = canHubGroups(net), groupOf = {}, out = { groups: {}, devices: {} };
-    groups.forEach(function (g, i) { g.forEach(function (id) { groupOf[id] = i; }); });
-    canFeeds(net).forEach(function (f) {
-        var to = canFeedTarget(net, f);
-        if (!to) return;
-        if (to.hub) out.groups[groupOf[to.hub.id]] = true;
-        else {
-            out.devices[to.device.id] = true;
-            if (to.device.power && groupOf[to.device.hub] !== undefined) out.groups[groupOf[to.device.hub]] = true;
-        }
+function canPowered(net, nets) {
+    nets = nets && nets.indexOf(net) >= 0 ? nets : [net];
+    var byId = {}, seen = {}, queue = [];
+    nets.forEach(function (n) { byId[n.id] = n; });
+    function reach(n, hubId) {
+        var k = n.id + '|' + hubId;
+        if (!canHub(n, hubId) || seen[k]) return;
+        seen[k] = true;
+        queue.push([n, hubId]);
+    }
+    var fedDevices = {};
+    nets.forEach(function (n) {
+        canFeeds(n).forEach(function (f) {
+            var to = canFeedTarget(n, f);
+            if (!to) return;
+            if (to.hub) reach(n, to.hub.id);
+            else {
+                fedDevices[n.id + '|' + to.device.id] = true;
+                if (to.device.power) reach(n, to.device.hub);
+            }
+        });
     });
-    net.devices.forEach(function (d) { if (d.power && groupOf[d.hub] !== undefined && out.groups[groupOf[d.hub]]) out.devices[d.id] = true; });
+    while (queue.length) {
+        var q = queue.shift(), n = q[0], id = q[1];
+        n.hubLinks.forEach(function (l) {
+            if (l.power === false) return;
+            if (l.a === id) reach(n, l.b); else if (l.b === id) reach(n, l.a);
+        });
+        canPowerLinks(n).forEach(function (l) { if (l.hub === id && byId[l.net]) reach(byId[l.net], l.to); });
+    }
+    var out = { hubs: {}, devices: {} };
+    net.hubs.forEach(function (h) { if (seen[net.id + '|' + h.id]) out.hubs[h.id] = true; });
+    net.devices.forEach(function (d) {
+        if (fedDevices[net.id + '|' + d.id] || (d.power && out.hubs[d.hub])) out.devices[d.id] = true;
+    });
     return out;
 }
 
@@ -130,6 +211,7 @@ function canHubGroups(net) {
             var id = queue.shift();
             group.push(id);
             net.hubLinks.forEach(function (l) {
+                if (l.data === false) return;   // power only: not the same bus
                 var other = l.a === id ? l.b : l.b === id ? l.a : null;
                 if (other && !seen[other] && canHub(net, other)) { seen[other] = true; queue.push(other); }
             });
@@ -139,7 +221,7 @@ function canHubGroups(net) {
     return groups;
 }
 
-function canNetworkChecks(net, members) {
+function canNetworkChecks(net, members, nets) {
     var out = [];
     function add(severity, where, message) { out.push({ severity: severity, where: where, message: message }); }
     var speed = canBitrate(net.bitrate), n = canTerminations(net);
@@ -169,21 +251,30 @@ function canNetworkChecks(net, members) {
         if (net.hubs.length && !canHub(net, t.hub)) add('warning', t.name, 'Terminator not plugged into a hub, so it does not count.');
     });
     if (!net.hubs.length && net.devices.length) add('warning', net.name, 'No hubs: add one and connect the devices to it to show the wiring.');
-    var powered = canPowered(net);
+    var powered = canPowered(net, nets), byId = {};
+    (nets || []).forEach(function (n) { byId[n.id] = n; });
     canFeeds(net).forEach(function (f) {
         if (!canFeedTarget(net, f)) add('warning', f.name || net.name, 'Power feed not connected to a hub or device.');
         if (!String(f.source || '').trim()) add('warning', f.name || net.name, 'Power feed has no source — say where the power comes from.');
     });
     net.devices.forEach(function (d) {
         if (d.power && !powered.devices[d.id]) {
-            add('warning', d.name, canFeeds(net).length ? 'Powered through its CAN connection, but no power feed reaches its hub.'
+            add('warning', d.name, canFeeds(net).length || canPowerLinks(net).length ? 'Powered through its CAN connection, but no power feed reaches its hub.'
                 : 'Powered through its CAN connection, but the network has no power feed.');
         }
     });
+    if (nets) {
+        canPowerLinks(net).forEach(function (l) {
+            var h = canHub(net, l.hub), o = byId[l.net];
+            if (!h || !o || !canHub(o, l.to)) add('warning', h ? h.name : net.name, 'Power link to a hub in another network that no longer exists.');
+        });
+    }
     var groups = canHubGroups(net);
     groups.slice(1).forEach(function (g) {
+        var powerOnly = net.hubLinks.some(function (l) { return l.data === false && (g.indexOf(l.a) >= 0) !== (g.indexOf(l.b) >= 0); });
         add('error', g.map(function (id) { return canHub(net, id).name; }).join(', '),
-            'Not wired to ' + canHub(net, groups[0][0]).name + ' — the hubs of one network must all be connected.');
+            'Not wired to ' + canHub(net, groups[0][0]).name + ' for CAN — the hubs of one network must all be connected.' +
+            (powerOnly ? ' A power-only link doesn\'t carry CAN; if these hubs are a separate bus, put them in a network of their own and link their power.' : ''));
     });
     return members ? out.concat(canPinChecks(net, members)) : out;
 }
@@ -376,7 +467,7 @@ function canPowerPair(pts, title) {
     return '<g class="can-power"><title>' + hdEsc(title) + '</title>' + line(side(-2.6), CAN_PLUS_COLOR) + line(side(2.6), CAN_GND_COLOR) + '</g>';
 }
 
-var CAN_ITEM_HEIGHT = { device: CAN_ITEM_H, term: CAN_TERM_H, feed: CAN_TERM_H };
+var CAN_ITEM_HEIGHT = { device: CAN_ITEM_H, term: CAN_TERM_H, feed: CAN_TERM_H, xpower: CAN_TERM_H };
 var CAN_PIN_SHORT = { h: 'H', l: 'L', plus: '+', gnd: '\u2212' };
 
 /** Linked pins of some of an item's wires: [{ role, text }]. */
@@ -408,12 +499,16 @@ function canPinTitle(title, item, roles) {
     return title + (lines.length ? ' — ' + lines.map(function (l) { return CAN_PIN_LABELS[l.role] + ' ' + l.text; }).join(', ') : '');
 }
 
-/** A device, terminator or power feed box; (x, y) is its top-left corner. */
+/**
+ * A device, terminator, power feed or power link box (xpower: power shared with a hub of another network, item = { id: that
+ * hub's id, name, source: "CAN 2 · Rear hub" }); (x, y) is its top-left corner.
+ */
 function canItemBox(net, item, type, x, y) {
     var h = CAN_ITEM_HEIGHT[type], out = '<g class="can-item can-' + type + '" data-can-item="' + hdEsc(item.id) + '"><title>' +
-        hdEsc(item.name + (type === 'feed' && item.source ? ' — from ' + item.source : '') + (item.notes ? ' — ' + item.notes : '')) + '</title>' +
+        hdEsc(type === 'xpower' ? 'Power shared with ' + item.source + ' (no CAN data)'
+            : item.name + (type === 'feed' && item.source ? ' — from ' + item.source : '') + (item.notes ? ' — ' + item.notes : '')) + '</title>' +
         '<rect class="box" x="' + x + '" y="' + y + '" width="' + CAN_ITEM_W + '" height="' + h + '" rx="4"/>' +
-        '<rect class="' + (type === 'feed' ? 'can-feed-head' : 'head') + '" x="' + x + '" y="' + y + '" width="' + CAN_ITEM_W + '" height="20" rx="4"/>' +
+        '<rect class="' + (type === 'feed' || type === 'xpower' ? 'can-feed-head' : 'head') + '" x="' + x + '" y="' + y + '" width="' + CAN_ITEM_W + '" height="20" rx="4"/>' +
         '<text class="title" x="' + (x + 8) + '" y="' + (y + 14) + '">' + hdEsc(hdClip(item.name || '(no name)', 23)) + '</text>';
     if (type === 'term') {
         // Resistor zig-zag and its value.
@@ -424,6 +519,8 @@ function canItemBox(net, item, type, x, y) {
             '<text x="' + (x + 58) + '" y="' + (y + 36) + '">120 Ω terminator</text>';
     } else if (type === 'feed') {
         out += '<text x="' + (x + 8) + '" y="' + (y + 36) + '">' + hdEsc(hdClip('Power from ' + (item.source || '?'), 28)) + '</text>';
+    } else if (type === 'xpower') {
+        out += '<text x="' + (x + 8) + '" y="' + (y + 36) + '">' + hdEsc(hdClip('Shared with ' + item.source, 28)) + '</text>';
     } else {
         var own = canBitrate(item.bitrate), net0 = canBitrate(net.bitrate), speed = own || net0, bad = own && net0 && own !== net0;
         out += '<text class="' + (bad ? 'can-bad' : 'dim') + '" x="' + (x + 8) + '" y="' + (y + 36) + '">' + hdEsc(speed ? canBitrateText(speed) : 'speed not set') + '</text>' +
@@ -436,9 +533,10 @@ function canItemBox(net, item, type, x, y) {
     return out + '</g>';
 }
 
-function canNetworkDiagram(net) {
+/** nets: all the system's networks, for power shared with them (optional). */
+function canNetworkDiagram(net, nets) {
     var body = '', wires = '', groups = canHubGroups(net), order = [].concat.apply([], groups), feeds = canFeeds(net);
-    var attached = {}, loose = [], toDevice = {}, boxes = {}, FEED_STEP = CAN_TERM_H + 36;
+    var attached = {}, loose = [], toDevice = {}, boxes = {}, FEED_STEP = CAN_TERM_H + 36, powered = canPowered(net, nets);
     order.forEach(function (id) { attached[id] = []; });
     net.devices.forEach(function (d) { (attached[d.hub] || loose).push({ item: d, type: 'device' }); });
     net.terminators.forEach(function (t) { (attached[t.hub] || loose).push({ item: t, type: 'term' }); });
@@ -447,6 +545,14 @@ function canNetworkDiagram(net) {
         if (to && to.hub) attached[to.hub.id].push({ item: f, type: 'feed' });
         else if (to && to.device) (toDevice[to.device.id] = toDevice[to.device.id] || []).push(f);
         else loose.push({ item: f, type: 'feed' });
+    });
+    // Power shared with hubs of other networks: a box beside the hub with two power wires and no CAN.
+    canPowerLinks(net).forEach(function (l) {
+        var o = (nets || []).filter(function (n) { return n.id === l.net; })[0], oh = o ? canHub(o, l.to) : null;
+        if (attached[l.hub]) {
+            attached[l.hub].push({ item: { id: l.to, name: 'Power link', source: oh ? (o.name || 'CAN') + ' · ' + (oh.name || 'hub') : 'another network' },
+                type: 'xpower' });
+        }
     });
 
     // Each hub gets a column wide enough for the items above and below it. Feeds into a device sit next to it (above a device
@@ -474,7 +580,9 @@ function canNetworkDiagram(net) {
         });
     }
     order.forEach(function (id) {
-        var c = cols[id], hub = canHub(net, id), links = net.hubLinks.filter(function (l) { return l.a === id || l.b === id; }).length;
+        var c = cols[id], hub = canHub(net, id), mine = net.hubLinks.filter(function (l) { return l.a === id || l.b === id; });
+        var links = mine.filter(function (l) { return l.data !== false; }).length, powerOnly = mine.length - links;
+        var shared = c.up.concat(c.down).filter(function (it) { return it.type === 'xpower'; }).length;
         function place(list, y, above) {
             var span = list.length * CAN_ITEM_W + (list.length - 1) * CAN_GAP, x0 = c.x + (c.w - span) / 2;
             list.forEach(function (it, i) {
@@ -483,7 +591,9 @@ function canNetworkDiagram(net) {
                 body += canItemBox(net, it.item, it.type, ix, iy);
                 boxes[it.item.id] = { x: ix, y: iy, h: h, above: above };
                 var title = it.item.name + ' ⇄ ' + hub.name, mid = (y0 + y1) / 2;
-                if (it.type === 'feed') {
+                if (it.type === 'xpower') {
+                    wires += canPowerPair(canSample([cx, y0], [cx, y1]), 'Power shared with ' + it.item.source);
+                } else if (it.type === 'feed') {
                     wires += canPowerPair(canSample([cx, y0], [cx, y1]), canPinTitle(title + ' (power)', it.item, ['plus', 'gnd']));
                     body += canPinLabels(it.item, ['plus', 'gnd'], cx + 9, mid, 'start');
                 } else if (it.type === 'device') {
@@ -505,21 +615,29 @@ function canNetworkDiagram(net) {
         body += '<g class="can-hub" data-can-item="' + hdEsc(id) + '"><title>' + hdEsc(hub.name + (hub.notes ? ' — ' + hub.notes : '')) + '</title>' +
             '<rect class="can-hub-box" x="' + c.x + '" y="' + hubY + '" width="' + c.w + '" height="' + CAN_HUB_H + '" rx="6"/>' +
             '<text class="title" x="' + (c.x + 10) + '" y="' + (hubY + 17) + '">' + hdEsc(hub.name || '(no name)') + '</text>' +
-            '<text class="sub" x="' + (c.x + 10) + '" y="' + (hubY + 31) + '">Hub · ' + (c.up.length + c.down.length) + ' connected' +
-            (links ? ' · ' + links + ' hub link' + (links === 1 ? '' : 's') : '') + '</text></g>';
+            '<text class="sub" x="' + (c.x + 10) + '" y="' + (hubY + 31) + '">' + hdEsc(hdClip(['Hub · ' + (c.up.length + c.down.length - shared) + ' connected',
+                links ? links + ' hub link' + (links === 1 ? '' : 's') : '', powerOnly + shared ? powerOnly + shared + ' power link' + (powerOnly + shared === 1 ? '' : 's') : '',
+                powered.hubs[id] ? 'powered' : ''].filter(Boolean).join(' · '), Math.floor((c.w - 20) / 5.2))) + '</text></g>';
     });
-    // Hub links: neighbours in the row straight across; others as a curve under everything.
+    // Hub links: neighbours in the row straight across; others as a curve under everything. A link carrying CAN is a twisted pair,
+    // with the power wires beside it when power reaches it; a power-only link is the power wires alone.
     var under = 0, linkY = hubY + CAN_HUB_H / 2;
     net.hubLinks.forEach(function (l) {
         var a = cols[l.a], b = cols[l.b];
         if (!a || !b) return;
         if (a.x > b.x) { var t = a; a = b; b = t; }
-        var title = canHub(net, l.a).name + ' ⇄ ' + canHub(net, l.b).name;
+        var title = canHub(net, l.a).name + ' ⇄ ' + canHub(net, l.b).name, data = l.data !== false;
+        var power = l.power !== false && (!data || powered.hubs[l.a]), off = data ? 12 : 0;
         if (Math.abs(order.indexOf(l.a) - order.indexOf(l.b)) === 1) {
-            wires += canTwistedPair(canSample([a.x + a.w, linkY], [b.x, linkY]), title);
+            if (data) wires += canTwistedPair(canSample([a.x + a.w, linkY], [b.x, linkY]), title);
+            if (power) wires += canPowerPair(canSample([a.x + a.w, linkY + off], [b.x, linkY + off]), title + (data ? ' (power)' : ' (power only, no CAN)'));
         } else {
             var dip = maxBottom + 40 + 24 * under++, p0 = [a.x + a.w / 2, hubY + CAN_HUB_H], p1 = [b.x + b.w / 2, hubY + CAN_HUB_H];
-            wires += canTwistedPair(canSample(p0, p1, [p0[0], dip], [p1[0], dip]), title);
+            if (data) wires += canTwistedPair(canSample(p0, p1, [p0[0], dip], [p1[0], dip]), title);
+            if (power) {
+                var q0 = [p0[0] + off, p0[1]], q1 = [p1[0] - off, p1[1]];
+                wires += canPowerPair(canSample(q0, q1, [q0[0], dip - off], [q1[0], dip - off]), title + (data ? ' (power)' : ' (power only, no CAN)'));
+            }
         }
     });
     var height = Math.max(maxBottom + 30 + 24 * under, hubY + CAN_HUB_H + 30);
@@ -558,6 +676,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = { canNewNetwork: canNewNetwork, canBitrate: canBitrate, canBitrateText: canBitrateText, canTerminations: canTerminations,
         canHubGroups: canHubGroups, canNetworkChecks: canNetworkChecks, canNetworkDiagram: canNetworkDiagram, canSetHubLink: canSetHubLink,
         canRemoveHub: canRemoveHub, canRemoveDevice: canRemoveDevice, canFeeds: canFeeds, canFeedTarget: canFeedTarget,
-        canPowered: canPowered, canPowerPair: canPowerPair, canPinRoles: canPinRoles, canFunctionRole: canFunctionRole, canNetBus: canNetBus,
+        canPowered: canPowered, canPowerPair: canPowerPair, canHubLink: canHubLink, canHubPowerLinked: canHubPowerLinked,
+        canPowerLinks: canPowerLinks, canPowerLinked: canPowerLinked, canSetPowerLink: canSetPowerLink, canForgetPowerLinks: canForgetPowerLinks, canPinRoles: canPinRoles, canFunctionRole: canFunctionRole, canNetBus: canNetBus,
         canPinText: canPinText, canFindPin: canFindPin, canSuggestPins: canSuggestPins, canRenameConnector: canRenameConnector, canPinUses: canPinUses, canDeviceBitrate: canDeviceBitrate, canTwistedPair: canTwistedPair, canSample: canSample };
 }

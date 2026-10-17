@@ -136,7 +136,7 @@ tr.issue-row li.issue-warning .issue-text { color: #ffb74d; }
 .can-table .text-input { width: 100%; min-width: 90px; padding: 3px 6px; font-size: 0.85rem; }
 .can-table .can-bitrate { width: 110px; }
 .can-table select { font-size: 0.85rem; }
-.can-link { margin-right: 10px; }
+.can-link { display: inline-block; white-space: nowrap; margin-right: 14px; }
 .can-network > .btn { margin-top: 6px; }
 .can-pins-btn { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, Menlo, Consolas, monospace; }
 .can-pins-row > td { background: rgba(255,255,255,0.03); padding: 6px 10px 10px !important; }

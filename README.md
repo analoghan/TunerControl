@@ -107,7 +107,8 @@ Design and check wiring harnesses built around the M1 ECU.
 - Wiring diagrams drawn from the harness: per connector or splice (every wire in its real colour/gauge to the pins it reaches, through splices to their far ends, with the connector's pictures) and an overview of all connectors and splices with wire counts; click through to the editor, download as SVG
 - Harness systems: harnesses that plug into each other (e.g. engine + chassis + transmission sub-harness) are grouped; connectors with the same name and mating part numbers are joined cavity to cavity automatically (or linked by hand), with checks across each join, circuit tracing through every harness, a system overview diagram and a whole-system tune comparison. Importing a workbook offers to split a sheet that holds the other half of a mating pair into its own harness, and to join a system with harnesses it plugs into
 - **CAN networks** in a harness system: devices, hubs and how the hubs connect, termination on/off per device, standalone
-  terminators, speed per network and device, power through the CAN connection, power feeds into a hub or device, and links from each wire to its harness connector pin
+  terminators, speed per network and device, power through the CAN connection, power feeds into a hub or device, hub links that carry CAN, power or both (and power shared between networks, for power hubs that split the
+  data buses), and links from each wire to its harness connector pin
   (filled in from pin functions such as "CAN 1 High"). Checks the termination count (two, 60 Ω), speed mismatches, unconnected hubs or
   devices and linked pins that are missing or don't match, and draws each network with twisted-pair (CAN-H/CAN-L) wiring
 - **Export PDF:** overview and system diagrams, checks, connector and splice tables with their problems, per-block diagrams, pictures and

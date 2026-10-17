@@ -154,7 +154,7 @@ describe('CAN networks — power', function () {
 
   it('draws two power wires beside a powered connection and into the network from each feed', function () {
     var d = canNetworkDiagram(powered());
-    assert.equal((d.svg.match(/class="can-power"/g) || []).length, 2, 'Dash link + the feed into hub B');
+    assert.equal((d.svg.match(/class="can-power"/g) || []).length, 3, 'Dash link, the feed into hub B, and the powered hub link A ⇄ B');
     assert.equal((d.svg.match(/class="can-pair"/g) || []).length, 5, 'CAN pairs unchanged; a feed has no CAN wires');
     assert.ok(d.svg.indexOf('Power from PDM30 OUT 5') >= 0);
     assert.ok(d.svg.indexOf('>PWR<') >= 0, 'badge on the powered device');
@@ -264,5 +264,86 @@ describe('CAN networks — harness pins', function () {
     assert.ok(svg.indexOf('>+ DASH.3<') >= 0 && svg.indexOf('>− DASH.4<') >= 0, 'power pins');
     assert.ok(svg.indexOf('M142 ⇄ Hub A — CAN-H M142.C.14, CAN-L M142.C.15') >= 0, 'tooltip');
     assert.equal(canPinText({ connector: 'M142.C', cavity: '14' }), 'M142.C.14');
+  });
+});
+
+describe('CAN networks — power links', function () {
+  function twoBuses() {
+    // CAN 1: the hcNet bus, fed on hub B. CAN 2: hub X (a second bus in the same power hub as B) with a keypad powered over CAN.
+    var a = hcNet();
+    a.feeds = [{ id: 'f1', name: 'Switched 12V', source: 'PDM30 OUT 5', to: 'hub:B', notes: '' }];
+    var b = canNewNetwork('CAN 2');
+    b.hubs = [{ id: 'X', name: 'Hub X', notes: '' }];
+    b.devices = [{ id: 'k', name: 'Keypad', hub: 'X', termination: true, bitrate: '', power: true, notes: '' },
+                 { id: 'e', name: 'E888', hub: 'X', termination: true, bitrate: '', notes: '' }];
+    return [a, b];
+  }
+
+  it('a link can carry CAN, power or both', function () {
+    var n = hcNet();
+    assert.ok(canHubLinked(n, 'A', 'B') && canHubPowerLinked(n, 'A', 'B'), 'an older link carries both');
+    canSetHubLink(n, 'A', 'B', false, 'data');
+    assert.ok(!canHubLinked(n, 'A', 'B') && canHubPowerLinked(n, 'A', 'B'), 'power only');
+    canSetHubLink(n, 'A', 'B', false, 'power');
+    assert.equal(n.hubLinks.length, 0, 'a link with neither goes');
+    canSetHubLink(n, 'A', 'B', true, 'power');
+    assert.deepEqual(n.hubLinks, [{ a: 'A', b: 'B', data: false, power: true }]);
+  });
+
+  it('power crosses a power-only link, CAN does not — and the reverse', function () {
+    var n = hcNet();
+    n.devices[1].power = true;   // Dash on hub A
+    n.feeds = [{ id: 'f1', name: 'Feed', source: 'PDM', to: 'hub:B', notes: '' }];
+    canSetHubLink(n, 'A', 'B', false, 'data');
+    assert.ok(canPowered(n).devices.d2, 'power reaches A');
+    var split = hcFind(canNetworkChecks(n), 'for CAN')[0];
+    assert.equal(split.severity, 'error');
+    assert.ok(split.message.indexOf('power-only link') >= 0, 'explains the split');
+    n = hcNet(); n.devices[1].power = true; n.feeds = [{ id: 'f1', name: 'Feed', source: 'PDM', to: 'hub:B', notes: '' }];
+    canSetHubLink(n, 'A', 'B', false, 'power');
+    assert.ok(!canPowered(n).devices.d2, 'a CAN-only link carries no power');
+    assert.equal(hcFind(canNetworkChecks(n), 'no power feed reaches its hub').length, 1);
+  });
+
+  it('shares power with a hub of another network', function () {
+    var nets = twoBuses(), a = nets[0], b = nets[1];
+    assert.equal(hcFind(canNetworkChecks(b, null, nets), 'the network has no power feed').length, 1);
+    canSetPowerLink(b, 'X', a, 'B', true);
+    assert.deepEqual(a.powerLinks, [{ hub: 'B', net: b.id, to: 'X' }], 'stored on both networks');
+    assert.ok(canPowerLinked(a, 'B', b, 'X'));
+    assert.ok(canPowered(b, nets).devices.k, 'the keypad gets CAN 1\'s feed');
+    assert.ok(canPowered(b, nets).hubs.X);
+    assert.deepEqual(canNetworkChecks(b, null, nets), []);
+    assert.ok(!canPowered(b).devices.k, 'without the other networks it cannot tell');
+    assert.deepEqual(canHubGroups(a), [['A', 'B']], 'no CAN between the networks');
+  });
+
+  it('removing a hub or network drops its power links', function () {
+    var nets = twoBuses(), a = nets[0], b = nets[1];
+    canSetPowerLink(b, 'X', a, 'B', true);
+    canRemoveHub(a, 'B', nets);
+    assert.deepEqual(a.powerLinks, []);
+    assert.deepEqual(b.powerLinks, []);
+    nets = twoBuses(); a = nets[0]; b = nets[1];
+    canSetPowerLink(b, 'X', a, 'B', true);
+    canForgetPowerLinks([b], a.id);
+    assert.deepEqual(b.powerLinks, []);
+    b.powerLinks = [{ hub: 'X', net: 'gone', to: 'Q' }];
+    assert.equal(hcFind(canNetworkChecks(b, null, [b]), 'no longer exists').length, 1);
+  });
+
+  it('draws power-only links and power shared with another network', function () {
+    var n = hcNet();
+    canSetHubLink(n, 'A', 'B', false, 'data');
+    var svg = canNetworkDiagram(n).svg;
+    assert.equal((svg.match(/class="can-pair"/g) || []).length, 4, 'three devices and the terminator; no CAN between the hubs');
+    assert.ok(svg.indexOf('Hub A ⇄ Hub B (power only, no CAN)') >= 0);
+    var nets = twoBuses();
+    canSetPowerLink(nets[1], 'X', nets[0], 'B', true);
+    svg = canNetworkDiagram(nets[1], nets).svg;
+    assert.ok(svg.indexOf('Shared with CAN 1 · Hub B') >= 0, 'a box for the other network\'s hub');
+    assert.ok(svg.indexOf('data-can-item="B"') >= 0, 'clicking it goes to that hub');
+    assert.ok(svg.indexOf('1 power link') >= 0 && svg.indexOf('powered') >= 0);
+    assert.equal((svg.match(/class="can-power"/g) || []).length, 2, 'the shared power and the keypad');
   });
 });
