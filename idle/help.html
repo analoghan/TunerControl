@@ -56,33 +56,35 @@
 
     <h2 id="quick-start">Quick Start</h2>
     <ol>
-      <li>Load a MoTeC log file (.csv or .ld) that includes clutch, throttle, and RPM channels.</li>
+      <li>Load a MoTeC log file (.csv or .ld) with Engine Speed, Throttle Pedal and Idle Aim (clutch and Vehicle Speed help).</li>
       <li>Click <strong>Analyze</strong>.</li>
       <li>Review the summary statistics, diagnostic messages, and charts.</li>
       <li>Identify whether idle hang is occurring and under what conditions (cold, warm, hot).</li>
     </ol>
     <div class="tip">
-      <strong>Tip:</strong> For best results, log a session that includes multiple deceleration events — shifting through gears, coming to stops, and coasting. The tool needs clutch-in + throttle-closed events to detect decel behavior.
+      <strong>Tip:</strong> For best results, log a session that includes multiple deceleration events — coming to stops and sitting at idle for a while. Gear changes with the clutch in are recognised and left out, because they
+      never get down to idle.
     </div>
 
     <h2 id="inputs">Input Requirements</h2>
     <h3>Required Channels</h3>
     <ul>
       <li><strong>Engine Speed</strong> — RPM for tracking deceleration and settle behavior</li>
-      <li><strong>Throttle Pedal</strong> or <strong>Throttle Position</strong> — must drop below 1% to trigger decel event detection</li>
-      <li><strong>Clutch Switch Position</strong> or <strong>Clutch Position</strong> — must be pressed (value &gt; 0) to indicate a decel event</li>
+      <li><strong>Throttle Pedal</strong> — the driver's pedal (at or below 1 % = off). The throttle blade (Throttle Position) is not used: with
+        drive-by-wire the idle control opens it, about 10 % at idle.</li>
+      <li><strong>Idle Aim</strong> — the ECU's idle speed target; every comparison is against the aim at that moment.</li>
     </ul>
-    <div class="danger">
-      <strong>All three required channels must be present.</strong> Without RPM, throttle, and clutch data, the tool cannot detect deceleration events and will show an error.
-    </div>
 
     <h3>Optional Channels (enhance analysis)</h3>
     <ul>
-      <li><strong>Idle Aim</strong> or <strong>Idle Speed Aim</strong> — the ECU's target idle RPM. If missing, defaults to 750–900 RPM.</li>
+      <li><strong>Clutch Switch Position</strong> — when logged, a return to idle needs the clutch in (otherwise the wheels drive the engine).</li>
+      <li><strong>Vehicle Speed</strong> — steady idle is measured only with the car stopped (below 1 km/h).</li>
       <li><strong>Inlet Manifold Pressure (MAP)</strong> — for manifold pressure correlation during events</li>
       <li><strong>Coolant Temperature</strong> — enables temperature-based correlation (cold/warm/hot hang rates)</li>
-      <li><strong>Idle Mass Flow</strong> — actual idle air mass flow for diagnosing air control issues</li>
-      <li><strong>Idle Mass Flow Feed Forward</strong> — the ECU's predicted idle air requirement. Comparing actual vs. feed forward reveals calibration errors.</li>
+      <li><strong>Idle Mass Flow</strong> — the idle airflow the controller asks for, in % (the M1 stores it as a ratio)</li>
+      <li><strong>Idle Mass Flow Feed Forward</strong> — the tune's starting point for that airflow (%). Actual minus feed forward is what the
+        controller adds (+) or takes away (−).</li>
+      <li><strong>Engine Post Start Idle Mass Flow</strong> — steady idle leaves out the time while post-start air is still added.</li>
     </ul>
 
     <h2 id="detection">Event Detection Logic</h2>
@@ -90,15 +92,15 @@
 
     <h3>Event Start Conditions (all must be true simultaneously)</h3>
     <ul>
-      <li>Clutch is pressed (position &gt; 0)</li>
-      <li>Throttle position is below 1%</li>
-      <li>RPM was above 1500 within the previous 1 second (confirms the engine was driving, not already at idle)</li>
+      <li>Clutch is pressed (when Clutch Switch Position is logged)</li>
+      <li>Throttle Pedal is at or below 1 %</li>
+      <li>Engine speed was more than 500 rpm above the Idle Aim within the previous second</li>
     </ul>
 
     <h3>Event End Conditions (any one triggers end)</h3>
     <ul>
       <li><strong>Settled:</strong> RPM stays within 100 RPM of idle aim for 2+ consecutive seconds</li>
-      <li><strong>Throttle opened:</strong> driver applies throttle (≥ 1%)</li>
+      <li><strong>Throttle opened:</strong> the pedal goes above 1 %</li>
       <li><strong>Clutch released:</strong> clutch pedal released (value drops to 0)</li>
     </ul>
 
@@ -109,6 +111,20 @@
       <p>3. Event ends when RPM holds within 100 RPM of 750 for 2 seconds</p>
       <p>4. Settle time = time from event start until RPM first reaches the idle aim range</p>
     </div>
+    <p>An event whose rpm never came within 300 rpm of the aim is a gear change with the clutch in, not a return to idle; those are
+      counted separately as <em>Gear Changes (left out)</em>.</p>
+
+    <h2 id="steady">Steady Idle</h2>
+    <p>Steady idle is the time with the car stopped, the pedal off, at least 2 s into the stop and no post-start idle air — measured in
+      seconds, not samples (logs are resampled to 100 Hz). It shows engine speed against the Idle Aim (median and 10–90 % range) and Idle
+      Mass Flow against its feed forward, with at least 5 s of data:</p>
+    <ul>
+      <li><strong>Above the aim while the controller takes air away</strong> — the feed forward gives more air than the idle needs and the
+        controller isn't taking enough away. When it keeps taking the same amount away, its integral is at the Idle Mass Flow Integral
+        Minimum. Lower the feed forward at those conditions by about the amount shown, or allow a lower minimum.</li>
+      <li><strong>Below the aim while the controller adds air</strong> — the feed forward is too low (or the integral is at its maximum).</li>
+      <li><strong>More than 100 rpm of spread</strong> (10–90 %) at steady idle — hunting, misfire or a sticking throttle.</li>
+    </ul>
 
     <h2 id="hang">Idle Hang Classification</h2>
     <p>A decel event is classified as "idle hang" if:</p>
@@ -123,7 +139,7 @@
       <li><strong>Dashpot / decel rate too slow</strong> — the ECU intentionally slows the RPM drop to prevent stalling, but the rate is calibrated too conservatively</li>
       <li><strong>Idle speed control integral term</strong> — if the integral term wound up during driving, it takes time to unwind during decel</li>
       <li><strong>IACV (Idle Air Control Valve) sticking</strong> — mechanical issue preventing the air bypass from closing quickly</li>
-      <li><strong>Vacuum leaks</strong> — unmetered air entering the manifold holds RPM up</li>
+      <li><strong>Vacuum leaks</strong> — unmetered air entering the manifold holds RPM up (the controller then takes air away: Idle Mass Flow below its feed forward)</li>
       <li><strong>Cold engine calibration</strong> — higher idle targets and slower control response when cold</li>
     </ul>
 
@@ -132,7 +148,7 @@
     <h3>Idle Behavior Summary</h3>
     <p>Key statistics at a glance:</p>
     <ul>
-      <li><strong>Decel Events</strong> — total number of deceleration events detected in the log</li>
+      <li><strong>Returns to Idle</strong> — events that came down to idle (gear changes are left out and counted separately)</li>
       <li><strong>Idle Hangs</strong> — count and percentage of events classified as hang</li>
       <li><strong>Normal Settles</strong> — events that settled to idle without hanging</li>
       <li><strong>Avg Settle Time</strong> — mean time from decel start to reaching idle aim range</li>

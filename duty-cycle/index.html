@@ -14,7 +14,7 @@
     </nav>
 
     <h1>Injector Duty Cycle Monitor</h1>
-    <p class="subtitle">Analyzes injector duty cycle across RPM and load to identify headroom limits. Flags zones approaching maximum capacity and correlates with DI injection timing window constraints.</p>
+    <p class="subtitle">Injector duty cycle across RPM and load, measured in seconds and sustained stretches (not single samples), to show how much headroom is left — and how much of the load range the log actually covers. On a direct-injection M1 the duty cycle is a share of the injection window, so 100 % means the pulse fills it.</p>
 
     <div class="form-section">
       <div class="file-row">
@@ -49,13 +49,13 @@
         <div id="summary-content"></div>
       </div>
       <div class="report-block">
-        <h2>Peak Duty Cycle by RPM</h2>
-        <p class="section-desc">Maximum observed injector duty cycle at each RPM band. Red = critical, Orange = warning, Green = headroom available.</p>
+        <h2>Duty Cycle by RPM</h2>
+        <p class="section-desc">Per 500 rpm band: time spent there, the 95th percentile, the highest value held for 0.3 s and the single highest sample. Status uses the held value.</p>
         <div id="rpm-table-content"></div>
       </div>
       <div class="report-block">
-        <h2>High Duty Cycle Events</h2>
-        <p class="section-desc">Instances where duty cycle exceeded the warning threshold, sorted by severity.</p>
+        <h2>High Duty Cycle Episodes</h2>
+        <p class="section-desc">Stretches above the warning threshold lasting at least 0.3 s, highest first.</p>
         <div id="events-content"></div>
       </div>
       <div class="report-block">
@@ -66,6 +66,7 @@
   </div>
 
   <script src="../lib/ld-parser.js"></script>
+  <script src="duty-analysis.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

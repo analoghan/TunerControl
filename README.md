@@ -58,9 +58,13 @@ timing and closed-loop fuel trim diagnostics.
 Load one log and get correlated diagnostics across fueling, knock, rail pressure and idle on one page.
 
 ### Idle, Duty Cycle and Charge Cooling
-- **Idle Behavior Analyzer** — deceleration idle hang detection, settle time analysis and mass flow correlation
-- **Injector Duty Cycle** — duty cycle across RPM and load zones, headroom limits and the DI injection window
-- **Charge Cooling Gain** — lambda step-test logs to set the charge cooling gain for your fuel and IAT
+- **Idle Behavior Analyzer** — returns to idle (gear changes left out), settle times and idle hangs against the logged Idle Aim, and
+  steady idle: rpm against the aim and Idle Mass Flow against its feed forward (e.g. idle held above the aim while the controller takes
+  air away = feed forward too high)
+- **Injector Duty Cycle** — duty cycle per rpm band in seconds and held peaks (not single samples), episodes above the warning level, the
+  implied DI injection window (the M1's DI duty cycle is a share of it) and how much of the load range the log covers
+- **Charge Cooling Gain** — finds the aim steps of a closed-loop-off step test, compares the change in lambda with the change in aim, and
+  says which way to move the gain (stays lean on a rich step = raise), as in MoTeC's training
 
 ### Log Viewer
 Plot any log channels (`.ld` or CSV) with preset channel layouts (e.g. fuelling), and see which stretches the VE filters leave out and where the transient

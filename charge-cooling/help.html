@@ -29,79 +29,72 @@
     <p>The charge cooling gain represents how much the injected fuel cools the intake charge before combustion. It directly affects the air density calculation in the MoTeC airflow model.</p>
 
     <h2>What is Charge Cooling?</h2>
-    <p>When fuel is injected, it absorbs heat from the intake air as it evaporates (latent heat of vaporization). This cooling effect reduces the charge temperature below what the IAT sensor reads. The charge cooling gain tells MoTeC how many degrees Celsius to subtract from the IAT reading to compute the actual charge temperature entering the cylinder.</p>
-    <p>The equation (simplified): <code>Charge Temperature = IAT - (Charge Cooling Gain × fuel_factor)</code></p>
-    <p>If the gain is too low, the ECU overestimates charge temperature → underestimates air density → delivers too much fuel (runs rich when you command a richer target). If too high, the opposite (runs lean when commanding rich).</p>
+    <p>When fuel is injected it absorbs heat as it evaporates, so the charge entering the cylinder is cooler than the inlet air sensor reads.
+      Engine Charge Cooling Gain tells the M1 how much cooler. With the charge temperature corrections zeroed, the charge temperature is the
+      inlet air temperature minus the gain — in MoTeC's training, 26.6 °C inlet air with a 13 °C gain gives a 13.6 °C charge temperature. A
+      cooler charge is denser, so the model puts in more fuel.</p>
+    <p>The gain matters when the amount of fuel changes. On a step to a richer aim, a gain that is <strong>too low</strong> under-estimates the
+      extra cooling, so the model under-fuels: lambda stays <strong>leaner</strong> than the new aim. A gain that is <strong>too high</strong>
+      over-fuels: lambda goes <strong>richer</strong> than the aim.</p>
 
     <h2>Prerequisites</h2>
     <ol>
-      <li><strong>VE table must be calibrated</strong> — at steady state (1.0 lambda target), actual lambda must match target. If VE is wrong, charge cooling results will be invalid.</li>
-      <li><strong>Closed loop must be DISABLED</strong> — the CL correction will mask charge cooling errors.</li>
-      <li><strong>Time constants zeroed</strong> — set Engine Charge Temperature Time Constant = 0, Port Temperature Time Constant = 0, Correction Factor = 0.</li>
-      <li><strong>Engine must be warm</strong> — coolant >80°C for consistent results.</li>
+      <li><strong>Idle VE tuned</strong> — at the starting aim (1.0) lambda should match. The tool compares the change in lambda with the change in
+        aim, so a small base error cancels out, but tune the idle VE first as the training does.</li>
+      <li><strong>Closed loop off</strong> — disable it, or zero its trim minimum and maximum. The tool rejects any step where the logged trims move
+        more than 0.5 %.</li>
+      <li><strong>Charge temperature simplified</strong> — Engine Charge Temperature Time Constant, Port Temperature Time Constant and the Correction
+        Factor table at 0 (and Inlet Manifold Temperature mode disabled), as in the training.</li>
+      <li><strong>Engine warm and idling steadily</strong> — the tool rejects steps where engine speed moves more than 150 rpm or manifold pressure more
+        than 5 kPa.</li>
     </ol>
-
-    <div class="danger">
-      <strong>Critical:</strong> If you run this test with closed loop enabled, the CL correction will compensate for charge cooling errors and you'll get incorrect results. Disable CL before the step test.
-    </div>
 
     <h2>Test Procedure</h2>
     <ol>
-      <li>Warm the engine fully (coolant >80°C)</li>
-      <li>Disable closed loop lambda correction (set max/min to 0%)</li>
-      <li>Zero the charge temperature time constant and correction factor tables</li>
-      <li>At idle, verify lambda tracks 1.0 target accurately (VE must be correct)</li>
-      <li>Change target lambda from 1.0 to 0.9 in the target lambda table</li>
-      <li>Wait 3-5 seconds for lambda to settle</li>
-      <li>Change target lambda back to 1.0</li>
-      <li>Wait 3-5 seconds for lambda to settle</li>
-      <li>Repeat 2-3 times for multiple data points</li>
-      <li>Log the session and load it into this tool</li>
+      <li>Warm the engine; idle out of gear.</li>
+      <li>Turn closed loop off.</li>
+      <li>Log Fuel Mixture Aim, Exhaust Lambda (or both banks), the closed-loop trims, Engine Speed, Inlet Manifold Pressure and Inlet Air Temperature.</li>
+      <li>Change the aim at the idle site from 1.00 to 0.90 and hold 5–10 s, then back to 1.00 and hold 5–10 s.</li>
+      <li>Repeat two or three times, then load the log here.</li>
+      <li>Change the gain in the direction shown (about 2 °C at a time) and repeat until lambda tracks within about 0.01.</li>
     </ol>
-
     <div class="tip">
-      <strong>Tip:</strong> You can also test at different lambda targets (1.0 → 0.85, 1.0 → 1.05) to verify the gain works in both directions. The tool detects any lambda target step change >3%.
+      <strong>Tip:</strong> a step leaner (1.00 → 1.05) works too; the tool reads each step the right way round. Any change of the aim by 0.03 or more
+      between two stretches where it holds still for 3 s counts as a step.
     </div>
 
     <h2>Interpreting Results</h2>
+    <p>For each step the tool averages lambda over the last 2 s before it and from 1.5 s after it (the sensor's delay) to the end of the step, and
+      works out the <em>tracking error</em>: how far the change in lambda differs from the change in aim.</p>
+    <h3>Within 0.5 %</h3>
+    <p>The gain is right.</p>
+    <h3>Rich step stays leaner than the aim</h3>
+    <p>Example: aim 1.00 → 0.90, lambda 1.00 → 0.94. The gain is <strong>too low</strong> — raise it.</p>
+    <h3>Rich step goes richer than the aim</h3>
+    <p>Example: aim 1.00 → 0.90, lambda 1.00 → 0.88. The gain is <strong>too high</strong> — lower it.</p>
+    <p>The tool doesn't predict the exact value: the training changes it about 2 °C at a time and re-tests. If you enter the current gain it shows the
+      next value to try.</p>
 
-    <h3>Lambda tracks target accurately (error &lt;0.5%)</h3>
-    <p>Charge cooling gain is correct. No adjustment needed.</p>
-
-    <h3>Actual lambda is RICHER than target (negative error)</h3>
-    <p>Example: target = 0.9, actual = 0.88. The ECU is delivering too much fuel. The charge cooling gain is <strong>too low</strong> — the ECU underestimates charge cooling, overestimates charge temperature, and over-fuels as a result. <strong>Increase the gain.</strong></p>
-
-    <h3>Actual lambda is LEANER than target (positive error)</h3>
-    <p>Example: target = 0.9, actual = 0.93. The ECU is not delivering enough fuel. The charge cooling gain is <strong>too high</strong> — the ECU overestimates charge cooling, underestimates charge temperature, and under-fuels. <strong>Decrease the gain.</strong></p>
-
-    <h2>Expected Values by Fuel Type</h2>
-    <ul>
-      <li><strong>Petrol (E0-E10):</strong> 10–25°C (MoTeC default: 13°C)</li>
-      <li><strong>E85:</strong> 25–50°C (ethanol has ~3× the latent heat of petrol)</li>
-      <li><strong>Pure Ethanol:</strong> 40–70°C</li>
-      <li><strong>Methanol:</strong> 50–90°C</li>
-    </ul>
-    <p>Higher ethanol content = more cooling effect = higher gain value needed.</p>
-
-    <h2>IAT Sensor Considerations</h2>
-    <p>The charge cooling gain is indexed by Inlet Air Temperature. At different IAT values, the cooling effect may change slightly. For most applications, a single value works well. If you tune at 30°C IAT but drive in 5°C conditions, the same gain should still be accurate.</p>
+    <h2>Fuel and Inlet Air Temperature</h2>
+    <p>Ethanol absorbs much more heat than petrol, so it needs a higher gain; the gain table can have a fuel composition axis for flex fuel, and each
+      composition has to be tested. The table also runs on inlet air temperature: a test sets the value near the temperature it was done at, so check
+      again with hot inlet air.</p>
 
     <div class="warning">
-      <strong>Heat soak:</strong> If your IAT sensor is mounted in the intake manifold (not the airbox), it can heat-soak when the engine is idling with no airflow. This gives artificially high IAT readings and can make the test less accurate. Best results come from testing immediately after a short drive when the IAT sensor is reading true ambient-influenced temperatures.
+      <strong>Heat soak:</strong> an inlet air sensor in the manifold heat-soaks at idle and reads high, which throws off the test. A sensor after the
+      intercooler or in the charge pipe avoids it; otherwise test straight after a short drive.
     </div>
 
     <h2>Troubleshooting</h2>
 
-    <h3>No step events detected</h3>
-    <p>The tool looks for the "Fuel Mixture Aim" channel changing by >3% between adjacent samples. If your target lambda changes gradually (ramp) rather than as a step, the tool won't detect it. Make abrupt changes in the target lambda table.</p>
+    <h3>No step test in this log</h3>
+    <p>In normal driving the aim moves gradually with load, so there is nothing to test. Change the aim abruptly in the table and hold it.</p>
 
-    <h3>Results seem wrong / suggested gain is outside expected range</h3>
-    <p>Most common causes:</p>
+    <h3>Steps found but none usable</h3>
     <ul>
-      <li>Closed loop was still active (check that CL trim is 0% in the log)</li>
-      <li>VE table is not calibrated (lambda doesn't track 1.0 at steady state)</li>
-      <li>IAT sensor heat soak giving bad readings</li>
-      <li>Not enough settle time between steps (lambda still moving when measured)</li>
+      <li><strong>Closed loop active</strong> — the trims moved more than 0.5 %; turn closed loop off.</li>
+      <li><strong>Not steady</strong> — engine speed or manifold pressure moved during the step (idle hunting, fan or A/C switching).</li>
+      <li><strong>Less than 1 s of valid lambda</strong> — hold each step longer.</li>
     </ul>
   </div>
 </body>

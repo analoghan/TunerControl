@@ -227,6 +227,7 @@ function renderReport(analysis) {
     renderWarnings(analysis.channelWarnings);
     renderSummary(analysis);
     renderDiagnostics(analysis);
+    renderSteadyIdle(analysis.steadyIdle);
     renderCoolantCorrelation(analysis.coolantTempCorrelation);
 }
 
@@ -240,8 +241,9 @@ function renderChannelMapping(channelMapping) {
 
     var channelLabels = {
         rpm: 'Engine Speed',
-        idle_aim: 'Idle Speed Aim',
-        tps: 'Throttle Position',
+        idle_aim: 'Idle Aim',
+        tps: 'Throttle Pedal',
+        vehicle_speed: 'Vehicle Speed',
         map: 'Inlet Manifold Pressure',
         coolant_temp: 'Coolant Temperature',
         idle_mass_flow: 'Idle Mass Flow',
@@ -306,7 +308,8 @@ function renderSummary(analysis) {
     grid.className = 'summary-grid';
 
     // Total decel events
-    addStat(grid, analysis.totalDecelEvents, 'Decel Events', '');
+    addStat(grid, analysis.totalDecelEvents, 'Returns to Idle', '');
+    if (analysis.skippedEvents) addStat(grid, analysis.skippedEvents, 'Gear Changes (left out)', '');
     // Hang events
     var hangPct = analysis.totalDecelEvents > 0
         ? (analysis.hangEvents / analysis.totalDecelEvents * 100).toFixed(0) + '%'
@@ -358,18 +361,19 @@ function renderDiagnostics(analysis) {
     var messages = [];
 
     if (analysis.totalDecelEvents === 0) {
-        messages.push({ text: 'No deceleration events detected in this log.', severity: 'warning' });
+        messages.push({ text: 'No returns to idle in this log (pedal off' + (analysis.channelMapping.clutch_pos ? ', clutch in' : '') +
+            ', from more than 500 rpm above the Idle Aim down to it).', severity: 'warning' });
     } else {
         if (analysis.hangEvents === 0) {
             messages.push({
-                text: 'No idle hang detected. All ' + analysis.totalDecelEvents + ' decel events settled normally.',
+                text: 'No idle hang detected in ' + analysis.totalDecelEvents + ' return' + (analysis.totalDecelEvents === 1 ? '' : 's') + ' to idle.',
                 severity: 'healthy'
             });
         } else {
             var pct = (analysis.hangEvents / analysis.totalDecelEvents * 100).toFixed(0);
             messages.push({
                 text: 'Idle hang detected in ' + analysis.hangEvents + ' of ' +
-                      analysis.totalDecelEvents + ' decel events (' + pct + '%).',
+                      analysis.totalDecelEvents + ' returns to idle (' + pct + '%).',
                 severity: 'severe'
             });
         }
@@ -409,10 +413,9 @@ function renderDiagnostics(analysis) {
             }
             if (mfd.hangFeedForward !== null && mfd.normalFeedForward !== null && analysis.hangEvents > 0) {
                 messages.push({
-                    text: 'Mass flow during hang: actual=' + (mfd.hangMassFlow || 'N/A') +
-                          ' g/s, feed forward=' + mfd.hangFeedForward +
-                          ' g/s. Normal events: actual=' + (mfd.normalMassFlow || 'N/A') +
-                          ' g/s, feed forward=' + mfd.normalFeedForward + ' g/s.',
+                    text: 'Idle Mass Flow during hangs: ' + (mfd.hangMassFlow === null ? 'N/A' : mfd.hangMassFlow + ' %') +
+                          ' (feed forward ' + mfd.hangFeedForward + ' %). Other returns to idle: ' +
+                          (mfd.normalMassFlow === null ? 'N/A' : mfd.normalMassFlow + ' %') + ' (feed forward ' + mfd.normalFeedForward + ' %).',
                     severity: 'info'
                 });
             }
@@ -444,6 +447,38 @@ function renderDiagnostics(analysis) {
         div.textContent = messages[i].text;
         content.appendChild(div);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Steady Idle Rendering
+// ---------------------------------------------------------------------------
+
+function renderSteadyIdle(steady) {
+    var content = document.getElementById('steady-content');
+    if (!content) return;
+    clearElement(content);
+    if (!steady) return;
+    if (steady.rpm) {
+        var grid = document.createElement('div');
+        grid.className = 'summary-grid';
+        function range(s, unit, dp) { return s ? s.p50.toFixed(dp) + unit + ' (' + s.p10.toFixed(dp) + '–' + s.p90.toFixed(dp) + ')' : '—'; }
+        addStat(grid, steady.seconds.toFixed(0) + ' s', 'Steady Idle', '');
+        addStat(grid, range(steady.rpm, '', 0), 'Engine Speed (10–90 %)', '');
+        addStat(grid, range(steady.aim, '', 0), 'Idle Aim', '');
+        addStat(grid, (steady.rpmAboveAim.p50 >= 0 ? '+' : '') + steady.rpmAboveAim.p50.toFixed(0) + ' rpm', 'Above Aim (median)',
+            Math.abs(steady.rpmAboveAim.p50) > 30 ? 'stat-warning' : 'stat-healthy');
+        if (steady.massFlowMinusFF) addStat(grid, (steady.massFlowMinusFF.p50 >= 0 ? '+' : '') + steady.massFlowMinusFF.p50.toFixed(1) + ' %', 'Idle Mass Flow − Feed Forward', '');
+        if (steady.map) addStat(grid, range(steady.map, ' kPa', 0), 'Manifold Pressure', '');
+        if (steady.ignition) addStat(grid, range(steady.ignition, '°', 1), 'Ignition Timing', '');
+        if (steady.coolant) addStat(grid, steady.coolant.p50.toFixed(0) + ' °C', 'Coolant', '');
+        content.appendChild(grid);
+    }
+    steady.diags.forEach(function (d) {
+        var div = document.createElement('div');
+        div.className = 'diagnostic diagnostic-' + (d.severity === 'good' ? 'healthy' : d.severity);
+        div.textContent = d.text;
+        content.appendChild(div);
+    });
 }
 
 // ---------------------------------------------------------------------------

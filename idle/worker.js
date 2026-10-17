@@ -280,7 +280,10 @@ function parseDataRows(lines, dataStart, numCols, progressCallback) {
 var CHANNEL_MAP = {
     rpm:                ['Engine Speed'],
     idle_aim:           ['Idle Aim', 'Idle Speed Aim'],
-    tps:                ['Throttle Pedal', 'Throttle Position'],
+    // The pedal, not the throttle blade: with drive-by-wire the idle control opens the blade (~10 % at idle).
+    tps:                ['Throttle Pedal', 'Throttle Pedal Sensor'],
+    vehicle_speed:      ['Vehicle Speed'],
+    post_start_mf:      ['Engine Post Start Idle Mass Flow'],
     map:                ['Inlet Manifold Pressure'],
     coolant_temp:       ['Coolant Temperature'],
     idle_mass_flow:     ['Idle Mass Flow'],
@@ -291,8 +294,18 @@ var CHANNEL_MAP = {
     idle_air_corr:      ['Idle Air Correction', 'Idle Airflow Correction'],
 };
 
-var REQUIRED_CHANNELS = ['rpm', 'tps', 'clutch_pos'];
-var OPTIONAL_WARN_CHANNELS = ['idle_aim', 'map', 'coolant_temp', 'idle_mass_flow', 'idle_mass_flow_ff', 'spark_timing', 'idle_spark_corr'];
+var REQUIRED_CHANNELS = ['rpm', 'tps', 'idle_aim'];
+var OPTIONAL_WARN_CHANNELS = ['clutch_pos', 'vehicle_speed', 'map', 'coolant_temp', 'idle_mass_flow', 'idle_mass_flow_ff', 'spark_timing'];
+
+/** Return-to-idle and steady-idle settings (rpm relative to the logged Idle Aim). */
+var IDLE_FROM_ABOVE = 500;      // the engine was this far above the aim within the last second
+var IDLE_REACHED = 300;         // an event counts once rpm comes within this of the aim (else: a gear change)
+var IDLE_SETTLE_BAND = 100;     // settled = within this of the aim …
+var IDLE_SETTLE_HOLD = 2.0;     // … for this long (s)
+var IDLE_HANG_RPM = 200;        // hang = more than this above the aim …
+var IDLE_HANG_TIME = 3.0;       // … for longer than this (s)
+var IDLE_PEDAL_OFF = 1.0;       // pedal at or below this (%) = off
+var IDLE_STEADY_AFTER = 2.0;    // steady idle starts this long after the car stopped with the pedal off (s)
 
 function resolveChannels(columnNames) {
     var nameToIdx = {};
@@ -339,112 +352,43 @@ function resolveChannels(columnNames) {
 // ---------------------------------------------------------------------------
 
 /**
- * Detects deceleration events from parsed log data.
- * A decel event starts when:
- *   - Clutch position > 50% (pedal pressed)
- *   - Throttle position < 1%
- *   - RPM was above 1500 within the last 1 second
- * A decel event ends when:
- *   - RPM settles within 100 RPM of idle_aim for 2+ consecutive seconds, OR
- *   - Throttle opens above 1%, OR
- *   - Clutch released (value drops below 50%)
+ * Returns to idle: the pedal is off (and the clutch pressed, when it is logged), and the engine was more than
+ * IDLE_FROM_ABOVE rpm above the Idle Aim within the last second. An event ends when the pedal opens, the clutch is
+ * released, or rpm has stayed within IDLE_SETTLE_BAND of the aim for IDLE_SETTLE_HOLD s. Events whose rpm never came
+ * within IDLE_REACHED of the aim (gear changes with the clutch in) are not returns to idle; they are counted in skipped.
  */
 function detectDecelEvents(data, channels, sampleRate) {
-    var rpmIdx = channels.rpm;
-    var tpsIdx = channels.tps;
-    var clutchIdx = channels.clutch_pos;
-    var idleAimIdx = channels.idle_aim;
-    var mapIdx = channels.map;
-    var coolantIdx = channels.coolant_temp;
-    var massFlowIdx = channels.idle_mass_flow;
-    var massFlowFFIdx = channels.idle_mass_flow_ff;
-
-    if (rpmIdx === -1 || tpsIdx === -1 || clutchIdx === -1) {
-        return [];
-    }
-
+    var rpmIdx = channels.rpm, tpsIdx = channels.tps, clutchIdx = channels.clutch_pos, idleAimIdx = channels.idle_aim;
     var lookbackSamples = Math.round(sampleRate * 1.0);
-    var settleDurationSamples = Math.round(sampleRate * 2.0);
-    var settleThreshold = 100; // RPM within idle_aim
+    var settleDurationSamples = Math.round(sampleRate * IDLE_SETTLE_HOLD);
+    var events = [], skipped = 0, inEvent = false, eventStartIdx = 0, settleCounter = 0;
 
-    var events = [];
-    var inEvent = false;
-    var eventStartIdx = 0;
-    var settleCounter = 0;
-
+    function close(endIdx, reason, settled) {
+        var evt = buildDecelEvent(data, eventStartIdx, endIdx, reason, channels, sampleRate, settled);
+        if (evt.reachedIdle) events.push(evt); else skipped++;
+    }
     for (var i = 0; i < data.length; i++) {
-        var rpm = data[i][rpmIdx];
-        var tps = data[i][tpsIdx];
-        var clutch = data[i][clutchIdx];
-        var idleAim = idleAimIdx !== -1 ? data[i][idleAimIdx] : 750;
-
-        if (isNaN(rpm) || isNaN(tps) || isNaN(clutch)) continue;
-
+        var rpm = data[i][rpmIdx], tps = data[i][tpsIdx], idleAim = data[i][idleAimIdx];
+        var clutch = clutchIdx !== -1 ? data[i][clutchIdx] : 1;
+        if (isNaN(rpm) || isNaN(tps) || isNaN(idleAim) || isNaN(clutch) || idleAim <= 0) continue;
         if (!inEvent) {
-            // Check if decel event should start
-            // Clutch position is 1 (pressed) or 0 (released)
-            if (clutch > 0 && tps < 1) {
-                // Check if RPM was above 1500 within the last 1 second
-                var wasHighRpm = false;
-                var startCheck = Math.max(0, i - lookbackSamples);
-                for (var j = startCheck; j <= i; j++) {
-                    if (data[j][rpmIdx] > 1500) {
-                        wasHighRpm = true;
-                        break;
-                    }
-                }
-                if (wasHighRpm) {
-                    inEvent = true;
-                    eventStartIdx = i;
-                    settleCounter = 0;
+            if (clutch > 0 && tps <= IDLE_PEDAL_OFF) {
+                for (var j = Math.max(0, i - lookbackSamples); j <= i; j++) {
+                    if (data[j][rpmIdx] > data[j][idleAimIdx] + IDLE_FROM_ABOVE) { inEvent = true; eventStartIdx = i; settleCounter = 0; break; }
                 }
             }
+        } else if (tps > IDLE_PEDAL_OFF) {
+            close(i, 'throttle', false); inEvent = false;
+        } else if (clutch < 1) {
+            close(i, 'clutch', false); inEvent = false;
+        } else if (Math.abs(rpm - idleAim) <= IDLE_SETTLE_BAND) {
+            if (++settleCounter >= settleDurationSamples) { close(i, 'settled', true); inEvent = false; }
         } else {
-            // Check if event should end
-            var shouldEnd = false;
-            var endReason = '';
-
-            // Throttle opened
-            if (tps >= 1) {
-                shouldEnd = true;
-                endReason = 'throttle';
-            }
-            // Clutch released (value drops to 0)
-            else if (clutch < 1) {
-                shouldEnd = true;
-                endReason = 'clutch';
-            }
-            // RPM settled
-            else if (Math.abs(rpm - idleAim) <= settleThreshold) {
-                settleCounter++;
-                if (settleCounter >= settleDurationSamples) {
-                    shouldEnd = true;
-                    endReason = 'settled';
-                }
-            } else {
-                settleCounter = 0;
-            }
-
-            if (shouldEnd) {
-                var endIdx = i;
-                events.push(buildDecelEvent(
-                    data, eventStartIdx, endIdx, endReason,
-                    channels, sampleRate, settleCounter >= settleDurationSamples
-                ));
-                inEvent = false;
-                settleCounter = 0;
-            }
+            settleCounter = 0;
         }
     }
-
-    // If still in event at end of data, close it
-    if (inEvent) {
-        events.push(buildDecelEvent(
-            data, eventStartIdx, data.length - 1, 'end_of_data',
-            channels, sampleRate, false
-        ));
-    }
-
+    if (inEvent) close(data.length - 1, 'end_of_data', false);
+    events.skipped = skipped;
     return events;
 }
 
@@ -504,15 +448,13 @@ function buildDecelEvent(data, startIdx, endIdx, endReason, channels, sampleRate
         }
     }
 
-    // Compute settle time: time from event start until RPM first reaches idle_aim range
-    var settleTime = null;
-    var idleAimVal = idleAimIdx !== -1 ? data[startIdx][idleAimIdx] : 750;
+    // Settle time: from the event start until rpm first comes within IDLE_SETTLE_BAND of the aim (at that moment).
+    var settleTime = null, reachedIdle = false;
     for (var i = startIdx; i <= endIdx; i++) {
-        var rpm = data[i][rpmIdx];
-        if (!isNaN(rpm) && Math.abs(rpm - idleAimVal) <= 100) {
-            settleTime = data[i][0] - startTime;
-            break;
-        }
+        var rpm = data[i][rpmIdx], aimNow = data[i][idleAimIdx];
+        if (isNaN(rpm) || isNaN(aimNow)) continue;
+        if (rpm - aimNow <= IDLE_REACHED) reachedIdle = true;
+        if (settleTime === null && Math.abs(rpm - aimNow) <= IDLE_SETTLE_BAND) settleTime = data[i][0] - startTime;
     }
 
     // Get coolant temp at event start
@@ -526,6 +468,8 @@ function buildDecelEvent(data, startIdx, endIdx, endReason, channels, sampleRate
         endTime: endTime,
         settleTime: settleTime,
         isHang: false, // classified later
+        reachedIdle: reachedIdle,
+        endReason: endReason,
         startRpm: startRpm,
         minRpm: minRpm === Infinity ? 0 : minRpm,
         avgRpmDuringEvent: rpmCount > 0 ? rpmSum / rpmCount : 0,
@@ -543,18 +487,17 @@ function buildDecelEvent(data, startIdx, endIdx, endReason, channels, sampleRate
 // ---------------------------------------------------------------------------
 
 /**
- * Classifies events as idle hang if RPM stays more than 200 RPM above
- * idle_aim (or 900 RPM if idle_aim unavailable) for more than 3 seconds.
+ * Classifies events as idle hang if RPM stays more than IDLE_HANG_RPM above
+ * the Idle Aim for more than IDLE_HANG_TIME seconds.
  */
 function classifyHangEvents(events, data, channels, sampleRate) {
     var rpmIdx = channels.rpm;
     var idleAimIdx = channels.idle_aim;
-    var hangDurationThreshold = 3.0; // seconds
-    var hangRpmThreshold = 200; // RPM above idle aim
+    var hangDurationThreshold = IDLE_HANG_TIME;
+    var hangRpmThreshold = IDLE_HANG_RPM;
 
     for (var e = 0; e < events.length; e++) {
         var evt = events[e];
-        var idleTarget = 900; // default if idle_aim unavailable
 
         // Find the start and end sample indices from time
         var startSampleIdx = -1;
@@ -571,19 +514,13 @@ function classifyHangEvents(events, data, channels, sampleRate) {
         if (startSampleIdx === -1) startSampleIdx = 0;
         if (endSampleIdx === -1) endSampleIdx = data.length - 1;
 
-        // Determine idle target from idle_aim at event start
-        if (idleAimIdx !== -1 && !isNaN(data[startSampleIdx][idleAimIdx])) {
-            idleTarget = data[startSampleIdx][idleAimIdx];
-        }
-
-        // Count consecutive time above threshold
-        var hangThresholdRpm = idleTarget + hangRpmThreshold;
+        // Consecutive time more than IDLE_HANG_RPM above the aim (at each moment)
         var consecutiveAbove = 0;
         var maxConsecutiveAbove = 0;
 
         for (var i = startSampleIdx; i <= endSampleIdx; i++) {
             var rpm = data[i][rpmIdx];
-            if (!isNaN(rpm) && rpm > hangThresholdRpm) {
+            if (!isNaN(rpm) && rpm > data[i][idleAimIdx] + hangRpmThreshold) {
                 consecutiveAbove++;
                 if (consecutiveAbove > maxConsecutiveAbove) {
                     maxConsecutiveAbove = consecutiveAbove;
@@ -729,17 +666,18 @@ function computeMassFlowDiagnostics(events) {
         diagnosis: null
     };
 
-    // Generate diagnosis
-    if (result.hangFeedForward !== null && result.normalFeedForward !== null) {
-        var ffDiff = result.hangFeedForward - result.normalFeedForward;
-        if (ffDiff > 1) {
-            result.diagnosis = 'Feed forward is ' + ffDiff.toFixed(1) + ' g/s higher during hang events than normal events. Reduce idle mass flow feed forward table.';
-        }
-    }
+    // Idle Mass Flow and its feed forward are percentages (the M1 stores them as ratios). Actual below feed forward means
+    // the controller is taking air away (feed forward too high, or air the model doesn't know about such as a leak);
+    // above means it is adding air (feed forward too low).
     if (result.hangMassFlow !== null && result.hangFeedForward !== null) {
-        var excess = result.hangMassFlow - result.hangFeedForward;
-        if (excess > 1) {
-            result.diagnosis = (result.diagnosis || '') + ' Actual mass flow exceeds feed forward by ' + excess.toFixed(1) + ' g/s during hang — possible vacuum leak or unmetered air source.';
+        var diff = result.hangMassFlow - result.hangFeedForward;
+        if (diff < -1) {
+            result.diagnosis = 'During idle hangs the controller is taking air away (Idle Mass Flow ' + result.hangMassFlow + ' % vs feed forward ' +
+                result.hangFeedForward + ' %) and rpm still stays high: the feed forward gives too much air for these conditions, or there is ' +
+                'air it doesn\'t know about (a leak, a sticking throttle).';
+        } else if (diff > 1) {
+            result.diagnosis = 'During idle hangs the controller is adding air (Idle Mass Flow ' + result.hangMassFlow + ' % vs feed forward ' +
+                result.hangFeedForward + ' %), so the hang is not too much feed forward — look at the aim ramp and decel settings.';
         }
     }
 
@@ -827,144 +765,72 @@ function buildChartData(data, channels, events) {
 }
 
 // ---------------------------------------------------------------------------
-// Feed-Forward Diagnostics
+// Steady idle
 // ---------------------------------------------------------------------------
 
+function idlePercentile(values, p) {
+    if (!values.length) return null;
+    var v = values.slice().sort(function (a, b) { return a - b; });
+    return v[Math.min(v.length - 1, Math.floor(v.length * p))];
+}
+
 /**
- * Analyzes idle spark timing correction and airflow correction to diagnose
- * feed-forward table calibration issues.
- *
- * Key diagnostics:
- * - If spark correction is consistently large (>5°), feed-forward airflow is wrong
- * - If RPM oscillates with a regular period, PID gains need adjustment
- * - If idle is stable but spark is far from optimal, feed-forward provides wrong air amount
+ * Steady warm idle: car stopped (Vehicle Speed < 1 km/h when logged), pedal off, at least IDLE_STEADY_AFTER s into the stop,
+ * no post-start idle air. Measured over time, not samples: rpm against the aim, and Idle Mass Flow against its feed forward.
+ * Returns { seconds, rpmAboveAim: { p10, p50, p90 }, spread, massFlowMinusFF: { p10, p50, p90 }, coolant, map, ignition, diags }.
  */
-function computeFeedForwardDiagnostics(data, channels, sampleRate) {
-    var diags = [];
-    var sparkCorrIdx = channels.idle_spark_corr;
-    var sparkIdx = channels.spark_timing;
-    var rpmIdx = channels.rpm;
-    var mapIdx = channels.map;
-    var tpsIdx = channels.tps;
-    var idleAimIdx = channels.idle_aim;
-    var airCorrIdx = channels.idle_air_corr;
-
-    // Find idle samples (low RPM, low TPS)
-    var idleSamples = [];
+function computeSteadyIdle(data, channels, sampleRate) {
+    var c = channels, after = Math.round(sampleRate * IDLE_STEADY_AFTER), run = 0, rows = [];
     for (var i = 0; i < data.length; i++) {
-        var rpm = rpmIdx >= 0 ? data[i][rpmIdx] : NaN;
-        var tps = tpsIdx >= 0 ? data[i][tpsIdx] : NaN;
-        if (isNaN(rpm) || isNaN(tps)) continue;
-        if (rpm > 400 && rpm < 1500 && tps < 5) {
-            idleSamples.push(i);
-        }
+        var x = data[i], ok = x[c.rpm] > 400 && x[c.tps] <= IDLE_PEDAL_OFF && x[c.idle_aim] > 0 &&
+            (c.vehicle_speed === -1 || x[c.vehicle_speed] < 1) && (c.post_start_mf === -1 || !(x[c.post_start_mf] > 0));
+        run = ok ? run + 1 : 0;
+        if (run > after) rows.push(x);
     }
-
-    if (idleSamples.length < 50) {
-        diags.push({ severity: 'info', text: 'Insufficient idle data for feed-forward analysis (need 50+ idle samples).' });
-        return diags;
+    var out = { seconds: rows.length / sampleRate, diags: [] };
+    if (out.seconds < 5) {
+        out.diags.push({ severity: 'info', text: 'Only ' + out.seconds.toFixed(1) + ' s of steady idle (stopped, pedal off, ' + IDLE_STEADY_AFTER +
+            ' s into the stop' + (c.vehicle_speed === -1 ? '' : ', Vehicle Speed below 1 km/h') + ') — at least 5 s are needed to judge the idle.' });
+        return out;
     }
+    function stats(fn) {
+        var v = rows.map(fn).filter(function (n) { return !isNaN(n); });
+        return v.length ? { p10: idlePercentile(v, 0.1), p50: idlePercentile(v, 0.5), p90: idlePercentile(v, 0.9) } : null;
+    }
+    out.rpmAboveAim = stats(function (x) { return x[c.rpm] - x[c.idle_aim]; });
+    out.rpm = stats(function (x) { return x[c.rpm]; });
+    out.aim = stats(function (x) { return x[c.idle_aim]; });
+    out.spread = out.rpm.p90 - out.rpm.p10;
+    if (c.idle_mass_flow !== -1 && c.idle_mass_flow_ff !== -1) out.massFlowMinusFF = stats(function (x) { return x[c.idle_mass_flow] - x[c.idle_mass_flow_ff]; });
+    if (c.coolant_temp !== -1) out.coolant = stats(function (x) { return x[c.coolant_temp]; });
+    if (c.map !== -1) out.map = stats(function (x) { return x[c.map]; });
+    if (c.spark_timing !== -1) out.ignition = stats(function (x) { return x[c.spark_timing]; });
 
-    // Analyze spark timing correction at idle
-    if (sparkCorrIdx >= 0) {
-        var sparkCorrSum = 0;
-        var sparkCorrAbsSum = 0;
-        var sparkCorrCount = 0;
-        var sparkCorrMax = 0;
-        var sparkCorrMin = 0;
-
-        for (var i = 0; i < idleSamples.length; i++) {
-            var corr = data[idleSamples[i]][sparkCorrIdx];
-            if (isNaN(corr)) continue;
-            sparkCorrSum += corr;
-            sparkCorrAbsSum += Math.abs(corr);
-            sparkCorrCount++;
-            if (corr > sparkCorrMax) sparkCorrMax = corr;
-            if (corr < sparkCorrMin) sparkCorrMin = corr;
-        }
-
-        if (sparkCorrCount > 0) {
-            var avgCorr = sparkCorrSum / sparkCorrCount;
-            var avgAbsCorr = sparkCorrAbsSum / sparkCorrCount;
-
-            if (Math.abs(avgCorr) > 5) {
-                diags.push({
-                    severity: 'warning',
-                    text: 'Idle spark correction is consistently ' + (avgCorr > 0 ? 'advancing' : 'retarding') + ' by ' + Math.abs(avgCorr).toFixed(1) + '° on average. This indicates the feed-forward airflow table is providing ' + (avgCorr > 0 ? 'too little' : 'too much') + ' air — the ECU is using spark timing to compensate. Adjust the idle feed-forward table to provide ' + (avgCorr > 0 ? 'more' : 'less') + ' airflow so spark correction returns closer to 0°.'
-                });
-            } else if (avgAbsCorr > 8) {
-                diags.push({
-                    severity: 'warning',
-                    text: 'Idle spark correction is oscillating widely (avg |correction| = ' + avgAbsCorr.toFixed(1) + '°, range ' + sparkCorrMin.toFixed(1) + '° to +' + sparkCorrMax.toFixed(1) + '°). This suggests the idle PID gains are too aggressive — the fast-path (spark) control is hunting. Try reducing the idle spark gain.'
-                });
-            } else if (Math.abs(avgCorr) < 2 && avgAbsCorr < 3) {
-                diags.push({
-                    severity: 'good',
-                    text: 'Idle spark correction is well-centered (avg ' + avgCorr.toFixed(1) + '°, |avg| ' + avgAbsCorr.toFixed(1) + '°). Feed-forward airflow appears correctly calibrated.'
-                });
-            }
-        }
+    var a = out.rpmAboveAim, m = out.massFlowMinusFF, secs = out.seconds.toFixed(0) + ' s of steady idle';
+    var where = out.coolant ? ' (coolant ' + out.coolant.p50.toFixed(0) + ' °C)' : '';
+    if (a.p50 > 30 && m && m.p50 < -1) {
+        out.diags.push({ severity: 'warning', text: 'Idle sits ' + a.p50.toFixed(0) + ' rpm above the aim (10–90 %: ' + a.p10.toFixed(0) + ' to ' +
+            a.p90.toFixed(0) + ' rpm) while the controller takes ' + (-m.p50).toFixed(1) + ' % of air away from the feed forward' + where + ', over ' + secs +
+            '. The feed forward gives more air than this idle needs and the controller isn\'t taking enough away; if it keeps taking ' +
+            'the same amount away, its integral is probably at the Idle Mass Flow Integral Minimum. Lower Idle Mass Flow Feed Forward Main at these conditions by about ' + (-m.p50).toFixed(1) +
+            ' % (or more), or allow a lower Integral Minimum, then check again.' });
+    } else if (a.p50 < -30 && m && m.p50 > 1) {
+        out.diags.push({ severity: 'warning', text: 'Idle sits ' + (-a.p50).toFixed(0) + ' rpm below the aim while the controller adds ' + m.p50.toFixed(1) +
+            ' % of air to the feed forward' + where + ', over ' + secs + '. The feed forward is too low (or the integral is at its maximum): raise Idle ' +
+            'Mass Flow Feed Forward Main at these conditions by about ' + m.p50.toFixed(1) + ' %.' });
+    } else if (Math.abs(a.p50) <= 30) {
+        out.diags.push({ severity: 'good', text: 'Idle holds the aim (median ' + (a.p50 >= 0 ? '+' : '') + a.p50.toFixed(0) + ' rpm, 10–90 %: ' + a.p10.toFixed(0) +
+            ' to ' + a.p90.toFixed(0) + ' rpm) over ' + secs + where + (m ? ', with the controller ' + (m.p50 >= 0 ? 'adding ' : 'taking away ') +
+            Math.abs(m.p50).toFixed(1) + ' % of air.' : '.') });
     } else {
-        diags.push({ severity: 'info', text: 'Idle Spark Correction channel not found — cannot assess feed-forward calibration. Log "Idle Spark Correction" or "Idle Ignition Correction" for this analysis.' });
+        out.diags.push({ severity: 'info', text: 'Idle is ' + (a.p50 > 0 ? 'above' : 'below') + ' the aim by a median of ' + Math.abs(a.p50).toFixed(0) +
+            ' rpm over ' + secs + where + '.' + (m ? ' Idle Mass Flow is ' + (m.p50 >= 0 ? '+' : '') + m.p50.toFixed(1) + ' % from the feed forward.' : '') });
     }
-
-    // Analyze RPM stability (oscillation detection)
-    if (rpmIdx >= 0 && idleSamples.length > 100) {
-        var rpmValues = [];
-        for (var i = 0; i < idleSamples.length; i++) {
-            rpmValues.push(data[idleSamples[i]][rpmIdx]);
-        }
-
-        // Compute RPM standard deviation
-        var rpmMean = 0;
-        for (var i = 0; i < rpmValues.length; i++) rpmMean += rpmValues[i];
-        rpmMean /= rpmValues.length;
-
-        var rpmVariance = 0;
-        for (var i = 0; i < rpmValues.length; i++) {
-            var diff = rpmValues[i] - rpmMean;
-            rpmVariance += diff * diff;
-        }
-        var rpmStdDev = Math.sqrt(rpmVariance / rpmValues.length);
-
-        if (rpmStdDev > 50) {
-            diags.push({
-                severity: 'warning',
-                text: 'Idle RPM is unstable (std dev = ' + rpmStdDev.toFixed(0) + ' RPM, mean = ' + rpmMean.toFixed(0) + ' RPM). Possible causes: feed-forward table not providing enough base airflow (forcing PID to work too hard), PID gains too aggressive, or mechanical issue (vacuum leak, sticky throttle).'
-            });
-        } else if (rpmStdDev > 25) {
-            diags.push({
-                severity: 'info',
-                text: 'Idle RPM has moderate variation (std dev = ' + rpmStdDev.toFixed(0) + ' RPM). Acceptable for most applications but could be tightened with feed-forward refinement.'
-            });
-        } else {
-            diags.push({
-                severity: 'good',
-                text: 'Idle RPM is stable (std dev = ' + rpmStdDev.toFixed(0) + ' RPM, mean = ' + rpmMean.toFixed(0) + ' RPM). ✓'
-            });
-        }
+    if (out.spread > 100) {
+        out.diags.push({ severity: 'warning', text: 'Idle rpm moves over ' + out.spread.toFixed(0) + ' rpm (10–90 %) at steady idle — look for hunting ' +
+            '(idle gains), misfire or a sticking throttle.' });
     }
-
-    // Analyze MAP at idle (cam size indicator)
-    if (mapIdx >= 0) {
-        var mapSum = 0;
-        var mapCount = 0;
-        for (var i = 0; i < idleSamples.length; i++) {
-            var map = data[idleSamples[i]][mapIdx];
-            if (!isNaN(map)) { mapSum += map; mapCount++; }
-        }
-        if (mapCount > 0) {
-            var avgMap = mapSum / mapCount;
-            if (avgMap > 60) {
-                diags.push({
-                    severity: 'info',
-                    text: 'Idle MAP is high (' + avgMap.toFixed(0) + ' kPa) — indicates a large cam with reduced vacuum. The feed-forward table needs higher airflow values to maintain idle with less vacuum available. Ensure your VE table is calibrated for this MAP range at idle RPM.'
-                });
-            }
-        }
-    }
-
-    return diags;
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -988,7 +854,7 @@ function runAnalysis(columnNames, data, sampleRate) {
     if (missingRequired) {
         self.postMessage({
             type: 'error',
-            message: 'Required channels missing (rpm, tps, clutch_pos). Cannot perform idle analysis.'
+            message: 'Required channels missing: Engine Speed, Throttle Pedal and Idle Aim are needed for the idle analysis.'
         });
         return;
     }
@@ -1010,10 +876,10 @@ function runAnalysis(columnNames, data, sampleRate) {
     self.postMessage({ type: 'progress', phase: 'Computing statistics...', percent: 80 });
     var analysis = computeStatistics(events, channels);
 
-    // Step 5: Compute feed-forward diagnostics (if spark/air correction channels available)
-    self.postMessage({ type: 'progress', phase: 'Analyzing feed-forward...', percent: 85 });
-    var feedForwardDiags = computeFeedForwardDiagnostics(data, channels, sampleRate);
-    analysis.feedForwardDiags = feedForwardDiags;
+    // Step 5: Steady idle (rpm against aim, airflow against feed forward)
+    self.postMessage({ type: 'progress', phase: 'Analyzing steady idle...', percent: 85 });
+    analysis.steadyIdle = computeSteadyIdle(data, channels, sampleRate);
+    analysis.skippedEvents = events.skipped || 0;
 
     // Step 6: Build chart data
     self.postMessage({ type: 'progress', phase: 'Building chart data...', percent: 90 });
