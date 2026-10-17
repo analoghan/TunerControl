@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="../transient-fuel/styles.css">
   <link rel="stylesheet" href="../m1-config/styles.css">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="../lib/print-report.css">
 </head>
 <body>
   <div class="app-container">
@@ -52,6 +53,7 @@
           <span class="spacer"></span>
           <button id="save-btn" class="btn">Save</button>
           <button id="export-btn" class="btn btn-secondary">Export .xlsx</button>
+          <button id="pdf-btn" class="btn btn-secondary">Export PDF</button>
           <button id="delete-btn" class="btn btn-danger">Delete</button>
         </div>
         <p class="hint" id="revision-hint" hidden></p>
@@ -136,6 +138,27 @@
       <p id="image-viewer-caption" class="hint"></p>
     </dialog>
 
+    <!-- Export PDF: choose what the report holds -->
+    <dialog id="pdf-dialog" class="hist-dialog pdf-dialog" aria-labelledby="pdf-title">
+      <form method="dialog">
+        <div class="hist-head"><h2 id="pdf-title">Export PDF</h2></div>
+        <p class="hint">Builds a printable report of this harness and opens the print dialog: choose <strong>Save as PDF</strong> as the printer.
+          Diagrams are scaled to fit a page.</p>
+        <fieldset class="pdf-options">
+          <legend>Include</legend>
+          <div id="pdf-parts"></div>
+        </fieldset>
+        <fieldset class="pdf-options">
+          <legend>Options</legend>
+          <label><input type="checkbox" id="pdf-landscape"> Landscape pages (wide diagrams print larger)</label>
+        </fieldset>
+        <div class="pdf-actions">
+          <button value="cancel" class="btn btn-secondary">Cancel</button>
+          <button value="print" class="btn">Export PDF</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="empty-state" class="empty-state">
       <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5" aria-hidden="true">
         <path d="M4 7h4v10H4zM16 7h4v10h-4zM8 10h8M8 14h8"/>
@@ -154,6 +177,7 @@
   <script src="harness-diagram.js"></script>
   <script src="harness-system.js"></script>
   <script src="harness-store.js"></script>
+  <script src="../lib/print-report.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,0 +1,76 @@
+/*
+ * lib/print-report.css — Print layout for lib/print-report.js: while a report prints, only #print-report is shown,
+ * in a light theme on white (the pages themselves are dark). Page-specific classes inside reports are reset here.
+ */
+
+#print-report { display: none; }
+
+@media print {
+  @page { margin: 12mm; }
+  html.pr-printing body > *:not(#print-report) { display: none !important; }
+  html.pr-printing, html.pr-printing body { background: #fff !important; color: #111 !important; margin: 0 !important; padding: 0 !important; }
+  html.pr-printing #print-report { display: block; }
+
+  #print-report { font: 9pt/1.35 Helvetica, Arial, sans-serif; color: #111; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #print-report * { color: #111 !important; background: transparent !important; box-shadow: none !important; }
+  #print-report h1 { font-size: 16pt; margin: 0 0 2px; }
+  #print-report h2 { font-size: 12pt; margin: 0 0 6px; padding-bottom: 3px; border-bottom: 1.5px solid #E31837; break-after: avoid; }
+  #print-report h3 { font-size: 10pt; margin: 10px 0 4px; break-after: avoid; }
+  #print-report p { margin: 0 0 6px; }
+  .pr-head { margin-bottom: 12px; }
+  #print-report .pr-subtitle { color: #444 !important; }
+  .pr-meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 16px; margin: 8px 0; }
+  .pr-meta div { break-inside: avoid; }
+  #print-report .pr-meta dt { font-size: 7pt; text-transform: uppercase; letter-spacing: 0.04em; color: #666 !important; }
+  .pr-meta dd { margin: 0; font-weight: 600; word-break: break-word; }
+  #print-report .pr-generated { font-size: 7.5pt; color: #777 !important; }
+  .pr-section { margin-top: 14px; }
+  .pr-new-page { break-before: page; }
+  #print-report .pr-block { margin-bottom: 10px; }
+  #print-report .pr-note { color: #555 !important; font-size: 8pt; }
+
+  /* Tables: report tables and the pages' own table classes */
+  #print-report table { width: 100%; border-collapse: collapse; margin: 0 0 8px; font-size: 8pt; }
+  #print-report thead { display: table-header-group; }
+  #print-report tr { break-inside: avoid; }
+  #print-report th, #print-report td { border: 0.5pt solid #aaa !important; padding: 2px 5px !important; text-align: left; vertical-align: top;
+    white-space: normal !important; overflow-wrap: break-word; }
+  #print-report th { background: #eee !important; font-weight: 600; }
+  #print-report td.num { text-align: right; }
+  #print-report .table-scroll, #print-report .grid-wrap { overflow: visible !important; }
+  #print-report .grid-table { width: auto; font-size: 6.5pt; }
+  #print-report .grid-table th, #print-report .grid-table td { padding: 1px 3px !important; text-align: right; white-space: nowrap !important; }
+  #print-report tr.grid-row > td { padding: 4px 8px 8px !important; }
+
+  /* Controls and links from the live pages */
+  #print-report .btn, #print-report .pr-hide, #print-report input, #print-report select, #print-report .sr-only { display: none !important; }
+  #print-report .link-btn { border: 0; padding: 0; font: inherit; text-decoration: none; }
+  #print-report .param-name { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 7.5pt; }
+  #print-report .muted, #print-report .param-kind, #print-report .fw-detail, #print-report .fw-detail-inline, #print-report .grid-caption,
+  #print-report .more, #print-report .result-count { color: #666 !important; }
+  #print-report .fw-detail, #print-report .fw-detail-inline, #print-report .param-kind, #print-report .more,
+  #print-report .result-count, #print-report .grid-caption { font-size: 7pt !important; }
+  #print-report .fw-table td:first-child, #print-report .param-pin { white-space: nowrap !important; }
+  #print-report .user-label { border: 0.5pt solid #2e7d32 !important; background: #e8f5e9 !important; color: #1b5e20 !important;
+    border-radius: 8px; padding: 0 5px; font-size: 7pt; }
+  #print-report .change-from { color: #b45309 !important; }
+  #print-report .change-to { color: #1b7a2b !important; }
+  #print-report .change-item { border: 0.5pt solid #bbb; border-radius: 4px; padding: 5px 8px; margin-bottom: 6px; break-inside: avoid; }
+  #print-report .change-added { border-left: 3px solid #2e7d32; }
+  #print-report .change-removed { border-left: 3px solid #c62828; }
+  #print-report .summary-grid { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 6px 0 10px; }
+  #print-report .summary-stat { border: 0.5pt solid #bbb; border-radius: 4px; padding: 3px 8px; }
+  #print-report .stat-value { font-weight: 700; margin-right: 4px; }
+  #print-report .fw-sep { border: 0; border-top: 0.5pt solid #ccc; margin: 3px 0; }
+  #print-report .status-error, #print-report .marker-error { color: #c62828 !important; }
+  #print-report .status-warning, #print-report .marker-warning { color: #b45309 !important; }
+
+  /* Figures: diagrams scale down to fit a page */
+  .pr-figure { break-inside: avoid; margin: 0 0 10px; text-align: center; }
+  .pr-figure svg, .pr-figure img { max-width: 100%; max-height: 235mm; height: auto; }
+  #print-report.pr-landscape .pr-figure svg, #print-report.pr-landscape .pr-figure img { max-height: 160mm; }
+  /* A diagram right under the report heading shares its page */
+  #print-report .pr-head + .pr-section .pr-figure svg { max-height: 195mm; }
+  #print-report.pr-landscape .pr-head + .pr-section .pr-figure svg { max-height: 125mm; }
+  #print-report .pr-figure figcaption { font-size: 7.5pt; color: #555 !important; margin-top: 2px; }
+}

@@ -1153,16 +1153,17 @@ function loadTune(id) {
         .catch(function (err) { showError('Could not load the tune: ' + err.message); });
 }
 
-function renderTune() {
-    var el = $('tune-result'), pkg = state.tunePkg;
+function renderTune() { $('tune-result').innerHTML = tuneCompareHtml(state.show); }
+
+/** The tune comparison of state.tunePkg; show = 'problems' or 'all'. */
+function tuneCompareHtml(show) {
+    var pkg = state.tunePkg;
     if (!pkg) {
-        el.innerHTML = '<p class="muted">Import a tune (.m1pkg) in the <a href="../m1-config/index.html">M1 Config Viewer</a> to compare it with this harness.</p>';
-        return;
+        return '<p class="muted">Import a tune (.m1pkg) in the <a href="../m1-config/index.html">M1 Config Viewer</a> to compare it with this harness.</p>';
     }
     var hardware = (pkg.meta && pkg.meta['Summary.Hardware']) || '';
     if (!M1C_PINOUTS[hardware]) {
-        el.innerHTML = '<p class="muted">No pinout is known for ' + esc(hardware || 'this ECU') + ', so its pins cannot be compared.</p>';
-        return;
+        return '<p class="muted">No pinout is known for ' + esc(hardware || 'this ECU') + ', so its pins cannot be compared.</p>';
     }
     var useSystem = !!state.system && state.tuneScope === 'system';
     var r = harnessTuneCompare(useSystem ? systemMembers() : state.model, pkg, hardware, state.resourceNames), s = r.summary;
@@ -1172,8 +1173,8 @@ function renderTune() {
                 return '<div class="summary-stat status-' + k[0] + '"><span class="stat-value">' + s[k[0]] + '</span><span class="stat-label">' +
                     k[1] + '</span></div>';
             }).join('') + '</div>';
-    var rows = r.rows.filter(function (x) { return state.show === 'all' || x.status !== 'ok'; });
-    if (state.show !== 'all') {
+    var rows = r.rows.filter(function (x) { return show === 'all' || x.status !== 'ok'; });
+    if (show !== 'all') {
         rows.sort(function (a, b) { return STATUS_ORDER[a.status] - STATUS_ORDER[b.status]; });   // stable: pin order within a status
     }
     html += '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Pin</th>' + (useSystem ? '<th>Harness</th>' : '') +
@@ -1208,8 +1209,153 @@ function renderTune() {
                 return '<tr><td class="param-pin">' + esc(u.ids) + '</td><td class="param-name">' + esc(u.tune.join(', ')) + '</td></tr>';
             }).join('') + '</tbody></table></div>';
     }
-    el.innerHTML = html;
+    return html;
 }
+
+// =========================================================================
+// Export PDF: a printable report of the harness (lib/print-report.js)
+// =========================================================================
+
+var PDF_OPTIONS_KEY = 'harnessPdfOptions';
+var PDF_PARTS = [['overview', 'Overview diagram'], ['system', 'System overview diagram'], ['checks', 'Checks'],
+    ['connectors', 'Connector pin tables'], ['connectorDiagrams', 'A wiring diagram for each connector'],
+    ['splices', 'Splice tables'], ['spliceDiagrams', 'A wiring diagram for each splice'], ['pictures', 'Pictures'],
+    ['tune', 'Tune comparison (all pins)']];
+
+function pdfSavedOptions() {
+    try { return JSON.parse(localStorage.getItem(PDF_OPTIONS_KEY) || 'null'); } catch (e) { return null; }
+}
+
+/** Why a report part can't be included, or '' when it can. */
+function pdfPartUnavailable(id) {
+    if (id === 'system' && !state.system) return 'this harness is not in a system';
+    if ((id === 'connectors' || id === 'connectorDiagrams') && !state.model.connectors.length) return 'no connectors';
+    if ((id === 'splices' || id === 'spliceDiagrams') && !state.model.splices.length) return 'no splices';
+    if (id === 'pictures' && !state.model.connectors.concat(state.model.splices).some(function (b) { return (b.images || []).length; })) return 'no pictures';
+    if (id === 'tune' && !state.tunePkg) return 'choose a tune on the Tune comparison tab first';
+    return '';
+}
+
+function openPdfDialog() {
+    var saved = pdfSavedOptions() || { parts: ['overview', 'checks', 'connectors', 'splices'] };
+    $('pdf-parts').innerHTML = PDF_PARTS.map(function (p) {
+        var why = pdfPartUnavailable(p[0]);
+        return '<label' + (why ? ' class="disabled"' : '') + '><input type="checkbox" value="' + p[0] + '"' +
+            (!why && saved.parts.indexOf(p[0]) >= 0 ? ' checked' : '') + (why ? ' disabled' : '') + '> ' + esc(p[1]) +
+            (why ? ' <span class="count">' + esc(why) + '</span>' : '') + '</label>';
+    }).join('');
+    $('pdf-landscape').checked = !!saved.landscape;
+    $('pdf-dialog').returnValue = '';   // Escape keeps the last returnValue
+    $('pdf-dialog').showModal();
+}
+
+function pdfFigure(svg, caption) {
+    return '<figure class="pr-figure">' + svg + (caption ? '<figcaption>' + esc(caption) + '</figcaption>' : '') + '</figure>';
+}
+
+/** Object URLs of a block's pictures: { id: url }. */
+function pdfImageUrls(block) {
+    return Promise.all((block.images || []).map(function (im) {
+        return hsImageUrl(im.id).then(function (url) { return [im.id, url]; }, function () { return null; });
+    })).then(function (pairs) {
+        var urls = {};
+        pairs.forEach(function (p) { if (p) urls[p[0]] = p[1]; });
+        return urls;
+    });
+}
+
+/** One connector or splice: its header fields, its rows (with any problems), then its diagram or pictures. */
+function pdfBlockHtml(block, isConnector, opts, urls) {
+    var fields = (isConnector ? CONNECTOR_FIELDS : SPLICE_FIELDS).filter(function (f) { return f[0] !== 'id' && block[f[0]]; });
+    var html = '<div class="pr-block"><h3>' + esc(block.id) + (block.title && block.title !== block.id ? ' — ' + esc(block.title) : '') + '</h3>';
+    if (fields.length) {
+        html += '<p class="pr-note">' + fields.map(function (f) { return '<strong>' + esc(f[1]) + ':</strong> ' + esc(block[f[0]]); }).join(' · ') + '</p>';
+    }
+    var kind = isConnector ? 'pin' : 'wire', recs = isConnector ? block.pins : block.wires;
+    var keys = isConnector ? HARNESS_PIN_FIELDS : HARNESS_WIRE_FIELDS, cols = isConnector ? HARNESS_PIN_COLUMNS : HARNESS_WIRE_COLUMNS;
+    var problems = recs.some(function (r, i) { return rowIssues(kind, block.id, i).length; });
+    var headers = keys.map(function (k, i) { return esc((block.columns || [])[i] || cols[i] || k); });
+    if (problems) headers.push('Problem');
+    html += prTable(headers, recs.map(function (r, i) {
+        var row = keys.map(function (k) { return esc(r[k]); });
+        if (problems) {
+            row.push(rowIssues(kind, block.id, i).map(function (x) {
+                return '<span class="status-' + (x.severity === 'error' ? 'error' : 'warning') + '">' + esc(x.message) + '</span>';
+            }).join('<br>'));
+        }
+        return row;
+    })) + '</div>';
+    if (opts[isConnector ? 'connectorDiagrams' : 'spliceDiagrams']) {
+        html += pdfFigure(harnessBlockDiagram(state.model, block.id, { imageUrls: opts.pictures ? urls : {} }).svg, block.id + ' wiring diagram');
+    } else if (opts.pictures) {
+        html += (block.images || []).map(function (im) {
+            return urls[im.id] ? '<figure class="pr-figure"><img src="' + esc(urls[im.id]) + '" alt="">' +
+                (im.caption ? '<figcaption>' + esc(im.caption) + '</figcaption>' : '') + '</figure>' : '';
+        }).join('');
+    }
+    return html;
+}
+
+function pdfChecksHtml() {
+    var list = state.checks;
+    if (!list.length) return '<p>No problems found: every connection matches at both ends.</p>';
+    var errors = list.filter(function (i) { return i.severity === 'error'; }).length;
+    return '<p>' + errors + ' error' + (errors === 1 ? '' : 's') + ', ' + (list.length - errors) + ' warning' + (list.length - errors === 1 ? '' : 's') + '</p>' +
+        prTable(['', 'Where', 'Problem'], list.map(function (i) {
+            return ['<span class="status-' + (i.severity === 'error' ? 'error">Error' : 'warning">Warning') + '</span>', esc(i.where), esc(i.message)];
+        }));
+}
+
+function exportPdf() {
+    var opts = { parts: [], landscape: $('pdf-landscape').checked };
+    $('pdf-parts').querySelectorAll('input:checked:not(:disabled)').forEach(function (cb) { opts.parts.push(cb.value); opts[cb.value] = true; });
+    try { localStorage.setItem(PDF_OPTIONS_KEY, JSON.stringify({ parts: opts.parts, landscape: opts.landscape })); } catch (e) { /* this visit only */ }
+    var name = $('name-input').value.trim() || state.name || 'Harness';
+    var blocks = state.model.connectors.concat(state.model.splices);
+    var wantImages = opts.pictures && (opts.connectors || opts.connectorDiagrams || opts.splices || opts.spliceDiagrams);
+    return Promise.all(blocks.map(function (b) { return wantImages ? pdfImageUrls(b) : Promise.resolve({}); })).then(function (urlList) {
+        var urls = {};
+        blocks.forEach(function (b, i) { urls[b.id] = urlList[i]; });
+        var sections = [];
+        if (opts.overview) {
+            var hardware = state.tunePkg && state.tunePkg.meta ? state.tunePkg.meta['Summary.Hardware'] : '';
+            sections.push({ title: 'Overview', html: pdfFigure(harnessOverviewDiagram(state.model, { hardware: hardware || undefined }).svg) });
+        }
+        if (opts.system) {
+            sections.push({ title: 'System — ' + state.system.name, html: pdfFigure(harnessSystemDiagram(systemMembers(), systemMates().mates).svg),
+                            newPage: sections.length > 0 });
+        }
+        if (opts.checks) sections.push({ title: 'Checks', html: pdfChecksHtml(), newPage: sections.length > 0 });
+        [[true, 'connectors', 'connectorDiagrams', 'Connectors', state.model.connectors],
+         [false, 'splices', 'spliceDiagrams', 'Splices', state.model.splices]].forEach(function (k) {
+            if (!opts[k[1]] && !opts[k[2]]) return;
+            var tableOpts = opts[k[1]] ? opts : null;
+            k[4].forEach(function (b, i) {
+                var html = tableOpts ? pdfBlockHtml(b, k[0], opts, urls[b.id])
+                    : pdfFigure(harnessBlockDiagram(state.model, b.id, { imageUrls: opts.pictures ? urls[b.id] : {} }).svg, b.id + ' wiring diagram');
+                // Each block with a diagram starts a page; tables alone run on.
+                sections.push({ title: i === 0 ? k[3] : '', html: html, newPage: sections.length > 0 && (i === 0 || !!opts[k[2]]) });
+            });
+        });
+        if (opts.tune) {
+            sections.push({ title: 'Tune comparison — ' + (state.tunePkg.tuneName || state.tunePkg.fileName || ''), html: tuneCompareHtml('all'),
+                            newPage: sections.length > 0 });
+        }
+        var errors = state.checks.filter(function (i) { return i.severity === 'error'; }).length;
+        var meta = [['Harness', name], ['Revision', state.revision ? state.revision + (state.latest && state.revision !== state.latest ? ' of ' + state.latest : '') : 'not saved'],
+            ['System', state.system ? state.system.name : ''], ['Connectors', state.model.connectors.length], ['Splices', state.model.splices.length],
+            ['Checks', state.checks.length ? errors + ' errors, ' + (state.checks.length - errors) + ' warnings' : 'no problems']];
+        if (state.dirty) meta.push(['Note', 'Includes changes not saved yet']);
+        return prPrint({ title: 'Harness — ' + name, meta: meta, sections: sections, landscape: opts.landscape,
+                         fileName: name + (state.revision ? ' r' + state.revision : '') });
+    });
+}
+
+$('pdf-btn').addEventListener('click', function () { if (state.model) openPdfDialog(); });
+$('pdf-dialog').addEventListener('close', function () {
+    if ($('pdf-dialog').returnValue !== 'print') return;
+    exportPdf().catch(function (err) { showError('Could not build the PDF: ' + err.message); });
+});
 
 // =========================================================================
 // Events and startup

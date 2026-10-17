@@ -49,6 +49,7 @@
       <li><a href="#value-history">Value history across versions</a></li>
       <li><a href="#units">Units</a></li>
       <li><a href="#io">I/O resources, names and pins</a></li>
+      <li><a href="#pdf">Export PDF</a></li>
       <li><a href="#backup">Backups</a></li>
       <li><a href="#other">Used by other tools</a></li>
       <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -169,6 +170,18 @@
     <div class="tip"><strong>Tip:</strong> Enter the name as M1 Tune or the datasheet writes it — e.g. <code>UDIG2</code>,
       <code>Universal Digital Input 2</code>, <code>Half Bridge Output 4</code>, <code>Knock Input 1</code>, <code>E888 AVI3</code> — and the pin is
       filled in automatically.</div>
+
+    <h2 id="pdf">Export PDF</h2>
+    <p><strong>Export PDF</strong> (next to the type filters) builds a printable report of the tune you're viewing and opens the print dialog —
+      choose <strong>Save as PDF</strong> as the printer. The first page has the tune, firmware, ECU and last save note. Choose the tabs to
+      include: Changes (the comparison you last ran, up to 500 cells per table), Calibration Selections, Firmware Features, Driver Switches,
+      Firmware I/O, Engine Setup, Vehicle Setup, All Parameters and My Labels. Your labels print beside the settings they belong to.</p>
+    <ul>
+      <li><strong>Table values</strong> prints every table's cells under its row — large; the dialog estimates the page count.</li>
+      <li><strong>Only items matching the current search and filter</strong> narrows every section to what the tabs show now, e.g. search
+        <code>fuel.timing</code> to print just those tables.</li>
+      <li>Your choices are remembered in this browser.</li>
+    </ul>
 
     <h2 id="backup">Backups</h2>
     <p><strong>Export backup</strong> saves every imported tune and your resource names to a JSON file. <strong>Restore backup</strong> loads

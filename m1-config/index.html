@@ -6,6 +6,7 @@
   <title>M1 Config Viewer — TunerControl</title>
   <link rel="stylesheet" href="../transient-fuel/styles.css">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="../lib/print-report.css">
 </head>
 <body>
   <div class="app-container">
@@ -77,6 +78,7 @@
           <button class="filter-btn" data-filter="Table">Tables</button>
           <button class="filter-btn" data-filter="IOResourceParameter">I/O Resources</button>
         </div>
+        <button id="pdf-btn" class="btn btn-secondary">Export PDF</button>
       </div>
 
       <!-- Category tabs -->
@@ -178,6 +180,32 @@
       <div id="follow-body" class="follow-body"></div>
     </dialog>
 
+    <!-- Export PDF: choose what the report holds -->
+    <dialog id="pdf-dialog" class="hist-dialog pdf-dialog" aria-labelledby="pdf-title">
+      <form method="dialog" id="pdf-form">
+        <div class="hist-head">
+          <h2 id="pdf-title">Export PDF</h2>
+        </div>
+        <p class="hint">Builds a printable report of this tune and opens the print dialog: choose <strong>Save as PDF</strong> as the printer.</p>
+        <fieldset class="pdf-options">
+          <legend>Include</legend>
+          <div id="pdf-sections"></div>
+        </fieldset>
+        <fieldset class="pdf-options">
+          <legend>Options</legend>
+          <label><input type="checkbox" id="pdf-grids"> Table values (every table's cells, under its row)</label>
+          <label><input type="checkbox" id="pdf-filtered"> Only items matching the current search and filter <span id="pdf-filter-desc" class="muted"></span></label>
+          <label><input type="checkbox" id="pdf-unused"> Unused FIRMWARE channels</label>
+          <label><input type="checkbox" id="pdf-landscape"> Landscape pages</label>
+        </fieldset>
+        <p id="pdf-size" class="hint"></p>
+        <div class="pdf-actions">
+          <button value="cancel" class="btn btn-secondary" formnovalidate>Cancel</button>
+          <button value="print" id="pdf-print" class="btn">Export PDF</button>
+        </div>
+      </form>
+    </dialog>
+
     <!-- Empty state -->
     <div id="empty-state" class="empty-state">
       <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5" aria-hidden="true">
@@ -202,6 +230,7 @@
   <script src="links.js"></script>
   <script src="tune-db.js"></script>
   <script src="tune-api.js"></script>
+  <script src="../lib/print-report.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

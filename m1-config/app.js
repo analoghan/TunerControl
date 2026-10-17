@@ -112,11 +112,13 @@ function allLabels() {
     }).sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
 }
 
-function renderLabels() {
+function renderLabels() { $('tbl-labels').innerHTML = labelsHtml(state.search); }
+
+function labelsHtml(search) {
     var list = allLabels().filter(function (l) {
-        return !state.search || (l.key + ' ' + l.text).toLowerCase().indexOf(state.search) >= 0;
+        return !search || (l.key + ' ' + l.text).toLowerCase().indexOf(search) >= 0;
     });
-    $('tbl-labels').innerHTML = list.length
+    return list.length
         ? '<div class="result-count">' + list.length + ' label' + (list.length === 1 ? '' : 's') + '</div>' +
           '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Setting</th><th>Label</th><th></th></tr></thead><tbody>' +
           list.map(function (l) {
@@ -126,7 +128,7 @@ function renderLabels() {
                   '</td><td><span class="user-label">' + esc(l.text) + '</span></td><td class="num"><button class="btn btn-small btn-secondary" data-label-edit="' +
                   esc(l.key) + '">Edit</button></td></tr>';
           }).join('') + '</tbody></table></div>'
-        : '<p class="muted">' + (state.search ? 'No labels match the search.' : 'No labels yet. Open a setting (click its name), then use Add label in the Follow window.') + '</p>';
+        : '<p class="muted">' + (search ? 'No labels match the search.' : 'No labels yet. Open a setting (click its name), then use Add label in the Follow window.') + '</p>';
 }
 
 /** The entity an axis of a table reads (e.g. a driver switch), or null. */
@@ -435,9 +437,10 @@ function renderInfo() {
 // Rendering — panels
 // =========================================================================
 
-function matchesFilters(item) {
-    if (state.filter !== 'all' && item.kind !== state.filter) return false;
-    return !state.search || item.name.toLowerCase().indexOf(state.search) >= 0;
+function matchesFilters(item, view) {
+    view = view || state;
+    if (view.filter !== 'all' && item.kind !== view.filter) return false;
+    return !view.search || item.name.toLowerCase().indexOf(view.search) >= 0;
 }
 
 function renderActiveTab() {
@@ -449,21 +452,30 @@ function renderActiveTab() {
     else renderParams(state.tab);
 }
 
-function renderParams(tab) {
+function renderParams(tab) { $('tbl-' + tab).innerHTML = paramsHtml(tab, state); }
+
+/** The parameter table of a category tab. view: { filter, search, grids } — grids prints every table's values under its row. */
+function paramsHtml(tab, view) {
     var rows = [], shown = 0;
     for (var i = 0; i < state.index.length; i++) {
         var e = state.index[i];
         if (e.cats.indexOf(tab) < 0) continue;
-        if (state.filter !== 'all' && e.item.kind !== state.filter) continue;
-        if (state.search && e.lname.indexOf(state.search) < 0 && itemLabelText(e.item).indexOf(state.search) < 0) continue;
+        if (view.filter !== 'all' && e.item.kind !== view.filter) continue;
+        if (view.search && e.lname.indexOf(view.search) < 0 && itemLabelText(e.item).indexOf(view.search) < 0) continue;
         rows.push(paramRow(e.item, i));
+        if (view.grids && e.item.axes) rows.push('<tr class="grid-row"><td colspan="5">' + gridHtml(e.item, i) + '</td></tr>');
         shown++;
     }
-    $('tbl-' + tab).innerHTML = shown
+    return shown
         ? '<div class="result-count">' + shown.toLocaleString() + ' item' + (shown === 1 ? '' : 's') + '</div>' +
           '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Name</th><th>Value</th>' +
           '<th>Pin</th><th>Unit</th><th>Type</th></tr></thead><tbody>' + rows.join('') + '</tbody></table></div>'
         : '<p class="muted">No matching parameters.</p>';
+}
+
+/** Number of items in a category tab, for the PDF export options. */
+function categoryCount(tab) {
+    return state.index.filter(function (e) { return e.cats.indexOf(tab) >= 0; }).length;
 }
 
 function paramRow(item, idx) {
@@ -503,7 +515,7 @@ function gridHtml(item, idx) {
     var hist = state.packages.length > 1;
     var html = '<div class="grid-caption">Values' + (m1cUnit(item) ? ' (' + esc(m1cUnit(item)) + ')' : '') +
         ' · X: ' + axisLabel(axes.X) + (axes.Y ? ' · Y: ' + axisLabel(axes.Y) : '') +
-        (hist ? ' · click a cell for its history' : '') + '</div>';
+        (hist ? '<span class="pr-hide"> · click a cell for its history</span>' : '') + '</div>';
     function cellKey(ix, iy, iz) {
         return 'V[' + [ix, iy, iz].slice(0, item.axes.length).join(',') + ']';
     }
@@ -539,9 +551,11 @@ function toggleGrid(btn) {
     btn.setAttribute('aria-expanded', 'true');
 }
 
-function renderCalibrations() {
+function renderCalibrations() { $('tbl-calibrations').innerHTML = calibrationsHtml(); }
+
+function calibrationsHtml() {
     var sel = state.current.selections || [];
-    $('tbl-calibrations').innerHTML = sel.length
+    return sel.length
         ? '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Slot</th><th>Calibration</th>' +
           '<th>Version</th></tr></thead><tbody>' + sel.map(function (s) {
               return '<tr><td class="param-name">' + esc(s.slot) + '</td><td>' + esc(s.name) + '</td><td>' +
@@ -550,18 +564,20 @@ function renderCalibrations() {
         : '<p class="muted">This package has no library calibration selections.</p>';
 }
 
-function renderChanges() {
-    var el = $('tbl-changes'), c = state.compare;
+function renderChanges() { $('tbl-changes').innerHTML = changesHtml(state, MAX_CELLS_SHOWN); }
+
+/** The comparison of state.compare. view: { filter, search }; maxCells: changed table cells listed per item. */
+function changesHtml(view, maxCells) {
+    var c = state.compare;
     if (!c) {
-        el.innerHTML = '<p class="muted">' + (state.packages.length < 2
+        return '<p class="muted">' + (state.packages.length < 2
             ? 'Import another version of this tune to see what changed.'
             : 'Choose two tunes above and press Compare.') + '</p>';
-        return;
     }
     var d = c.diff;
     var items = d.items.filter(function (i) {
         var def = c.byName[i.name];
-        return matchesFilters(def || { name: i.name, kind: i.kind });
+        return matchesFilters(def || { name: i.name, kind: i.kind }, view);
     });
     var cellCount = d.items.reduce(function (n, i) { return n + i.cells.length; }, 0);
 
@@ -598,8 +614,8 @@ function renderChanges() {
     } else if (!items.length && d.items.length) {
         html += '<p class="muted">No changed items match the current search/filter.</p>';
     }
-    html += items.map(function (ch) { return changeHtml(ch, c.byName[ch.name]); }).join('');
-    el.innerHTML = html;
+    html += items.map(function (ch) { return changeHtml(ch, c.byName[ch.name], maxCells); }).join('');
+    return html;
 }
 
 function stat(value, label) {
@@ -609,7 +625,7 @@ function stat(value, label) {
 
 var MAX_CELLS_SHOWN = 40;
 
-function changeHtml(ch, item) {
+function changeHtml(ch, item, maxCells) {
     var cls = ch.change === 'added' ? ' change-added' : ch.change === 'removed' ? ' change-removed' : '';
     var html = '<div class="change-item' + cls + '"><h3><span class="param-name">' +
         (links().groups[m1lOwnerGroup(ch.name)] ? followLink('g:' + m1lOwnerGroup(ch.name), esc(ch.name), 'follow-name') : esc(ch.name)) + '</span>' +
@@ -629,14 +645,14 @@ function changeHtml(ch, item) {
             (unit ? ' ' + esc(unit) : '') + ' <button class="link-btn" data-hist-name="' + esc(ch.name) + '" data-hist-key="">history</button></div></div>';
     }
     html += '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Cell</th><th>From</th><th>To</th></tr></thead><tbody>';
-    ch.cells.slice(0, MAX_CELLS_SHOWN).forEach(function (cell) {
+    ch.cells.slice(0, maxCells).forEach(function (cell) {
         html += '<tr><td><button class="link-btn" data-hist-name="' + esc(ch.name) + '" data-hist-key="' + esc(cell.key) +
             '" title="History of this cell">' + esc(m1cCellLabel(item, cell.key)) + '</button></td><td class="num change-from">' +
             esc(m1cFormatCell(item, cell.key, cell.from)) + '</td><td class="num change-to">' +
             esc(m1cFormatCell(item, cell.key, cell.to)) + '</td></tr>';
     });
     html += '</tbody></table></div>';
-    if (ch.cells.length > MAX_CELLS_SHOWN) html += '<div class="more">… and ' + (ch.cells.length - MAX_CELLS_SHOWN) + ' more cells</div>';
+    if (ch.cells.length > maxCells) html += '<div class="more">… and ' + (ch.cells.length - maxCells) + ' more cells</div>';
     if (unit) html += '<div class="more">Values in ' + esc(unit) + '</div>';
     return html + '</div>';
 }
@@ -767,8 +783,10 @@ function fwCanHtml(can) {
         (scaled ? ' · ×' + fwNum(can.multiplier) + ' ÷ ' + fwNum(can.divisor) + ' + ' + fwNum(can.adder) : '') + '</div>';
 }
 
-function renderFirmwareIo() {
-    var ix = links(), rows = m1lFirmwareTable(ix), showUnused = $('fw-show-unused').checked;
+function renderFirmwareIo() { $('tbl-fwio').innerHTML = firmwareIoHtml($('fw-show-unused').checked, state.search); }
+
+function firmwareIoHtml(showUnused, search) {
+    var ix = links(), rows = m1lFirmwareTable(ix);
     var used = rows.filter(function (r) { return r.sources.length || r.targets.length; });
     var html = '<div class="result-count">' + used.length + ' of ' + rows.length + ' FIRMWARE channels in use · ' +
         used.filter(function (r) { return r.sources.length; }).length + ' written · ' +
@@ -795,15 +813,123 @@ function renderFirmwareIo() {
                  html: '<tr' + (r.sources.length || r.targets.length ? '' : ' class="fw-unused-row"') + '><td class="param-name">' +
                     followLink(r.key, esc(r.title)) + '</td><td>' + (from || '<span class="muted">—</span>') + '</td><td>' +
                     (to || '<span class="muted">—</span>') + '</td><td>' + (then.join('<br>') || '<span class="muted">—</span>') + '</td></tr>' };
-    }).filter(function (r) { return !state.search || r.text.indexOf(state.search) >= 0; });
+    }).filter(function (r) { return !search || r.text.indexOf(search) >= 0; });
     html += body.length
         ? '<div class="table-scroll"><table class="event-table data-table fw-table"><thead><tr><th>Channel</th><th>From (writes it)</th>' +
           '<th>To (reads it)</th><th>Then used by</th></tr></thead><tbody>' + body.map(function (r) { return r.html; }).join('') + '</tbody></table></div>'
         : '<p class="muted">No matching FIRMWARE channels.</p>';
-    $('tbl-fwio').innerHTML = html;
+    return html;
 }
 
 $('fw-show-unused').addEventListener('change', function () { if (state.tab === 'fwio') renderFirmwareIo(); });
+
+// =========================================================================
+// Export PDF: a printable report of the chosen tabs (lib/print-report.js)
+// =========================================================================
+
+var PDF_SECTIONS = [['changes', 'Changes'], ['calibrations', 'Calibration Selections'], ['firmware', 'Firmware Feature Switches'],
+    ['driver', 'Driver Switches'], ['fwio', 'Firmware I/O Channels'], ['engine', 'Engine Setup Parameters'],
+    ['vehicle', 'Vehicle Setup Parameters'], ['all', 'All Parameters'], ['labels', 'My Labels']];
+var PDF_OPTIONS_KEY = 'm1cPdfOptions';
+var PDF_ROWS_PER_PAGE = 45;
+
+function pdfSavedOptions() {
+    try { return JSON.parse(localStorage.getItem(PDF_OPTIONS_KEY) || 'null'); } catch (e) { return null; }
+}
+
+/** Rows a section adds to the report (table grids count their rows), or null when it has nothing to show. */
+function pdfSectionRows(id, view, grids) {
+    if (id === 'changes') {
+        return state.compare ? state.compare.diff.items.reduce(function (n, i) { return n + 1 + Math.min(i.cells.length, 500); }, 0) || null : null;
+    }
+    if (id === 'calibrations') return (state.current.selections || []).length || null;
+    if (id === 'fwio') return 32;
+    if (id === 'labels') return allLabels().length || null;
+    var n = 0;
+    state.index.forEach(function (e) {
+        if (e.cats.indexOf(id) < 0 || (view && !matchesFilters(e.item, view))) return;
+        n += 1;
+        if (grids && e.item.axes) {
+            var y = e.item.axes.filter(function (a) { return a.axis === 'Y'; })[0], z = e.item.axes.filter(function (a) { return a.axis === 'Z'; })[0];
+            n += 3 + (y ? y.sites : 1) * (z ? z.sites : 1);
+        }
+    });
+    return n || null;
+}
+
+function pdfView() {
+    return $('pdf-filtered').checked ? { filter: state.filter, search: state.search } : { filter: 'all', search: '' };
+}
+
+function pdfUpdateSize() {
+    var view = pdfView(), grids = $('pdf-grids').checked, rows = 0;
+    $('pdf-sections').querySelectorAll('input').forEach(function (cb) {
+        if (cb.checked && !cb.disabled) rows += pdfSectionRows(cb.value, view, grids) || 0;
+    });
+    var pages = Math.max(1, Math.ceil(rows / PDF_ROWS_PER_PAGE));
+    $('pdf-size').textContent = rows ? 'About ' + rows.toLocaleString() + ' rows — roughly ' + pages.toLocaleString() + ' page' + (pages === 1 ? '' : 's') +
+        (pages > 100 ? '. That is a big report: it can take a while to lay out.' : '.') : 'Nothing chosen yet.';
+    $('pdf-print').disabled = !rows;
+}
+
+function openPdfDialog() {
+    var saved = pdfSavedOptions() || { sections: [state.tab === 'all' ? 'vehicle' : state.tab] };
+    var active = state.filter !== 'all' || !!state.search;
+    $('pdf-sections').innerHTML = PDF_SECTIONS.map(function (s) {
+        var rows = pdfSectionRows(s[0], null, false), title = s[0] === 'changes' && state.compare
+            ? 'Changes: ' + (state.compare.a.tuneName || state.compare.a.fileName) + ' → ' + (state.compare.b.tuneName || state.compare.b.fileName) : s[1];
+        var note = s[0] === 'changes' && !state.compare ? 'compare two tunes first' : s[0] === 'labels' && rows === null ? 'no labels yet'
+            : rows === null ? 'none in this tune'
+            : s[0] === 'fwio' ? '' : rows.toLocaleString() + (s[0] === 'changes' ? ' rows' : ' items');
+        return '<label' + (rows === null ? ' class="disabled"' : '') + '><input type="checkbox" value="' + s[0] + '"' +
+            (rows !== null && saved.sections.indexOf(s[0]) >= 0 ? ' checked' : '') + (rows === null ? ' disabled' : '') + '> ' + esc(title) +
+            (note ? ' <span class="count">' + esc(note) + '</span>' : '') + '</label>';
+    }).join('');
+    $('pdf-grids').checked = !!saved.grids;
+    $('pdf-unused').checked = !!saved.unused;
+    $('pdf-landscape').checked = !!saved.landscape;
+    $('pdf-filtered').checked = active;
+    $('pdf-filtered').disabled = !active;
+    $('pdf-filtered').parentNode.classList.toggle('disabled', !active);
+    $('pdf-filter-desc').textContent = active ? '(' + [state.search ? '"' + state.search + '"' : '', state.filter !== 'all' ? state.filter : '']
+        .filter(Boolean).join(', ') + ')' : '(none active)';
+    pdfUpdateSize();
+    $('pdf-dialog').returnValue = '';   // Escape keeps the last returnValue
+    $('pdf-dialog').showModal();
+}
+
+function exportPdf() {
+    var chosen = [];
+    $('pdf-sections').querySelectorAll('input:checked:not(:disabled)').forEach(function (cb) { chosen.push(cb.value); });
+    var opts = { sections: chosen, grids: $('pdf-grids').checked, unused: $('pdf-unused').checked, landscape: $('pdf-landscape').checked };
+    try { localStorage.setItem(PDF_OPTIONS_KEY, JSON.stringify(opts)); } catch (e) { /* remembered for this visit only */ }
+    var p = state.current, view = pdfView();
+    view.grids = opts.grids;
+    var sections = chosen.map(function (id, n) {
+        var title = PDF_SECTIONS.filter(function (s) { return s[0] === id; })[0][1], html;
+        if (id === 'changes') html = changesHtml(view, 500);
+        else if (id === 'calibrations') html = calibrationsHtml();
+        else if (id === 'fwio') html = firmwareIoHtml(opts.unused, view.search);
+        else if (id === 'labels') html = labelsHtml(view.search);
+        else html = paramsHtml(id, view);
+        return { title: title, html: html, newPage: n > 0 && id !== 'labels' && id !== 'calibrations' };
+    });
+    var name = p.tuneName || p.fileName || 'Tune';
+    var meta = [['Tune', name], ['Firmware', p.firmware && p.firmware.name], ['Version', p.firmware && p.firmware.version],
+        ['Saved', fmtDate(p.modified)], ['ECU', [hardwareOf(p), p.serial !== null && p.serial !== undefined ? '#' + p.serial : ''].filter(Boolean).join(' ')],
+        ['Parameters', p.items.length.toLocaleString()]];
+    if (lastNote(p)) meta.push(['Last note', lastNote(p)]);
+    if (view.search || view.filter !== 'all') meta.push(['Filtered', [view.search ? '"' + view.search + '"' : '', view.filter !== 'all' ? view.filter : ''].filter(Boolean).join(', ')]);
+    return prPrint({ title: 'M1 Config — ' + name, subtitle: p.fileName && p.fileName !== name ? p.fileName : '', meta: meta, sections: sections,
+                     fileName: name + ' - config', landscape: opts.landscape });
+}
+
+$('pdf-btn').addEventListener('click', function () { if (state.current) openPdfDialog(); });
+$('pdf-form').addEventListener('change', pdfUpdateSize);
+$('pdf-dialog').addEventListener('close', function () {
+    if ($('pdf-dialog').returnValue !== 'print') return;
+    exportPdf().catch(function (err) { showError('Could not build the PDF: ' + err.message); });
+});
 
 // =========================================================================
 // Follow: what a setting group or I/O resource uses and what references it
