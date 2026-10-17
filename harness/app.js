@@ -275,8 +275,9 @@ function selectTab(tab) {
         t.classList.toggle('active', on);
         t.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    ['connectors', 'splices', 'diagram', 'system', 'checks', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
+    ['connectors', 'splices', 'diagram', 'system', 'can', 'checks', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
     if (tab === 'system') renderSystem();
+    if (tab === 'can') renderCan();
     if (tab === 'checks') renderChecks();
     if (tab === 'diagram') renderDiagram();
     if (tab === 'tune') loadTunes();
@@ -293,6 +294,7 @@ function renderAll() {
     if (state.tab === 'tune') renderTune();
     if (state.tab === 'diagram') renderDiagram();
     if (state.tab === 'system') renderSystem();
+    if (state.tab === 'can') renderCan();
 }
 
 // =========================================================================
@@ -834,12 +836,25 @@ function renderDiagram() {
         extra += '<option value="' + esc(state.diagram) + '">Circuit from ' + esc((memberName(tp[0]) ? memberName(tp[0]) + ' · ' : '') +
             tp.slice(1).join('|')) + '</option>';
     }
+    var nets = canNetworks();
+    if (nets.length) {
+        extra += '<optgroup label="CAN networks">' + nets.map(function (n) {
+            return '<option value="can:' + esc(n.id) + '">' + esc(n.name || 'CAN network') + '</option>';
+        }).join('') + '</optgroup>';
+    }
     sel.innerHTML = opts + extra + group('Connectors', state.model.connectors) + group('Splices', state.model.splices);
     if (state.diagram === 'system' && !state.system) state.diagram = '';
-    if (state.diagram && state.diagram !== 'system' && !/^trace:/.test(state.diagram) &&
+    if (/^can:/.test(state.diagram) && !canFindNet(state.diagram.slice(4))) state.diagram = '';
+    if (state.diagram && state.diagram !== 'system' && !/^(trace|can):/.test(state.diagram) &&
         !findConnector(state.diagram) && !findSplice(state.diagram)) state.diagram = '';
     sel.value = state.diagram;
     if (state.diagram === 'system' || /^trace:/.test(state.diagram)) { renderSystemDiagram(); return; }
+    if (/^can:/.test(state.diagram)) {
+        renderDiagram.seq = (renderDiagram.seq || 0) + 1;
+        $('diagram-hint').textContent = 'Each connection is a twisted pair (CAN-H / CAN-L). Click a device or hub to edit it.';
+        $('diagram').innerHTML = canNetworkDiagram(canFindNet(state.diagram.slice(4))).svg;
+        return;
+    }
     var focus = state.diagram ? findConnector(state.diagram) || findSplice(state.diagram) : null;
     $('diagram-hint').textContent = focus
         ? 'Click a pin to edit it, or a connector or splice header to show its diagram.'
@@ -978,6 +993,8 @@ function renderSystemSelect() {
     $('tune-scope').hidden = !state.system;
     var joins = state.system ? systemMates().mates.length : 0;
     $('count-system').textContent = state.system ? state.system.harnesses.length + ' harnesses' + (joins ? ', ' + joins + ' joins' : '') : '';
+    $('count-can').textContent = canCountText();
+    if (state.tab === 'can') renderCan();
 }
 
 function saveSystem(system) {
@@ -1246,7 +1263,7 @@ var PDF_OPTIONS_KEY = 'harnessPdfOptions';
 var PDF_PARTS = [['overview', 'Overview diagram'], ['system', 'System overview diagram'], ['checks', 'Checks'],
     ['connectors', 'Connector pin tables'], ['connectorDiagrams', 'A wiring diagram for each connector'],
     ['splices', 'Splice tables'], ['spliceDiagrams', 'A wiring diagram for each splice'], ['pictures', 'Pictures'],
-    ['tune', 'Tune comparison (all pins)']];
+    ['can', 'CAN networks (tables and diagrams)'], ['tune', 'Tune comparison (all pins)']];
 
 function pdfSavedOptions() {
     try { return JSON.parse(localStorage.getItem(PDF_OPTIONS_KEY) || 'null'); } catch (e) { return null; }
@@ -1259,6 +1276,7 @@ function pdfPartUnavailable(id) {
     if ((id === 'splices' || id === 'spliceDiagrams') && !state.model.splices.length) return 'no splices';
     if (id === 'pictures' && !state.model.connectors.concat(state.model.splices).some(function (b) { return (b.images || []).length; })) return 'no pictures';
     if (id === 'tune' && !state.tunePkg) return 'choose a tune on the Tune comparison tab first';
+    if (id === 'can' && !canNetworks().length) return state.system ? 'no CAN networks in the system' : 'this harness is not in a system';
     return '';
 }
 
@@ -1273,6 +1291,30 @@ function openPdfDialog() {
     $('pdf-landscape').checked = !!saved.landscape;
     $('pdf-dialog').returnValue = '';   // Escape keeps the last returnValue
     $('pdf-dialog').showModal();
+}
+
+/** One CAN network: devices, hubs and terminators, its checks, then its diagram. */
+function pdfCanHtml(net) {
+    function hubName(id) { var h = id ? net.hubs.filter(function (x) { return x.id === id; })[0] : null; return h ? esc(h.name) : 'Not connected'; }
+    var speed = canBitrate(net.bitrate), checks = canNetworkChecks(net);
+    var html = '<div class="pr-block"><h3>' + esc(net.name) + '</h3><p class="pr-note"><strong>Speed:</strong> ' + esc(speed ? canBitrateText(speed) : 'not set') +
+        ' · <strong>Terminations:</strong> ' + canTerminations(net) + (net.notes ? ' · ' + esc(net.notes) : '') + '</p>';
+    html += prTable(['Device', 'Hub', 'Termination', 'Speed', 'Notes'], net.devices.map(function (d) {
+        var own = canBitrate(d.bitrate);
+        return [esc(d.name), hubName(d.hub), d.termination ? '120 Ω on' : 'off', esc(own ? canBitrateText(own) : speed ? canBitrateText(speed) + ' (network)' : ''), esc(d.notes)];
+    }));
+    if (net.hubs.length) {
+        html += prTable(['Hub', 'Connects to hubs', 'Notes'], net.hubs.map(function (h) {
+            return [esc(h.name), net.hubs.filter(function (o) { return o !== h && canHubLinked(net, h.id, o.id); }).map(function (o) { return esc(o.name); }).join(', '), esc(h.notes)];
+        }));
+    }
+    if (net.terminators.length) html += prTable(['Terminator (120 Ω)', 'Plugged into hub'], net.terminators.map(function (t) { return [esc(t.name), hubName(t.hub)]; }));
+    if (checks.length) {
+        html += '<p class="pr-note">' + checks.map(function (c) {
+            return '<span class="status-' + (c.severity === 'error' ? 'error' : 'warning') + '">' + esc(c.where + ' — ' + c.message) + '</span>';
+        }).join('<br>') + '</p>';
+    }
+    return html + '</div>' + pdfFigure(canNetworkDiagram(net).svg, net.name + ' — twisted-pair wiring');
 }
 
 function pdfFigure(svg, caption) {
@@ -1364,6 +1406,11 @@ function exportPdf() {
                 sections.push({ title: i === 0 ? k[3] : '', html: html, newPage: sections.length > 0 && (i === 0 || !!opts[k[2]]) });
             });
         });
+        if (opts.can) {
+            canNetworks().forEach(function (net, i) {
+                sections.push({ title: i === 0 ? 'CAN networks' : '', html: pdfCanHtml(net), newPage: sections.length > 0 });
+            });
+        }
         if (opts.tune) {
             sections.push({ title: 'Tune comparison — ' + (state.tunePkg.tuneName || state.tunePkg.fileName || ''), html: tuneCompareHtml('all'),
                             newPage: sections.length > 0 });
@@ -1382,6 +1429,205 @@ $('pdf-btn').addEventListener('click', function () { if (state.model) openPdfDia
 $('pdf-dialog').addEventListener('close', function () {
     if ($('pdf-dialog').returnValue !== 'print') return;
     exportPdf().catch(function (err) { showError('Could not build the PDF: ' + err.message); });
+});
+
+// =========================================================================
+// CAN networks of the system (harness-can.js), saved with the system
+// =========================================================================
+
+function canNetworks() {
+    if (!state.system) return [];
+    if (!state.system.canNetworks) state.system.canNetworks = [];
+    return state.system.canNetworks;
+}
+
+function canFindNet(id) { return canNetworks().filter(function (n) { return n.id === id; })[0] || null; }
+
+function canList(net, kind) { return kind === 'hub' ? net.hubs : kind === 'device' ? net.devices : net.terminators; }
+
+var canSaveTimer = null;
+
+/** Save the system soon (typing) or now. */
+function canSave(soon) {
+    clearTimeout(canSaveTimer);
+    var sys = state.system;
+    if (!sys) return;
+    canSaveTimer = setTimeout(function () {
+        hsSaveSystem(sys.id, sys).catch(function (err) { showError('Could not save the CAN networks: ' + err.message); });
+    }, soon ? 600 : 0);
+}
+
+function canCountText() {
+    var n = canNetworks().length;
+    return n ? String(n) : '';
+}
+
+function canChecksHtml(net) {
+    var checks = canNetworkChecks(net);
+    return checks.length ? '<ul class="can-checks">' + checks.map(function (c) {
+        return '<li>' + markerHtml([c]) + ' <strong>' + esc(c.where) + '</strong> — ' + esc(c.message) + '</li>';
+    }).join('') + '</ul>' : '<p class="ok-banner">Two terminations, one speed, everything connected.</p>';
+}
+
+function canInput(net, kind, item, field, attrs) {
+    return '<input type="text" class="text-input can-input can-' + field + '" data-net="' + esc(net.id) + '" data-kind="' + kind + '"' +
+        (item ? ' data-id="' + esc(item.id) + '"' : '') + ' data-field="' + field + '" value="' + esc((item || net)[field]) + '"' + (attrs || '') + '>';
+}
+
+function canHubSelect(net, kind, item) {
+    return '<select class="can-input" data-net="' + esc(net.id) + '" data-kind="' + kind + '" data-id="' + esc(item.id) + '" data-field="hub" ' +
+        'aria-label="Hub for ' + esc(item.name) + '"><option value="">Not connected</option>' + net.hubs.map(function (h) {
+            return '<option value="' + esc(h.id) + '"' + (h.id === item.hub ? ' selected' : '') + '>' + esc(h.name || '(no name)') + '</option>';
+        }).join('') + '</select>';
+}
+
+function canRemoveBtn(net, kind, item) {
+    return '<button class="btn btn-small btn-danger" data-can-action="remove" data-net="' + esc(net.id) + '" data-kind="' + kind + '" data-id="' +
+        esc(item.id) + '" aria-label="Remove ' + esc(item.name) + '">&times;</button>';
+}
+
+function canNetworkHtml(net) {
+    var html = '<section class="system-section can-network" data-net-section="' + esc(net.id) + '"><div class="can-head">' +
+        '<label>Network ' + canInput(net, 'net', null, 'name', ' aria-label="Network name"') + '</label>' +
+        '<label>Speed ' + canInput(net, 'net', null, 'bitrate', ' list="can-bitrates" placeholder="kbit/s" aria-label="Network speed (kbit/s)"') + ' kbit/s</label>' +
+        '<label class="can-notes">Notes ' + canInput(net, 'net', null, 'notes', ' aria-label="Network notes"') + '</label>' +
+        '<button class="btn btn-small btn-secondary" data-can-action="diagram" data-net="' + esc(net.id) + '">Diagram</button>' +
+        '<button class="btn btn-small btn-danger" data-can-action="delete-network" data-net="' + esc(net.id) + '">Delete network</button></div>' +
+        '<div class="can-checks-wrap" id="can-checks-' + esc(net.id) + '">' + canChecksHtml(net) + '</div>';
+
+    html += '<h4>Devices</h4>' + (net.devices.length ? '<div class="table-scroll"><table class="event-table data-table can-table"><thead><tr>' +
+        '<th>Device</th><th>Hub</th><th>Termination</th><th>Speed (kbit/s)</th><th>Notes</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
+        net.devices.map(function (d) {
+            return '<tr><td>' + canInput(net, 'device', d, 'name', ' aria-label="Device name"') + '</td><td>' + canHubSelect(net, 'device', d) + '</td>' +
+                '<td><label class="check-label"><input type="checkbox" class="can-input" data-net="' + esc(net.id) + '" data-kind="device" data-id="' +
+                esc(d.id) + '" data-field="termination"' + (d.termination ? ' checked' : '') + '> 120 Ω on</label></td>' +
+                '<td>' + canInput(net, 'device', d, 'bitrate', ' list="can-bitrates" placeholder="' + esc(net.bitrate ? 'network' : 'kbit/s') +
+                    '" aria-label="Device speed (kbit/s)"') + '</td>' +
+                '<td>' + canInput(net, 'device', d, 'notes', ' aria-label="Device notes"') + '</td><td class="actions">' + canRemoveBtn(net, 'device', d) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<p class="muted">No devices yet.</p>') +
+        '<button class="btn btn-small btn-secondary" data-can-action="add-device" data-net="' + esc(net.id) + '">Add device</button>';
+
+    html += '<h4>Hubs</h4>' + (net.hubs.length ? '<div class="table-scroll"><table class="event-table data-table can-table"><thead><tr>' +
+        '<th>Hub</th><th>Connects to hubs</th><th>Notes</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
+        net.hubs.map(function (h) {
+            var others = net.hubs.filter(function (o) { return o !== h; });
+            return '<tr><td>' + canInput(net, 'hub', h, 'name', ' aria-label="Hub name"') + '</td><td>' + (others.length ? others.map(function (o) {
+                return '<label class="check-label can-link"><input type="checkbox" class="can-input" data-net="' + esc(net.id) + '" data-kind="hub" data-id="' +
+                    esc(h.id) + '" data-field="link" data-other="' + esc(o.id) + '"' + (canHubLinked(net, h.id, o.id) ? ' checked' : '') + '> ' +
+                    '<span data-hub-name="' + esc(o.id) + '">' + esc(o.name || '(no name)') + '</span></label>';
+            }).join(' ') : '<span class="muted">No other hubs</span>') + '</td>' +
+                '<td>' + canInput(net, 'hub', h, 'notes', ' aria-label="Hub notes"') + '</td><td class="actions">' + canRemoveBtn(net, 'hub', h) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<p class="muted">No hubs yet.</p>') +
+        '<button class="btn btn-small btn-secondary" data-can-action="add-hub" data-net="' + esc(net.id) + '">Add hub</button>';
+
+    html += '<h4>Terminators</h4>' + (net.terminators.length ? '<div class="table-scroll"><table class="event-table data-table can-table"><thead><tr>' +
+        '<th>Terminator (120 Ω)</th><th>Plugged into hub</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
+        net.terminators.map(function (t) {
+            return '<tr><td>' + canInput(net, 'term', t, 'name', ' aria-label="Terminator name"') + '</td><td>' + canHubSelect(net, 'term', t) + '</td>' +
+                '<td class="actions">' + canRemoveBtn(net, 'term', t) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<p class="muted">No standalone terminators.</p>') +
+        '<button class="btn btn-small btn-secondary" data-can-action="add-term" data-net="' + esc(net.id) + '">Add terminator</button>';
+    return html + '</section>';
+}
+
+function renderCan() {
+    var el = $('can');
+    $('count-can').textContent = canCountText();
+    if (!state.system) {
+        el.innerHTML = '<p class="muted">CAN networks belong to a harness system. Choose a system in the <strong>System</strong> list above ' +
+            '(or <strong>New system…</strong>) to add networks to it.</p>' + (state.id ? '' : '<p class="muted">Save the harness first.</p>');
+        return;
+    }
+    el.innerHTML = '<datalist id="can-bitrates">' + CAN_BITRATES.map(function (b) { return '<option value="' + b + '">'; }).join('') + '</datalist>' +
+        canNetworks().map(canNetworkHtml).join('') +
+        '<button class="btn btn-secondary" data-can-action="add-network">Add CAN network</button>';
+}
+
+/** Show a newly added row's name field. */
+function canFocus(id) {
+    var input = $('can').querySelector('input[data-id="' + id + '"][data-field="name"]');
+    if (input) { input.focus(); input.select(); }
+}
+
+$('can').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-can-action]');
+    if (!b || !state.system) return;
+    var action = b.getAttribute('data-can-action'), net = canFindNet(b.getAttribute('data-net')), item, focus = null;
+    if (action === 'add-network') {
+        var n = canNewNetwork('CAN ' + (canNetworks().length + 1));
+        canNetworks().push(n);
+        focus = n.id;
+        renderCan(); canSave();
+        var input = $('can').querySelector('input[data-net="' + n.id + '"][data-kind="net"][data-field="name"]');
+        if (input) { input.focus(); input.select(); }
+        return;
+    }
+    if (!net) return;
+    if (action === 'delete-network') {
+        if (!window.confirm('Delete the CAN network "' + net.name + '" with its ' + net.devices.length + ' devices and ' + net.hubs.length + ' hubs?')) return;
+        state.system.canNetworks = canNetworks().filter(function (x) { return x !== net; });
+    } else if (action === 'diagram') {
+        state.diagram = 'can:' + net.id;
+        selectTab('diagram');
+        return;
+    } else if (action === 'add-device') {
+        item = { id: canId(), name: 'Device ' + (net.devices.length + 1), hub: net.hubs.length === 1 ? net.hubs[0].id : '', termination: false, bitrate: '', notes: '' };
+        net.devices.push(item);
+    } else if (action === 'add-hub') {
+        item = { id: canId(), name: 'Hub ' + (net.hubs.length + 1), notes: '' };
+        if (net.hubs.length) canSetHubLink(net, net.hubs[net.hubs.length - 1].id, item.id, true);   // usually chained to the last one
+        net.hubs.push(item);
+    } else if (action === 'add-term') {
+        item = { id: canId(), name: 'Terminator ' + (net.terminators.length + 1), hub: net.hubs.length === 1 ? net.hubs[0].id : '' };
+        net.terminators.push(item);
+    } else if (action === 'remove') {
+        var kind = b.getAttribute('data-kind'), id = b.getAttribute('data-id');
+        if (kind === 'hub') canRemoveHub(net, id);
+        else if (kind === 'device') net.devices = net.devices.filter(function (x) { return x.id !== id; });
+        else net.terminators = net.terminators.filter(function (x) { return x.id !== id; });
+    }
+    if (item) focus = item.id;
+    renderCan(); canSave();
+    if (focus) canFocus(focus);
+});
+
+// Typing: update and save, refresh the checks and hub names in place (re-rendering would lose the focus).
+$('can').addEventListener('input', function (e) {
+    var t = e.target;
+    if (!t.classList.contains('can-input') || t.type === 'checkbox' || t.tagName === 'SELECT') return;
+    var net = canFindNet(t.getAttribute('data-net'));
+    if (!net) return;
+    var kind = t.getAttribute('data-kind'), field = t.getAttribute('data-field');
+    var target = kind === 'net' ? net : canList(net, kind).filter(function (x) { return x.id === t.getAttribute('data-id'); })[0];
+    if (!target) return;
+    target[field] = field === 'bitrate' ? t.value.trim() : t.value;
+    if (kind === 'hub' && field === 'name') {
+        $('can').querySelectorAll('option[value="' + target.id + '"], [data-hub-name="' + target.id + '"]').forEach(function (o) {
+            o.textContent = target.name || '(no name)';
+        });
+    }
+    if (kind === 'net' && field === 'bitrate') {
+        $('can').querySelectorAll('input[data-net="' + net.id + '"][data-kind="device"][data-field="bitrate"]').forEach(function (i) {
+            i.placeholder = net.bitrate ? 'network' : 'kbit/s';
+        });
+    }
+    var checks = document.getElementById('can-checks-' + net.id);
+    if (checks) checks.innerHTML = canChecksHtml(net);
+    canSave(true);
+});
+
+$('can').addEventListener('change', function (e) {
+    var t = e.target;
+    if (!t.classList.contains('can-input') || (t.type !== 'checkbox' && t.tagName !== 'SELECT')) return;
+    var net = canFindNet(t.getAttribute('data-net'));
+    if (!net) return;
+    var kind = t.getAttribute('data-kind'), field = t.getAttribute('data-field');
+    var target = canList(net, kind).filter(function (x) { return x.id === t.getAttribute('data-id'); })[0];
+    if (!target) return;
+    if (field === 'link') canSetHubLink(net, target.id, t.getAttribute('data-other'), t.checked);
+    else if (field === 'termination') target.termination = t.checked;
+    else if (field === 'hub') target.hub = t.value;
+    renderCan(); canSave();
 });
 
 // =========================================================================
@@ -1577,6 +1823,12 @@ $('tune-select').addEventListener('change', function () { loadTune(this.value); 
 $('diagram-select').addEventListener('change', function () { state.diagram = this.value; renderDiagram(); });
 $('diagram-download').addEventListener('click', downloadDiagram);
 $('diagram').addEventListener('click', function (e) {
+    var canItem = e.target.closest('[data-can-item]');
+    if (canItem) {
+        selectTab('can');
+        canFocus(canItem.getAttribute('data-can-item'));
+        return;
+    }
     var row = e.target.closest('[data-endpoint]'), node = e.target.closest('[data-node]');
     var traced = e.target.closest('[data-trace]'), harnessBox = e.target.closest('[data-harness]');
     if (traced) { gotoSystemEndpoint(traced.getAttribute('data-trace')); return; }

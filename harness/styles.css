@@ -122,6 +122,23 @@ tr.issue-row li.issue-warning .issue-text { color: #ffb74d; }
 .panel-desc a, .muted a { color: #ff5a6e; }
 .plain-list { margin: 0; padding-left: 18px; color: #ccc; }
 
+/* CAN networks */
+.can-network h4 { font-size: 0.85rem; color: #b0b0b0; margin: 14px 0 6px; }
+.can-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.can-head label { display: inline-flex; align-items: center; gap: 6px; color: #ccc; font-size: 0.85rem; }
+.can-head .can-name { width: 160px; font-weight: 600; }
+.can-head .can-bitrate { width: 80px; }
+.can-head .can-notes { flex: 1; min-width: 200px; }
+.can-head .can-notes input { flex: 1; }
+.can-checks { list-style: none; margin: 10px 0 0; padding: 0; font-size: 0.85rem; color: #ccc; }
+.can-checks li { padding: 2px 0; }
+.can-checks-wrap .ok-banner { margin: 10px 0 0; }
+.can-table .text-input { width: 100%; min-width: 90px; padding: 3px 6px; font-size: 0.85rem; }
+.can-table .can-bitrate { width: 110px; }
+.can-table select { font-size: 0.85rem; }
+.can-link { margin-right: 10px; }
+.can-network > .btn { margin-top: 6px; }
+
 /* Add from .xlsx dialog */
 .add-dialog { width: min(720px, 95vw); }
 .add-list { max-height: 55vh; overflow-y: auto; }

@@ -14,7 +14,8 @@
  *                  number ever saved (numbers are not reused after a revision is deleted)
  *   harness_revisions every saved version of a harness (full model as JSON), newest = harnesses.revision
  *   harness_images connector/splice pictures, id = SHA-256 of the bytes (shared by all revisions)
- *   harness_systems harnesses joined by mating connectors: { harnesses: [ids], manual: [links], rejected: [links] }
+ *   harness_systems harnesses joined by mating connectors: { harnesses: [ids], manual: [links], rejected: [links],
+ *                   canNetworks: [CAN networks, see harness/harness-can.js] }
  *   runs           saved analysis runs (tuning history): tool ('ve' | 'transient' | 'knock' | 'fuel-pressure'), the log, the tune
  *                  that was in the ECU, and the run's settings, summary and detail (JSON); id is a random UUID
  * View
@@ -310,7 +311,7 @@ function systemRecord(r) {
     return Object.assign({ id: r.id, name: r.name, updated: r.updated }, JSON.parse(r.data_json));
 }
 
-/** Harness systems: [{ id, name, updated, harnesses, manual, rejected }]. */
+/** Harness systems: [{ id, name, updated, harnesses, manual, rejected, canNetworks }]. */
 TuneStore.prototype.listHarnessSystems = function () {
     return this.db.prepare('SELECT id, name, updated, data_json FROM harness_systems ORDER BY name').all().map(systemRecord);
 };
@@ -318,7 +319,8 @@ TuneStore.prototype.listHarnessSystems = function () {
 /** Create (id null) or replace a system. Returns the stored record, or null when id doesn't exist. */
 TuneStore.prototype.saveHarnessSystem = function (id, system) {
     var now = new Date().toISOString();
-    var data = JSON.stringify({ harnesses: system.harnesses || [], manual: system.manual || [], rejected: system.rejected || [] });
+    var data = JSON.stringify({ harnesses: system.harnesses || [], manual: system.manual || [], rejected: system.rejected || [],
+                                canNetworks: system.canNetworks || [] });
     if (id) {
         if (!this.db.prepare('UPDATE harness_systems SET name = ?, updated = ?, data_json = ? WHERE id = ?').run(system.name, now, data, id).changes) return null;
     } else {

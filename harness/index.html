@@ -66,6 +66,7 @@
         <button class="tab" role="tab" aria-selected="false" data-tab="splices">Splices <span class="count" id="count-splices"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="diagram">Diagram</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="system">System <span class="count" id="count-system"></span></button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="can">CAN networks <span class="count" id="count-can"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="checks">Checks <span class="count" id="count-checks"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="tune">Tune comparison</button>
       </div>
@@ -107,6 +108,14 @@
         <h2>System</h2>
         <p class="panel-desc">Harnesses that plug into each other. Connectors with the same name in two harnesses whose part numbers mate (one's connector is the other's mate connector) are joined automatically, cavity to cavity; circuits, diagrams and the tune comparison then follow wires across the joins.</p>
         <div id="system"></div>
+      </div>
+
+      <div id="panel-can" class="panel" role="tabpanel" hidden>
+        <h2>CAN networks</h2>
+        <p class="panel-desc">The CAN data networks of this harness's system: the devices on each network, the hubs they plug into, how the
+          hubs connect to each other, where the bus is terminated and the speed. Changes are saved with the system straight away. The Diagram
+          tab draws each network with twisted-pair wiring.</p>
+        <div id="can"></div>
       </div>
 
       <div id="panel-checks" class="panel" role="tabpanel" hidden>
@@ -193,6 +202,7 @@
   <script src="harness-tune.js"></script>
   <script src="harness-diagram.js"></script>
   <script src="harness-system.js"></script>
+  <script src="harness-can.js"></script>
   <script src="harness-store.js"></script>
   <script src="../lib/print-report.js"></script>
   <script src="app.js"></script>

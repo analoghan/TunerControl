@@ -28,8 +28,8 @@
  *   PUT    /api/harnesses/:id                body { name, data, note } → new revision { id, revision, saved }
  *   DELETE /api/harnesses/:id
  *   DELETE /api/harnesses/:id/revisions/:n   delete one revision → { latest } (409 if it is the only one)
- *   GET    /api/harness-systems             [{ id, name, updated, harnesses, manual, rejected }]
- *   POST   /api/harness-systems             body { name, harnesses, manual, rejected } → system
+ *   GET    /api/harness-systems             [{ id, name, updated, harnesses, manual, rejected, canNetworks }]
+ *   POST   /api/harness-systems             body { name, harnesses, manual, rejected, canNetworks } → system
  *   PUT    /api/harness-systems/:id         same body → system
  *   DELETE /api/harness-systems/:id         (the harnesses themselves are kept)
  *   GET    /api/runs[?tool=T][&full=1]       tuning history runs, oldest log first (full adds settings and data)
@@ -252,7 +252,8 @@ function handleApi(req, res, url, store) {
                 if (!body || typeof body.name !== 'string' || !body.name.trim()) throw new HttpError(400, 'name is required');
                 if (!Array.isArray(body.harnesses)) throw new HttpError(400, 'harnesses must be a list');
                 var system = store.saveHarnessSystem(sid, { name: body.name.trim(), harnesses: body.harnesses,
-                    manual: Array.isArray(body.manual) ? body.manual : [], rejected: Array.isArray(body.rejected) ? body.rejected : [] });
+                    manual: Array.isArray(body.manual) ? body.manual : [], rejected: Array.isArray(body.rejected) ? body.rejected : [],
+                    canNetworks: Array.isArray(body.canNetworks) ? body.canNetworks : [] });
                 if (!system) throw new HttpError(404, 'System not found');
                 sendJson(req, res, sid ? 200 : 201, system);
             });

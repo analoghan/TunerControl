@@ -50,6 +50,7 @@
       <li><a href="#checks">Checks</a></li>
       <li><a href="#diagrams">Diagrams and tracing</a></li>
       <li><a href="#systems">Systems: harnesses that plug together</a></li>
+      <li><a href="#can">CAN networks</a></li>
       <li><a href="#tune">Tune comparison</a></li>
       <li><a href="#workflow">Suggested workflow</a></li>
       <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -220,6 +221,24 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
         disagree across the join, and linked connectors whose part numbers don't mate.</li>
     </ul>
     <p>The system tab and diagrams use each other harness's <strong>latest saved revision</strong>, and the open harness as you're editing it.</p>
+
+    <h2 id="can">CAN networks</h2>
+    <p>A <a href="#systems">system</a> can hold any number of CAN data networks (e.g. <em>CAN 1</em> for the dash and PDM, <em>CAN 2</em> for
+      a keypad). Open the <strong>CAN networks</strong> tab of any harness in the system — the networks belong to the system, and every change
+      is saved with it straight away (no Save needed).</p>
+    <ul>
+      <li><strong>Network</strong> — a name, its speed in kbit/s (125, 250, 500, 1000 …) and notes.</li>
+      <li><strong>Devices</strong> — each device on the bus, the hub it plugs into, whether its own <strong>120 Ω</strong> termination is
+        on, and its speed. Leave the speed blank when it runs at the network's speed.</li>
+      <li><strong>Hubs</strong> — tick which other hubs each hub is wired to. A new hub starts wired to the previous one.</li>
+      <li><strong>Terminators</strong> — standalone 120 Ω terminators and the hub each plugs into.</li>
+    </ul>
+    <p>Each network is checked: a bus needs <strong>exactly two terminations</strong> (60 Ω between CAN-H and CAN-L) — none or one is an
+      error, more than two a warning with the resistance it gives; every device must use the network's speed; devices and terminators should
+      be plugged into a hub; and all of a network's hubs must be wired together. Terminators not plugged into a hub don't count.</p>
+    <p><strong>Diagram</strong> (or <em>CAN networks</em> in the Diagram tab's list) draws the network: hubs in a row with their devices and
+      terminators above and below, every connection as a twisted pair (yellow CAN-H, green CAN-L), each device's speed and termination, and
+      anything not on a hub underneath. Click a device or hub to edit it. Export PDF can include the networks' tables and diagrams.</p>
 
     <h2 id="tune">Tune comparison</h2>
     <p>Pick a tune imported in the <a href="../m1-config/index.html">M1 Config Viewer</a>. Every I/O assignment in the tune is turned into its ECU

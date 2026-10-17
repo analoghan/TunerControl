@@ -192,9 +192,10 @@ function hsListSystems() {
     return list.then(function (rows) { return rows.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }); });
 }
 
-/** Create (id null) or update a system { name, harnesses, manual, rejected }. Resolves the stored record. */
+/** Create (id null) or update a system { name, harnesses, manual, rejected, canNetworks }. Resolves the stored record. */
 function hsSaveSystem(id, system) {
-    var body = { name: system.name, harnesses: system.harnesses || [], manual: system.manual || [], rejected: system.rejected || [] };
+    var body = { name: system.name, harnesses: system.harnesses || [], manual: system.manual || [], rejected: system.rejected || [],
+                 canNetworks: system.canNetworks || [] };
     if (hsBackend === 'server') {
         return tuneApi(id ? 'PUT' : 'POST', 'harness-systems' + (id ? '/' + encodeURIComponent(id) : ''), { body: body });
     }

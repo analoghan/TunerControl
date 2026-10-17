@@ -151,11 +151,14 @@ test('HTTP API: harness systems', function () {
             .then(function (s) {
                 id = s.id;
                 assert.deepStrictEqual([s.name, s.harnesses, s.manual, s.rejected], ['Car', ['h1'], [], []]);
-                return fetch(base + '/' + id, { method: 'PUT', headers: headers, body: JSON.stringify({ name: 'Car 2', harnesses: ['h1', 'h2'] }) });
+                assert.deepStrictEqual(s.canNetworks, []);
+                return fetch(base + '/' + id, { method: 'PUT', headers: headers, body: JSON.stringify({ name: 'Car 2', harnesses: ['h1', 'h2'],
+                    canNetworks: [{ id: 'n1', name: 'CAN 1', bitrate: 1000, devices: [{ id: 'd1', name: 'M142', termination: true }] }] }) });
             })
             .then(function (r) { return r.json(); })
             .then(function (s) {
                 assert.deepStrictEqual(s.harnesses, ['h1', 'h2']);
+                assert.strictEqual(s.canNetworks[0].devices[0].name, 'M142', 'CAN networks are kept with the system');
                 return fetch(base, { method: 'POST', headers: headers, body: JSON.stringify({ name: 'Bad' }) });
             })
             .then(function (r) {
