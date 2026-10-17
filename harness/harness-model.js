@@ -202,28 +202,44 @@ function harnessSheetGroups(model) {
     return groups;
 }
 
+/** Largest size of a picture in an exported workbook (px); bigger ones are scaled down, keeping their shape. */
+var HARNESS_XLSX_IMAGE_MAX = { w: 320, h: 240 };
+
 /**
- * Sheets for writeXlsx() in the same block layout harnessFromWorkbook() reads. `imageData` maps image id →
- * bytes (Uint8Array); images without bytes there are left out. Pictures go in column I next to their block.
+ * Sheets for writeXlsx() in the same block layout harnessFromWorkbook() reads, styled: a dark title row per block, shaded
+ * header lines, headings and alternating light/dark rows in the pin and wire tables. `imageData` maps image id → bytes
+ * (Uint8Array); images without bytes there are left out. Pictures go in column I next to their block, at most
+ * HARNESS_XLSX_IMAGE_MAX in size, and the next block starts below them.
  */
 function harnessToWorkbook(model, imageData) {
     return harnessSheetGroups(model).map(function (sheet) {
-        var rows = [], bold = [], images = [];
+        var rows = [], bold = [], images = [], styles = {};
+        function fill(style, n) { var a = []; for (var i = 0; i < n; i++) a.push(style); return a; }
         function block(title, header, columns, records, fields, blockImages) {
             if (rows.length) rows.push([]);
-            bold.push(rows.length);
-            var row = rows.length;
+            var span = columns.length, row = rows.length, picBottom = row;
             (blockImages || []).forEach(function (im) {
                 var data = im.data || (imageData && im.id ? imageData[im.id] : null);
                 if (!data) return;
-                images.push({ row: row, col: 8, cx: (im.w || 300) * 9525, cy: (im.h || 300) * 9525, mime: im.mime, data: data });
-                row += Math.ceil((im.h || 300) / 20) + 1;   // ~20 px per default row
+                var w = im.w || 300, h = im.h || 300, k = Math.min(1, HARNESS_XLSX_IMAGE_MAX.w / w, HARNESS_XLSX_IMAGE_MAX.h / h);
+                w = Math.round(w * k); h = Math.round(h * k);
+                images.push({ row: picBottom, col: 8, cx: w * 9525, cy: h * 9525, mime: im.mime, data: data });
+                picBottom += Math.ceil(h / 20) + 1;   // ~20 px per default row
             });
+            styles[rows.length] = fill('title', span);
             rows.push([title]);
-            header.forEach(function (h) { rows.push([h[0], h[1] || '']); });
+            header.forEach(function (h) {
+                styles[rows.length] = ['metaKey'].concat(fill('meta', span - 1));
+                rows.push([h[0], h[1] || '']);
+            });
             bold.push(rows.length);
+            styles[rows.length] = fill('header', span);
             rows.push(columns.slice());
-            records.forEach(function (rec) { rows.push(fields.map(function (f) { return rec[f] || ''; })); });
+            records.forEach(function (rec, i) {
+                styles[rows.length] = fill(i % 2 ? 'band1' : 'band0', span);
+                rows.push(fields.map(function (f) { return rec[f] || ''; }));
+            });
+            while (rows.length < picBottom) rows.push([]);   // keep the next block clear of the pictures
         }
         sheet.connectors.forEach(function (c) {
             block(c.title || c.id, [['CONNECTOR', c.connector], ['BOOT', c.boot], ['MATE CONN', c.mateConn],
@@ -233,7 +249,7 @@ function harnessToWorkbook(model, imageData) {
             block(s.id, [['SPLICE', s.type], ['BOOT', s.boot], ['NOTES', s.notes]],
                 s.columns || HARNESS_WIRE_COLUMNS, s.wires, HARNESS_WIRE_FIELDS, s.images);
         });
-        return { name: sheet.name, rows: rows, bold: bold, images: images, widths: [16, 18, 22, 34, 40, 26, 22, 12] };
+        return { name: sheet.name, rows: rows, bold: bold, rowStyles: styles, images: images, widths: [16, 18, 22, 34, 40, 26, 22, 12] };
     });
 }
 

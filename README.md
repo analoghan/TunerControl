@@ -113,7 +113,7 @@ Design and check wiring harnesses built around the M1 ECU.
   devices and linked pins that are missing or don't match, and draws each network with twisted-pair (CAN-H/CAN-L) wiring
 - **Export PDF:** overview and system diagrams, checks, connector and splice tables with their problems, per-block diagrams, pictures and
   the tune comparison, in portrait or landscape
-- Every save is a revision (server or browser storage), and single revisions can be deleted; export back to `.xlsx` in the same layout, pictures included
+- Every save is a revision (server or browser storage), and single revisions can be deleted; export back to `.xlsx` in the same layout, styled (title bar, shaded headings, alternating rows), pictures included and scaled to at most 320 × 240 px
 
 ### Calculators
 Quick bidirectional unit conversions for tuning:

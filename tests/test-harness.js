@@ -130,6 +130,32 @@ describe('XLSX — pictures', function () {
 });
 
 describe('Harness — workbook import and export', function () {
+  it('styles exported tables and keeps pictures small and clear of the next block', function () {
+    var m = harnessFromWorkbook(hxWorkbook(), 'Test');
+    var map = m.connectors.filter(function (c) { return c.id === 'MAP'; })[0];
+    map.images = [{ id: 'big', mime: 'image/png', w: 1600, h: 1200, caption: '' }];
+    var sheets = harnessToWorkbook(m, { big: new Uint8Array([137, 80, 78, 71]) });
+    var sh = sheets.filter(function (x) { return x.images.length; })[0], im = sh.images[0];
+    assert.deepEqual([im.cx / 9525, im.cy / 9525], [320, 240], 'a 1600 × 1200 photo goes in at 320 × 240');
+    var title = sh.rows.map(function (r) { return r[0]; }).indexOf(map.title || map.id);
+    assert.equal(im.row, title, 'beside the block title');
+    var next = sh.rows.findIndex(function (r, i) { return i > title && sh.rowStyles[i] && sh.rowStyles[i][0] === 'title'; });
+    if (next >= 0) assert.ok(next >= im.row + Math.ceil(240 / 20), 'the next block starts below the picture');
+    assert.equal(sh.rowStyles[title][0], 'title');
+    assert.deepEqual([sh.rowStyles[title + 1][0], sh.rowStyles[title + 1][1]], ['metaKey', 'meta']);
+    var head = title + 6, first = head + 1;
+    assert.equal(sh.rowStyles[head][0], 'header');
+    assert.deepEqual([sh.rowStyles[first][0], sh.rowStyles[first + 1] && sh.rowStyles[first + 1][0]], ['band0', map.pins.length > 1 ? 'band1' : undefined]);
+    assert.equal(sh.rowStyles[first].length, sh.rows[head].length, 'the band runs across every column');
+    var xml = xlsxSheetXml(sh);
+    assert.ok(/<c r="[A-Z]+\d+" s="5"\/>/.test(xml) || xml.indexOf(' s="5"') >= 0, 'dark band cells written');
+    assert.ok(xlsxDrawingXml(sh.images).indexOf('<a:xfrm>') < 0, 'pictures are placed by their anchor only');
+    return readXlsx(writeXlsx(sheets)).then(function (wb) {
+      var again = harnessFromWorkbook(wb, 'Test');
+      assert.deepEqual(again.connectors.map(function (c) { return c.pins; }), m.connectors.map(function (c) { return c.pins; }), 'styling does not change what is read back');
+    });
+  });
+
   it('reads connector and splice blocks with their headers and rows', function () {
     var m = harnessFromWorkbook(hxWorkbook(), 'Test');
     assert.deepEqual(m.connectors.map(function (c) { return c.id; }), ['M142.C', 'M142.D', 'MAP', 'PEDAL', 'IAT']);
