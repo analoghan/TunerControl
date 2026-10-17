@@ -856,7 +856,7 @@ function renderDiagram() {
     if (state.diagram === 'system' || /^trace:/.test(state.diagram)) { renderSystemDiagram(); return; }
     if (/^can:/.test(state.diagram)) {
         renderDiagram.seq = (renderDiagram.seq || 0) + 1;
-        $('diagram-hint').textContent = 'Each connection is a twisted pair (CAN-H / CAN-L). Click a device or hub to edit it.';
+        $('diagram-hint').textContent = 'Each connection is a twisted pair (CAN-H / CAN-L), with +12 V and ground beside it where it carries power. Click a device, feed or hub to edit it.';
         $('diagram').innerHTML = canNetworkDiagram(canFindNet(state.diagram.slice(4))).svg;
         return;
     }
@@ -1304,10 +1304,17 @@ function pdfCanHtml(net) {
     var speed = canBitrate(net.bitrate), checks = canNetworkChecks(net);
     var html = '<div class="pr-block"><h3>' + esc(net.name) + '</h3><p class="pr-note"><strong>Speed:</strong> ' + esc(speed ? canBitrateText(speed) : 'not set') +
         ' · <strong>Terminations:</strong> ' + canTerminations(net) + (net.notes ? ' · ' + esc(net.notes) : '') + '</p>';
-    html += prTable(['Device', 'Hub', 'Termination', 'Speed', 'Notes'], net.devices.map(function (d) {
+    html += prTable(['Device', 'Hub', 'Termination', 'Power', 'Speed', 'Notes'], net.devices.map(function (d) {
         var own = canBitrate(d.bitrate);
-        return [esc(d.name), hubName(d.hub), d.termination ? '120 Ω on' : 'off', esc(own ? canBitrateText(own) : speed ? canBitrateText(speed) + ' (network)' : ''), esc(d.notes)];
+        return [esc(d.name), hubName(d.hub), d.termination ? '120 Ω on' : 'off', d.power ? 'From CAN' : '',
+            esc(own ? canBitrateText(own) : speed ? canBitrateText(speed) + ' (network)' : ''), esc(d.notes)];
     }));
+    if (canFeeds(net).length) {
+        html += prTable(['Power feed', 'Power comes from', 'Feeds into', 'Notes'], canFeeds(net).map(function (f) {
+            var to = canFeedTarget(net, f);
+            return [esc(f.name), esc(f.source), to ? esc(to.hub ? 'Hub ' + to.hub.name : to.device.name) : 'Not connected', esc(f.notes)];
+        }));
+    }
     if (net.hubs.length) {
         html += prTable(['Hub', 'Connects to hubs', 'Notes'], net.hubs.map(function (h) {
             return [esc(h.name), net.hubs.filter(function (o) { return o !== h && canHubLinked(net, h.id, o.id); }).map(function (o) { return esc(o.name); }).join(', '), esc(h.notes)];
@@ -1448,7 +1455,9 @@ function canNetworks() {
 
 function canFindNet(id) { return canNetworks().filter(function (n) { return n.id === id; })[0] || null; }
 
-function canList(net, kind) { return kind === 'hub' ? net.hubs : kind === 'device' ? net.devices : net.terminators; }
+function canList(net, kind) {
+    return kind === 'hub' ? net.hubs : kind === 'device' ? net.devices : kind === 'feed' ? canFeeds(net) : net.terminators;
+}
 
 var canSaveTimer = null;
 
@@ -1486,6 +1495,21 @@ function canHubSelect(net, kind, item) {
         }).join('') + '</select>';
 }
 
+/** Where a power feed goes in: a hub or a device. */
+function canFeedSelect(net, feed) {
+    function opt(value, label) { return '<option value="' + esc(value) + '"' + (feed.to === value ? ' selected' : '') + '>' + esc(label || '(no name)') + '</option>'; }
+    return '<select class="can-input" data-net="' + esc(net.id) + '" data-kind="feed" data-id="' + esc(feed.id) + '" data-field="to" ' +
+        'aria-label="Where ' + esc(feed.name) + ' feeds in"><option value="">Not connected</option>' +
+        (net.hubs.length ? '<optgroup label="Hubs">' + net.hubs.map(function (h) { return opt('hub:' + h.id, h.name); }).join('') + '</optgroup>' : '') +
+        (net.devices.length ? '<optgroup label="Devices">' + net.devices.map(function (d) { return opt('device:' + d.id, d.name); }).join('') + '</optgroup>' : '') +
+        '</select>';
+}
+
+function canCheckbox(net, kind, item, field, label) {
+    return '<label class="check-label"><input type="checkbox" class="can-input" data-net="' + esc(net.id) + '" data-kind="' + kind + '" data-id="' +
+        esc(item.id) + '" data-field="' + field + '"' + (item[field] ? ' checked' : '') + '> ' + label + '</label>';
+}
+
 function canRemoveBtn(net, kind, item) {
     return '<button class="btn btn-small btn-danger" data-can-action="remove" data-net="' + esc(net.id) + '" data-kind="' + kind + '" data-id="' +
         esc(item.id) + '" aria-label="Remove ' + esc(item.name) + '">&times;</button>';
@@ -1501,11 +1525,12 @@ function canNetworkHtml(net) {
         '<div class="can-checks-wrap" id="can-checks-' + esc(net.id) + '">' + canChecksHtml(net) + '</div>';
 
     html += '<h4>Devices</h4>' + (net.devices.length ? '<div class="table-scroll"><table class="event-table data-table can-table"><thead><tr>' +
-        '<th>Device</th><th>Hub</th><th>Termination</th><th>Speed (kbit/s)</th><th>Notes</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
+        '<th>Device</th><th>Hub</th><th>Termination</th><th title="Powered through its CAN connection (+12 V and ground in the CAN cable)">Power</th>' +
+        '<th>Speed (kbit/s)</th><th>Notes</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
         net.devices.map(function (d) {
             return '<tr><td>' + canInput(net, 'device', d, 'name', ' aria-label="Device name"') + '</td><td>' + canHubSelect(net, 'device', d) + '</td>' +
-                '<td><label class="check-label"><input type="checkbox" class="can-input" data-net="' + esc(net.id) + '" data-kind="device" data-id="' +
-                esc(d.id) + '" data-field="termination"' + (d.termination ? ' checked' : '') + '> 120 Ω on</label></td>' +
+                '<td>' + canCheckbox(net, 'device', d, 'termination', '120 Ω on') + '</td>' +
+                '<td>' + canCheckbox(net, 'device', d, 'power', 'From CAN') + '</td>' +
                 '<td>' + canInput(net, 'device', d, 'bitrate', ' list="can-bitrates" placeholder="' + esc(net.bitrate ? 'network' : 'kbit/s') +
                     '" aria-label="Device speed (kbit/s)"') + '</td>' +
                 '<td>' + canInput(net, 'device', d, 'notes', ' aria-label="Device notes"') + '</td><td class="actions">' + canRemoveBtn(net, 'device', d) + '</td></tr>';
@@ -1532,6 +1557,18 @@ function canNetworkHtml(net) {
                 '<td class="actions">' + canRemoveBtn(net, 'term', t) + '</td></tr>';
         }).join('') + '</tbody></table></div>' : '<p class="muted">No standalone terminators.</p>') +
         '<button class="btn btn-small btn-secondary" data-can-action="add-term" data-net="' + esc(net.id) + '">Add terminator</button>';
+
+    var feeds = canFeeds(net), names = net.devices.map(function (d) { return d.name; }).filter(Boolean);
+    html += '<h4>Power feeds</h4>' + (feeds.length ? '<div class="table-scroll"><table class="event-table data-table can-table"><thead><tr>' +
+        '<th>Feed</th><th>Power comes from</th><th>Feeds into</th><th>Notes</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
+        feeds.map(function (f) {
+            return '<tr><td>' + canInput(net, 'feed', f, 'name', ' aria-label="Feed name"') + '</td>' +
+                '<td>' + canInput(net, 'feed', f, 'source', ' list="can-sources-' + esc(net.id) + '" placeholder="e.g. PDM30 OUT 5" aria-label="Where the power comes from"') + '</td>' +
+                '<td>' + canFeedSelect(net, f) + '</td><td>' + canInput(net, 'feed', f, 'notes', ' aria-label="Feed notes"') + '</td>' +
+                '<td class="actions">' + canRemoveBtn(net, 'feed', f) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<p class="muted">No power feeds.</p>') +
+        '<datalist id="can-sources-' + esc(net.id) + '">' + names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>' +
+        '<button class="btn btn-small btn-secondary" data-can-action="add-feed" data-net="' + esc(net.id) + '">Add power feed</button>';
     return html + '</section>';
 }
 
@@ -1582,13 +1619,17 @@ $('can').addEventListener('click', function (e) {
         item = { id: canId(), name: 'Hub ' + (net.hubs.length + 1), notes: '' };
         if (net.hubs.length) canSetHubLink(net, net.hubs[net.hubs.length - 1].id, item.id, true);   // usually chained to the last one
         net.hubs.push(item);
+    } else if (action === 'add-feed') {
+        item = { id: canId(), name: 'Power feed ' + (canFeeds(net).length + 1), source: '', to: net.hubs.length === 1 ? 'hub:' + net.hubs[0].id : '', notes: '' };
+        canFeeds(net).push(item);
     } else if (action === 'add-term') {
         item = { id: canId(), name: 'Terminator ' + (net.terminators.length + 1), hub: net.hubs.length === 1 ? net.hubs[0].id : '' };
         net.terminators.push(item);
     } else if (action === 'remove') {
         var kind = b.getAttribute('data-kind'), id = b.getAttribute('data-id');
         if (kind === 'hub') canRemoveHub(net, id);
-        else if (kind === 'device') net.devices = net.devices.filter(function (x) { return x.id !== id; });
+        else if (kind === 'device') canRemoveDevice(net, id);
+        else if (kind === 'feed') net.feeds = canFeeds(net).filter(function (x) { return x.id !== id; });
         else net.terminators = net.terminators.filter(function (x) { return x.id !== id; });
     }
     if (item) focus = item.id;
@@ -1607,9 +1648,12 @@ $('can').addEventListener('input', function (e) {
     if (!target) return;
     target[field] = field === 'bitrate' ? t.value.trim() : t.value;
     if (kind === 'hub' && field === 'name') {
-        $('can').querySelectorAll('option[value="' + target.id + '"], [data-hub-name="' + target.id + '"]').forEach(function (o) {
+        $('can').querySelectorAll('option[value="' + target.id + '"], option[value="hub:' + target.id + '"], [data-hub-name="' + target.id + '"]').forEach(function (o) {
             o.textContent = target.name || '(no name)';
         });
+    }
+    if (kind === 'device' && field === 'name') {
+        $('can').querySelectorAll('option[value="device:' + target.id + '"]').forEach(function (o) { o.textContent = target.name || '(no name)'; });
     }
     if (kind === 'net' && field === 'bitrate') {
         $('can').querySelectorAll('input[data-net="' + net.id + '"][data-kind="device"][data-field="bitrate"]').forEach(function (i) {
@@ -1630,8 +1674,8 @@ $('can').addEventListener('change', function (e) {
     var target = canList(net, kind).filter(function (x) { return x.id === t.getAttribute('data-id'); })[0];
     if (!target) return;
     if (field === 'link') canSetHubLink(net, target.id, t.getAttribute('data-other'), t.checked);
-    else if (field === 'termination') target.termination = t.checked;
-    else if (field === 'hub') target.hub = t.value;
+    else if (field === 'termination' || field === 'power') target[field] = t.checked;
+    else if (field === 'hub' || field === 'to') target[field] = t.value;
     renderCan(); canSave();
 });
 

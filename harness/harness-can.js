@@ -5,12 +5,16 @@
  *   network:    { id, name, bitrate (kbit/s, '' = not set), notes, hubs, hubLinks, devices, terminators }
  *   hubs:       [{ id, name, notes }]
  *   hubLinks:   [{ a: hubId, b: hubId }]                 hubs wired to each other (order doesn't matter)
- *   devices:    [{ id, name, hub (hubId or ''), termination (true = its 120 Ω resistor is on), bitrate ('' = the network's), notes }]
+ *   devices:    [{ id, name, hub (hubId or ''), termination (true = its 120 Ω resistor is on), bitrate ('' = the network's),
+ *                  power (true = powered through the CAN connection), notes }]
  *   terminators:[{ id, name, hub }]                      standalone 120 Ω terminators plugged into a hub
+ *   feeds:      [{ id, name, source, to }]               power into the network: source = where it comes from (free text,
+ *                                                        e.g. "PDM30 OUT 5"), to = 'hub:<id>' | 'device:<id>' | ''
+ * A device with power: true is powered through its CAN connection (+12 V and ground in the same cable).
  *
  * canNetworkChecks(net) → [{ severity, where, message }]
  * canNetworkDiagram(net) → { svg, width, height }: hubs in a row, their devices and terminators above and below, every
- *   connection drawn as a twisted pair (CAN-H / CAN-L). Uses the SVG helpers of harness-diagram.js.
+ *   connection drawn as a twisted pair (CAN-H / CAN-L), power wires (+12 V / ground) alongside where a connection carries power. Uses the SVG helpers of harness-diagram.js.
  */
 
 var CAN_BITRATES = [125, 250, 500, 1000];
@@ -21,7 +25,7 @@ function canId() {
 }
 
 function canNewNetwork(name) {
-    return { id: canId(), name: name || 'CAN', bitrate: 500, notes: '', hubs: [], hubLinks: [], devices: [], terminators: [] };
+    return { id: canId(), name: name || 'CAN', bitrate: 500, notes: '', hubs: [], hubLinks: [], devices: [], terminators: [], feeds: [] };
 }
 
 /** Speed in kbit/s as a number, or null when not set ("500", "500 kbit/s", "1 Mbit/s" → 1000). */
@@ -56,11 +60,54 @@ function canSetHubLink(net, a, b, on) {
     if (on && a !== b) net.hubLinks.push({ a: a, b: b });
 }
 
-/** Remove a hub and everything that pointed at it (links; devices and terminators become unconnected). */
+/** Power feeds (older networks have none stored). */
+function canFeeds(net) {
+    if (!net.feeds) net.feeds = [];
+    return net.feeds;
+}
+
+/** What a power feed goes into: { hub } or { device }, or null when it isn't connected. */
+function canFeedTarget(net, feed) {
+    var m = String(feed.to || '').match(/^(hub|device):(.+)$/);
+    if (!m) return null;
+    if (m[1] === 'hub') { var h = canHub(net, m[2]); return h ? { hub: h } : null; }
+    var d = net.devices.filter(function (x) { return x.id === m[2]; })[0];
+    return d ? { device: d } : null;
+}
+
+/** Remove a hub and everything that pointed at it (links; devices, terminators and feeds become unconnected). */
 function canRemoveHub(net, id) {
     net.hubs = net.hubs.filter(function (h) { return h.id !== id; });
     net.hubLinks = net.hubLinks.filter(function (l) { return l.a !== id && l.b !== id; });
     net.devices.concat(net.terminators).forEach(function (d) { if (d.hub === id) d.hub = ''; });
+    canFeeds(net).forEach(function (f) { if (f.to === 'hub:' + id) f.to = ''; });
+}
+
+/** Remove a device; feeds into it become unconnected. */
+function canRemoveDevice(net, id) {
+    net.devices = net.devices.filter(function (d) { return d.id !== id; });
+    canFeeds(net).forEach(function (f) { if (f.to === 'device:' + id) f.to = ''; });
+}
+
+/**
+ * Which hub groups and devices have power: power entering a hub reaches every hub wired to it and every powered device
+ * on them; power fed into a device reaches its hub's group when the device is powered through its CAN connection.
+ * Returns { groups: { groupIndex: true }, devices: { id: true } }.
+ */
+function canPowered(net) {
+    var groups = canHubGroups(net), groupOf = {}, out = { groups: {}, devices: {} };
+    groups.forEach(function (g, i) { g.forEach(function (id) { groupOf[id] = i; }); });
+    canFeeds(net).forEach(function (f) {
+        var to = canFeedTarget(net, f);
+        if (!to) return;
+        if (to.hub) out.groups[groupOf[to.hub.id]] = true;
+        else {
+            out.devices[to.device.id] = true;
+            if (to.device.power && groupOf[to.device.hub] !== undefined) out.groups[groupOf[to.device.hub]] = true;
+        }
+    });
+    net.devices.forEach(function (d) { if (d.power && groupOf[d.hub] !== undefined && out.groups[groupOf[d.hub]]) out.devices[d.id] = true; });
+    return out;
 }
 
 /** Terminations on the bus: devices with theirs on, and terminators plugged into a hub (or with no hubs to plug into). */
@@ -119,6 +166,17 @@ function canNetworkChecks(net) {
         if (net.hubs.length && !canHub(net, t.hub)) add('warning', t.name, 'Terminator not plugged into a hub, so it does not count.');
     });
     if (!net.hubs.length && net.devices.length) add('warning', net.name, 'No hubs: add one and connect the devices to it to show the wiring.');
+    var powered = canPowered(net);
+    canFeeds(net).forEach(function (f) {
+        if (!canFeedTarget(net, f)) add('warning', f.name || net.name, 'Power feed not connected to a hub or device.');
+        if (!String(f.source || '').trim()) add('warning', f.name || net.name, 'Power feed has no source — say where the power comes from.');
+    });
+    net.devices.forEach(function (d) {
+        if (d.power && !powered.devices[d.id]) {
+            add('warning', d.name, canFeeds(net).length ? 'Powered through its CAN connection, but no power feed reaches its hub.'
+                : 'Powered through its CAN connection, but the network has no power feed.');
+        }
+    });
     var groups = canHubGroups(net);
     groups.slice(1).forEach(function (g) {
         add('error', g.map(function (id) { return canHub(net, id).name; }).join(', '),
@@ -161,62 +219,113 @@ function canTwistedPair(pts, title) {
     return '<g class="can-pair"><title>' + hdEsc(title) + '</title>' + line(l, CAN_L_COLOR) + line(h, CAN_H_COLOR) + '</g>';
 }
 
-var CAN_ITEM_W = 160, CAN_ITEM_H = 56, CAN_TERM_H = 44, CAN_GAP = 22, CAN_HUB_H = 40;
+var CAN_ITEM_W = 180, CAN_ITEM_H = 56, CAN_TERM_H = 44, CAN_GAP = 22, CAN_HUB_H = 40, CAN_POWER_OFFSET = 14;
+var CAN_PLUS_COLOR = '#d32f2f', CAN_GND_COLOR = '#1b1b1b';
 
-/** A device or terminator box. Returns svg; (x, y) is its top-left corner. */
-function canItemBox(net, item, isTerm, x, y) {
-    var h = isTerm ? CAN_TERM_H : CAN_ITEM_H, out = '<g class="can-item" data-can-item="' + hdEsc(item.id) + '"><title>' +
-        hdEsc(item.name + (item.notes ? ' — ' + item.notes : '')) + '</title>' +
+/** Two power wires (+12 V red, ground black) side by side along the sampled path, each with a dark edge. */
+function canPowerPair(pts, title) {
+    function side(d) {
+        return pts.map(function (p, i) {
+            var a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+            var dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+            return (p[0] - dy / len * d).toFixed(1) + ',' + (p[1] + dx / len * d).toFixed(1);
+        }).join(' ');
+    }
+    function line(p, color) {
+        return '<polyline points="' + p + '" stroke="#333" stroke-width="3.6" fill="none"/><polyline points="' + p + '" stroke="' + color + '" stroke-width="2" fill="none"/>';
+    }
+    return '<g class="can-power"><title>' + hdEsc(title) + '</title>' + line(side(-2.6), CAN_PLUS_COLOR) + line(side(2.6), CAN_GND_COLOR) + '</g>';
+}
+
+var CAN_ITEM_HEIGHT = { device: CAN_ITEM_H, term: CAN_TERM_H, feed: CAN_TERM_H };
+
+/** A device, terminator or power feed box; (x, y) is its top-left corner. */
+function canItemBox(net, item, type, x, y) {
+    var h = CAN_ITEM_HEIGHT[type], out = '<g class="can-item can-' + type + '" data-can-item="' + hdEsc(item.id) + '"><title>' +
+        hdEsc(item.name + (type === 'feed' && item.source ? ' — from ' + item.source : '') + (item.notes ? ' — ' + item.notes : '')) + '</title>' +
         '<rect class="box" x="' + x + '" y="' + y + '" width="' + CAN_ITEM_W + '" height="' + h + '" rx="4"/>' +
-        '<rect class="head" x="' + x + '" y="' + y + '" width="' + CAN_ITEM_W + '" height="20" rx="4"/>' +
-        '<text class="title" x="' + (x + 8) + '" y="' + (y + 14) + '">' + hdEsc(hdClip(item.name || '(no name)', 20)) + '</text>';
-    if (isTerm) {
+        '<rect class="' + (type === 'feed' ? 'can-feed-head' : 'head') + '" x="' + x + '" y="' + y + '" width="' + CAN_ITEM_W + '" height="20" rx="4"/>' +
+        '<text class="title" x="' + (x + 8) + '" y="' + (y + 14) + '">' + hdEsc(hdClip(item.name || '(no name)', 23)) + '</text>';
+    if (type === 'term') {
         // Resistor zig-zag and its value.
         var zx = x + 10, zy = y + 32, zz = 'M' + zx + ',' + zy;
         for (var i = 0; i < 6; i++) zz += ' L' + (zx + 4 + i * 6) + ',' + (zy + (i % 2 ? 5 : -5));
         zz += ' L' + (zx + 40) + ',' + zy;
         out += '<path d="' + zz + '" stroke="#333" stroke-width="1.5" fill="none"/>' +
             '<text x="' + (x + 58) + '" y="' + (y + 36) + '">120 Ω terminator</text>';
+    } else if (type === 'feed') {
+        out += '<text x="' + (x + 8) + '" y="' + (y + 36) + '">' + hdEsc(hdClip('Power from ' + (item.source || '?'), 28)) + '</text>';
     } else {
         var own = canBitrate(item.bitrate), net0 = canBitrate(net.bitrate), speed = own || net0, bad = own && net0 && own !== net0;
         out += '<text class="' + (bad ? 'can-bad' : 'dim') + '" x="' + (x + 8) + '" y="' + (y + 36) + '">' + hdEsc(speed ? canBitrateText(speed) : 'speed not set') + '</text>' +
+            (item.power ? '<rect class="can-pwr" x="' + (x + CAN_ITEM_W - 112) + '" y="' + (y + 25) + '" width="36" height="16" rx="8"/>' +
+                '<text class="can-term-text can-pwr-text" x="' + (x + CAN_ITEM_W - 94) + '" y="' + (y + 37) + '" text-anchor="middle">PWR</text>' : '') +
             '<rect class="' + (item.termination ? 'can-term-on' : 'can-term-off') + '" x="' + (x + CAN_ITEM_W - 72) + '" y="' + (y + 25) + '" width="64" height="16" rx="8"/>' +
             '<text class="can-term-text" x="' + (x + CAN_ITEM_W - 40) + '" y="' + (y + 37) + '" text-anchor="middle">' + (item.termination ? '120 Ω on' : 'Term off') + '</text>' +
-            (item.notes ? '<text class="sub" x="' + (x + 8) + '" y="' + (y + 50) + '">' + hdEsc(hdClip(item.notes, 26)) + '</text>' : '');
+            (item.notes ? '<text class="sub" x="' + (x + 8) + '" y="' + (y + 50) + '">' + hdEsc(hdClip(item.notes, 30)) + '</text>' : '');
     }
     return out + '</g>';
 }
 
 function canNetworkDiagram(net) {
-    var body = '', wires = '', groups = canHubGroups(net), order = [].concat.apply([], groups), top = 70;
-    var attached = {};
+    var body = '', wires = '', groups = canHubGroups(net), order = [].concat.apply([], groups), feeds = canFeeds(net);
+    var attached = {}, loose = [], toDevice = {}, boxes = {}, FEED_STEP = CAN_TERM_H + 36;
     order.forEach(function (id) { attached[id] = []; });
-    var loose = [];
-    net.devices.forEach(function (d) { (attached[d.hub] || loose).push({ item: d, term: false }); });
-    net.terminators.forEach(function (t) { (attached[t.hub] || loose).push({ item: t, term: true }); });
+    net.devices.forEach(function (d) { (attached[d.hub] || loose).push({ item: d, type: 'device' }); });
+    net.terminators.forEach(function (t) { (attached[t.hub] || loose).push({ item: t, type: 'term' }); });
+    feeds.forEach(function (f) {
+        var to = canFeedTarget(net, f);
+        if (to && to.hub) attached[to.hub.id].push({ item: f, type: 'feed' });
+        else if (to && to.device) (toDevice[to.device.id] = toDevice[to.device.id] || []).push(f);
+        else loose.push({ item: f, type: 'feed' });
+    });
 
-    // Each hub gets a column wide enough for the items above and below it.
-    var x = 20, cols = {}, hubY = top + CAN_ITEM_H + 60, bottomY = hubY + CAN_HUB_H + 60, maxBottom = hubY + CAN_HUB_H;
+    // Each hub gets a column wide enough for the items above and below it. Feeds into a device sit next to it (above a device
+    // in the top row, below one in the bottom row), so room is kept above the top row for theirs.
+    var x = 20, cols = {}, stackTop = 0;
     order.forEach(function (id) {
         var items = attached[id], up = items.slice(0, Math.ceil(items.length / 2)), down = items.slice(up.length);
         var n = Math.max(1, up.length, down.length), w = n * CAN_ITEM_W + (n - 1) * CAN_GAP;
         cols[id] = { x: x, w: w, up: up, down: down };
+        up.forEach(function (it) { if (toDevice[it.item.id]) stackTop = Math.max(stackTop, toDevice[it.item.id].length); });
         x += w + 70;
     });
+    var top = 70 + stackTop * FEED_STEP, hubY = top + CAN_ITEM_H + 60, bottomY = hubY + CAN_HUB_H + 60, maxBottom = hubY + CAN_HUB_H;
+    /** Feeds into a device: stacked on its free side, each with two power wires straight into it. */
+    function deviceFeeds(dev) {
+        var b = boxes[dev.id];
+        (toDevice[dev.id] || []).forEach(function (f, k) {
+            // Wires run to the device, or for a second feed to the box between it and the device.
+            var px = b.x + CAN_ITEM_W / 2 + CAN_POWER_OFFSET * 2, fy, y0, y1;
+            if (b.above) { fy = b.y - (k + 1) * FEED_STEP; y0 = fy + CAN_TERM_H; y1 = b.y - k * FEED_STEP; }
+            else { fy = b.y + b.h + 36 + k * FEED_STEP; y0 = fy; y1 = k ? fy - 36 : b.y + b.h; }
+            body += canItemBox(net, f, 'feed', b.x, fy);
+            wires += canPowerPair(canSample([px, y0], [px, y1]), f.name + ' → ' + dev.name + ' (power)');
+            if (!b.above) maxBottom = Math.max(maxBottom, fy + CAN_TERM_H);
+        });
+    }
     order.forEach(function (id) {
         var c = cols[id], hub = canHub(net, id), links = net.hubLinks.filter(function (l) { return l.a === id || l.b === id; }).length;
         function place(list, y, above) {
             var span = list.length * CAN_ITEM_W + (list.length - 1) * CAN_GAP, x0 = c.x + (c.w - span) / 2;
             list.forEach(function (it, i) {
-                var ix = x0 + i * (CAN_ITEM_W + CAN_GAP), h = it.term ? CAN_TERM_H : CAN_ITEM_H, cx = ix + CAN_ITEM_W / 2;
-                var iy = above ? y + CAN_ITEM_H - h : y;
-                body += canItemBox(net, it.item, it.term, ix, iy);
-                wires += canTwistedPair(canSample([cx, above ? iy + h : hubY + CAN_HUB_H], [cx, above ? hubY : iy]), it.item.name + ' ⇄ ' + hub.name);
+                var ix = x0 + i * (CAN_ITEM_W + CAN_GAP), h = CAN_ITEM_HEIGHT[it.type], cx = ix + CAN_ITEM_W / 2;
+                var iy = above ? y + CAN_ITEM_H - h : y, y0 = above ? iy + h : hubY + CAN_HUB_H, y1 = above ? hubY : iy;
+                body += canItemBox(net, it.item, it.type, ix, iy);
+                boxes[it.item.id] = { x: ix, y: iy, h: h, above: above };
+                var title = it.item.name + ' ⇄ ' + hub.name;
+                if (it.type === 'feed') {
+                    wires += canPowerPair(canSample([cx, y0], [cx, y1]), title + ' (power)');
+                } else {
+                    wires += canTwistedPair(canSample([cx, y0], [cx, y1]), title);
+                    if (it.item.power) wires += canPowerPair(canSample([cx + CAN_POWER_OFFSET, y0], [cx + CAN_POWER_OFFSET, y1]), title + ' (power)');
+                }
                 if (!above) maxBottom = Math.max(maxBottom, iy + h);
             });
         }
         place(c.up, top, true);
         place(c.down, bottomY, false);
+        c.up.concat(c.down).forEach(function (it) { if (it.type === 'device') deviceFeeds(it.item); });
         body += '<g class="can-hub" data-can-item="' + hdEsc(id) + '"><title>' + hdEsc(hub.name + (hub.notes ? ' — ' + hub.notes : '')) + '</title>' +
             '<rect class="can-hub-box" x="' + c.x + '" y="' + hubY + '" width="' + c.w + '" height="' + CAN_HUB_H + '" rx="6"/>' +
             '<text class="title" x="' + (c.x + 10) + '" y="' + (hubY + 17) + '">' + hdEsc(hub.name || '(no name)') + '</text>' +
@@ -230,7 +339,7 @@ function canNetworkDiagram(net) {
         if (!a || !b) return;
         if (a.x > b.x) { var t = a; a = b; b = t; }
         var title = canHub(net, l.a).name + ' ⇄ ' + canHub(net, l.b).name;
-        if (order.indexOf(l.a) >= 0 && Math.abs(order.indexOf(l.a) - order.indexOf(l.b)) === 1) {
+        if (Math.abs(order.indexOf(l.a) - order.indexOf(l.b)) === 1) {
             wires += canTwistedPair(canSample([a.x + a.w, linkY], [b.x, linkY]), title);
         } else {
             var dip = maxBottom + 40 + 24 * under++, p0 = [a.x + a.w / 2, hubY + CAN_HUB_H], p1 = [b.x + b.w / 2, hubY + CAN_HUB_H];
@@ -238,29 +347,40 @@ function canNetworkDiagram(net) {
         }
     });
     var height = Math.max(maxBottom + 30 + 24 * under, hubY + CAN_HUB_H + 30);
-    // Anything not on a hub, in a row underneath.
+    // Anything not on a hub, in a row underneath (feeds into those devices go below them).
     if (loose.length) {
         var ly = height + 24;
         body += '<text class="sub" x="20" y="' + (ly - 8) + '">' + (net.hubs.length ? 'Not connected to a hub' : 'No hubs yet') + '</text>';
-        loose.forEach(function (it, i) { body += canItemBox(net, it.item, it.term, 20 + i * (CAN_ITEM_W + CAN_GAP), ly); });
-        height = ly + CAN_ITEM_H + 20;
+        maxBottom = ly + CAN_ITEM_H;
+        loose.forEach(function (it, i) {
+            var ix = 20 + i * (CAN_ITEM_W + CAN_GAP);
+            body += canItemBox(net, it.item, it.type, ix, ly);
+            boxes[it.item.id] = { x: ix, y: ly, h: CAN_ITEM_HEIGHT[it.type], above: false };
+            if (it.type === 'device') deviceFeeds(it.item);
+        });
+        height = maxBottom + 20;
         x = Math.max(x, 20 + loose.length * (CAN_ITEM_W + CAN_GAP) + 50);
     }
-    var width = Math.max(x - 50, 560) + 20, n = canTerminations(net), speed = canBitrate(net.bitrate);
+    var width = Math.max(x - 50, 640) + 20, n = canTerminations(net), speed = canBitrate(net.bitrate);
     var head = '<text class="title" x="20" y="24" style="font-size:15px">' + hdEsc(net.name || 'CAN network') + '</text>' +
         '<text class="sub" x="20" y="42">' + hdEsc([speed ? canBitrateText(speed) : 'speed not set', n + ' termination' + (n === 1 ? '' : 's') +
-            (n ? ' (' + Math.round(120 / n) + ' Ω)' : ''), net.devices.length + ' device' + (net.devices.length === 1 ? '' : 's')].join(' · ')) + '</text>' +
-        '<g transform="translate(' + (width - 190) + ',16)"><line x1="0" y1="6" x2="26" y2="6" stroke="' + CAN_H_COLOR + '" stroke-width="3"/>' +
-        '<text x="32" y="10">CAN-H</text><line x1="90" y1="6" x2="116" y2="6" stroke="' + CAN_L_COLOR + '" stroke-width="3"/>' +
-        '<text x="122" y="10">CAN-L</text><text class="sub" x="0" y="28">twisted pair</text></g>';
+            (n ? ' (' + Math.round(120 / n) + ' Ω)' : ''), net.devices.length + ' device' + (net.devices.length === 1 ? '' : 's'),
+            feeds.length ? feeds.length + ' power feed' + (feeds.length === 1 ? '' : 's') : ''].filter(Boolean).join(' · ')) + '</text>';
+    function key(dx, color, label) {
+        return '<line x1="' + dx + '" y1="6" x2="' + (dx + 22) + '" y2="6" stroke="' + color + '" stroke-width="3"/><text x="' + (dx + 27) + '" y="10">' + label + '</text>';
+    }
+    head += '<g transform="translate(' + (width - 300) + ',16)">' + key(0, CAN_H_COLOR, 'CAN-H') + key(72, CAN_L_COLOR, 'CAN-L') +
+        key(144, CAN_PLUS_COLOR, '+12 V') + key(216, CAN_GND_COLOR, 'GND') + '<text class="sub" x="0" y="28">CAN wires twisted; power alongside</text></g>';
     var style = '<style>.can-hub-box{fill:#e3ecf7;stroke:#3a5f8a;stroke-width:1.5}.can-term-on{fill:#e8f5e9;stroke:#2e7d32}' +
         '.can-term-off{fill:#f2f2f2;stroke:#aaa}.can-term-text{font-size:10px}.can-bad{fill:#c62828;font-weight:bold}' +
-        '.can-item,.can-hub{cursor:pointer}.can-item:hover .head,.can-hub:hover rect{stroke:#E31837;stroke-width:2}</style>';
+        '.can-pwr{fill:#ffebee;stroke:#d32f2f}.can-pwr-text{fill:#b71c1c;font-weight:bold}.can-feed-head{fill:#ffe3e3;stroke:#555;stroke-width:1}' +
+        '.can-item,.can-hub{cursor:pointer}.can-item:hover .head,.can-item:hover .can-feed-head,.can-hub:hover rect{stroke:#E31837;stroke-width:2}</style>';
     return { svg: hdSvg(width, height, style + head + wires + body), width: width, height: height };
 }
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { canNewNetwork: canNewNetwork, canBitrate: canBitrate, canBitrateText: canBitrateText, canTerminations: canTerminations,
         canHubGroups: canHubGroups, canNetworkChecks: canNetworkChecks, canNetworkDiagram: canNetworkDiagram, canSetHubLink: canSetHubLink,
-        canRemoveHub: canRemoveHub, canDeviceBitrate: canDeviceBitrate, canTwistedPair: canTwistedPair, canSample: canSample };
+        canRemoveHub: canRemoveHub, canRemoveDevice: canRemoveDevice, canFeeds: canFeeds, canFeedTarget: canFeedTarget,
+        canPowered: canPowered, canPowerPair: canPowerPair, canDeviceBitrate: canDeviceBitrate, canTwistedPair: canTwistedPair, canSample: canSample };
 }

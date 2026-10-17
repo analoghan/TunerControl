@@ -232,13 +232,20 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
         on, and its speed. Leave the speed blank when it runs at the network's speed.</li>
       <li><strong>Hubs</strong> — tick which other hubs each hub is wired to. A new hub starts wired to the previous one.</li>
       <li><strong>Terminators</strong> — standalone 120 Ω terminators and the hub each plugs into.</li>
+      <li><strong>Power</strong> — tick <em>From CAN</em> on a device that is powered through its CAN connection (+12 V and ground in the
+        same cable as CAN-H/CAN-L).</li>
+      <li><strong>Power feeds</strong> — where power enters the network: a name, where it comes from (e.g. <em>PDM30 OUT 5</em>) and the hub
+        or device it feeds into.</li>
     </ul>
     <p>Each network is checked: a bus needs <strong>exactly two terminations</strong> (60 Ω between CAN-H and CAN-L) — none or one is an
       error, more than two a warning with the resistance it gives; every device must use the network's speed; devices and terminators should
-      be plugged into a hub; and all of a network's hubs must be wired together. Terminators not plugged into a hub don't count.</p>
+      be plugged into a hub; and all of a network's hubs must be wired together. Terminators not plugged into a hub don't count. A device
+      powered from CAN needs a power feed that reaches it — power fed into a hub reaches every hub wired to it — and each feed needs a source
+      and somewhere to go in.</p>
     <p><strong>Diagram</strong> (or <em>CAN networks</em> in the Diagram tab's list) draws the network: hubs in a row with their devices and
       terminators above and below, every connection as a twisted pair (yellow CAN-H, green CAN-L), each device's speed and termination, and
-      anything not on a hub underneath. Click a device or hub to edit it. Export PDF can include the networks' tables and diagrams.</p>
+      anything not on a hub underneath. A connection that carries power gets two more wires beside its pair (red +12 V, black ground); a
+      power feed is drawn as its own box with those two wires into its hub, or next to the device it feeds. Click a device, feed or hub to edit it. Export PDF can include the networks' tables and diagrams.</p>
 
     <h2 id="tune">Tune comparison</h2>
     <p>Pick a tune imported in the <a href="../m1-config/index.html">M1 Config Viewer</a>. Every I/O assignment in the tune is turned into its ECU

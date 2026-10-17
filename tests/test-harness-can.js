@@ -104,3 +104,66 @@ describe('CAN networks — diagram', function () {
     assert.ok(Math.max.apply(null, ys) > 2 && Math.min.apply(null, ys) < -2, 'CAN-H swings to both sides');
   });
 });
+
+describe('CAN networks — power', function () {
+  function powered() {
+    var n = hcNet();
+    n.devices[1].power = true;   // Dash on hub A, powered through its CAN connection
+    n.feeds = [{ id: 'f1', name: 'Switched 12V', source: 'PDM30 OUT 5', to: 'hub:B', notes: '' }];
+    return n;
+  }
+
+  it('power fed into one hub reaches devices on hubs wired to it', function () {
+    var n = powered();
+    assert.deepEqual(canNetworkChecks(n), []);
+    assert.ok(canPowered(n).devices.d2);
+  });
+
+  it('warns about a powered device with no feed reaching it, and about loose or sourceless feeds', function () {
+    var n = powered();
+    canSetHubLink(n, 'A', 'B', false);   // hub A no longer gets B's power
+    assert.equal(hcFind(canNetworkChecks(n), 'no power feed reaches its hub')[0].where, 'Dash');
+    n = powered();
+    n.feeds = [];
+    assert.equal(hcFind(canNetworkChecks(n), 'the network has no power feed').length, 1);
+    n = powered();
+    n.feeds[0].to = ''; n.feeds[0].source = '';
+    var c = canNetworkChecks(n);
+    assert.equal(hcFind(c, 'not connected to a hub or device').length, 1);
+    assert.equal(hcFind(c, 'has no source').length, 1);
+  });
+
+  it('a feed into a device powers that device; removing the device or its hub disconnects feeds', function () {
+    var n = hcNet();
+    n.feeds = [{ id: 'f1', name: 'Dash feed', source: 'Battery', to: 'device:d2' }];
+    assert.ok(canPowered(n).devices.d2);
+    assert.equal(canFeedTarget(n, n.feeds[0]).device.name, 'Dash');
+    canRemoveDevice(n, 'd2');
+    assert.equal(n.feeds[0].to, '');
+    n = powered();
+    canRemoveHub(n, 'B');
+    assert.equal(n.feeds[0].to, '');
+  });
+
+  it('older networks without feeds still work', function () {
+    var n = hcNet();
+    delete n.feeds;
+    assert.deepEqual(canNetworkChecks(n), []);
+    assert.ok(canNetworkDiagram(n).svg.indexOf('<svg') === 0);
+  });
+
+  it('draws two power wires beside a powered connection and into the network from each feed', function () {
+    var d = canNetworkDiagram(powered());
+    assert.equal((d.svg.match(/class="can-power"/g) || []).length, 2, 'Dash link + the feed into hub B');
+    assert.equal((d.svg.match(/class="can-pair"/g) || []).length, 5, 'CAN pairs unchanged; a feed has no CAN wires');
+    assert.ok(d.svg.indexOf('Power from PDM30 OUT 5') >= 0);
+    assert.ok(d.svg.indexOf('>PWR<') >= 0, 'badge on the powered device');
+    var n = hcNet();
+    n.feeds = [{ id: 'f1', name: 'Dash feed', source: 'Battery', to: 'device:d2' }];
+    d = canNetworkDiagram(n);
+    assert.ok(d.svg.indexOf('Dash feed') >= 0, 'the feed is drawn next to Dash');
+    assert.equal((d.svg.match(/class="can-power"/g) || []).length, 1);
+    var pair = canPowerPair(canSample([0, 0], [100, 0]), 'x');
+    assert.equal((pair.match(/<polyline/g) || []).length, 4, '+12 V and ground, each with an edge');
+  });
+});
