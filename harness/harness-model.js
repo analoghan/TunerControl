@@ -440,12 +440,93 @@ function harnessSplitSheet(model, sheet, subName) {
     };
 }
 
+// ---------------------------------------------------------------------------
+// Adding blocks from another workbook
+// ---------------------------------------------------------------------------
+
+/** A name not used by any connector or splice in the models: id_2, id_3, … */
+function harnessFreeId(models, id) {
+    var used = {};
+    models.forEach(function (m) {
+        m.connectors.concat(m.splices).forEach(function (b) { used[b.id.toLowerCase()] = true; });
+    });
+    if (!used[id.toLowerCase()]) return id;
+    for (var n = 2; ; n++) if (!used[(id + '_' + n).toLowerCase()]) return id + '_' + n;
+}
+
+/** The block in `model` with this id, ignoring case (names are unique that way). */
+function harnessFindBlock(model, id) {
+    var lower = id.toLowerCase();
+    return model.connectors.concat(model.splices).filter(function (b) { return b.id.toLowerCase() === lower; })[0] || null;
+}
+
+/**
+ * Copy blocks from `incoming` (a model read from another workbook) into `model`, in place.
+ * picks: [{ id, action: 'add' | 'replace' | 'rename', newId }] — ids of incoming blocks; blocks not listed are left out.
+ *   add     — the name is free in `model`
+ *   replace — swap the block in `model` that has this name for the incoming one, in the same place
+ *   rename  — add it as newId; connections among the incoming blocks that pointed at it are renamed too
+ * Connections from the incoming blocks to names not brought in are kept as written, so they reach blocks already in `model`.
+ * Each block keeps its sheet, spelled like a matching sheet in `model`. Returns { added, replaced, renamed: [[from, to]] }.
+ */
+function harnessMergeBlocks(model, incoming, picks) {
+    var byId = {}, out = { added: [], replaced: [], renamed: [] };
+    incoming.connectors.concat(incoming.splices).forEach(function (b) { byId[b.id] = b; });
+    var index = harnessIndex(incoming), renames = {};
+    picks.forEach(function (p) { if (p.action === 'rename' && byId[p.id]) renames[p.id] = harnessText(p.newId); });
+    function copy(b) {
+        var c = JSON.parse(JSON.stringify(b, function (k, v) { return k === 'data' ? undefined : v; }));
+        // Image bytes: keep the same Uint8Array (JSON would turn it into an object).
+        if (b.images) c.images = b.images.map(function (im, i) { return Object.assign(c.images[i], im.data ? { data: im.data } : {}); });
+        return c;
+    }
+    function rename(rec, field) {
+        var t = harnessText(rec[field]);
+        if (!t) return;
+        var r = harnessResolve(index, t);
+        if (r.kind === 'pin' && renames[r.connector.id]) rec[field] = renames[r.connector.id] + '.' + r.cavity + (r.extra ? ' ' + r.extra : '');
+        else if (r.kind === 'splice' && renames[r.splice.id]) rec[field] = renames[r.splice.id] + (r.extra ? ' ' + r.extra : '');
+    }
+    var sheets = harnessSheetGroups(model);
+    function sheetName(name, fallback) {
+        var n = harnessText(name).replace(/\s+/g, ' ') || fallback;
+        var same = sheets.filter(function (s) { return s.name.toLowerCase() === n.toLowerCase(); })[0];
+        return same ? same.name : n;
+    }
+    picks.forEach(function (p) {
+        var src = byId[p.id];
+        if (!src || ['add', 'replace', 'rename'].indexOf(p.action) < 0) return;
+        var isConnector = !!src.pins, list = isConnector ? model.connectors : model.splices, b = copy(src);
+        (isConnector ? b.pins : b.wires).forEach(function (rec) { rename(rec, isConnector ? 'remote' : 'end'); });
+        b.sheet = sheetName(src.sheet, isConnector ? 'Connectors' : 'Splices');
+        if (!model.sheets.some(function (s) { return s.name.toLowerCase() === b.sheet.toLowerCase(); })) {
+            model.sheets.push({ name: b.sheet, kind: isConnector ? 'connectors' : 'splices' });
+        }
+        var old = harnessFindBlock(model, p.action === 'rename' ? renames[p.id] : src.id);
+        if (p.action === 'replace' && old && !!old.pins === isConnector) {
+            list[list.indexOf(old)] = b;
+            out.replaced.push(b.id);
+            return;
+        }
+        if (old) throw new Error('"' + (p.action === 'rename' ? renames[p.id] : src.id) + '" is already used in this harness.');
+        if (p.action === 'rename') {
+            if (!renames[p.id]) throw new Error('A new name is needed for ' + src.id + '.');
+            b.id = renames[p.id];
+            if (isConnector && b.title === src.id) b.title = b.id;
+            out.renamed.push([src.id, b.id]);
+        } else out.added.push(b.id);
+        list.push(b);
+    });
+    return out;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         harnessFromWorkbook: harnessFromWorkbook, harnessToWorkbook: harnessToWorkbook, harnessIndex: harnessIndex,
         harnessResolve: harnessResolve, harnessCheck: harnessCheck, harnessConnectorId: harnessConnectorId,
         harnessHasWire: harnessHasWire, harnessEndpointName: harnessEndpointName, harnessText: harnessText,
         harnessSplitCandidates: harnessSplitCandidates, harnessSheetGroups: harnessSheetGroups, harnessSplitSheet: harnessSplitSheet,
+        harnessMergeBlocks: harnessMergeBlocks, harnessFreeId: harnessFreeId, harnessFindBlock: harnessFindBlock,
         HARNESS_PIN_FIELDS: HARNESS_PIN_FIELDS, HARNESS_WIRE_FIELDS: HARNESS_WIRE_FIELDS
     };
 }

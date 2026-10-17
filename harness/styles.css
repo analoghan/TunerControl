@@ -119,6 +119,19 @@ tr.issue-row li.issue-warning .issue-text { color: #ffb74d; }
 .panel-desc a, .muted a { color: #ff5a6e; }
 .plain-list { margin: 0; padding-left: 18px; color: #ccc; }
 
+/* Add from .xlsx dialog */
+.add-dialog { width: min(720px, 95vw); }
+.add-list { max-height: 55vh; overflow-y: auto; }
+.add-list .pdf-options legend label { display: inline-flex; gap: 6px; color: #ddd; font-size: 0.85rem; }
+.add-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 3px 0; font-size: 0.88rem; color: #ddd; }
+.add-row > label { display: flex; align-items: baseline; gap: 8px; min-width: 200px; }
+.add-row .block-id { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.add-row .count { color: #888; font-size: 0.78rem; }
+.add-row .add-clash { color: #ff9800; font-size: 0.78rem; }
+.add-row select, .add-row .text-input { font-size: 0.8rem; padding: 2px 4px; }
+.add-row .text-input { width: 150px; }
+.add-error { color: #f44336; font-size: 0.85rem; margin: 4px 0; }
+
 @media (max-width: 800px) {
   .split { grid-template-columns: 1fr; }
   .block-list { position: static; max-height: 260px; }

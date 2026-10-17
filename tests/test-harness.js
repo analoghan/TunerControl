@@ -528,3 +528,44 @@ describe('Harness — systems of harnesses', function () {
     assert.deepEqual([row.status, row.harnessName], ['ok', 'Chassis']);
   });
 });
+
+describe('Harness — adding blocks from another workbook', function () {
+  function pin(cavity, remote) {
+    return { cavity: cavity, terminal: '', wirePn: 'W', wire: '22 AWG White', function: 'F' + cavity, note: '', remote: remote, status: '' };
+  }
+  function incoming() {
+    return { name: 'In', sheets: [{ name: 'subharness', kind: 'connectors' }], connectors: [
+      { id: 'SUB.A', title: 'SUB.A', sheet: 'subharness', pins: [pin('1', 'MAP.1'), pin('2', 'PEDAL.1'), pin('3', 'SPL.SUB')],
+        images: [{ mime: 'image/png', w: 10, h: 10, data: new Uint8Array([1, 2, 3]) }] },
+      { id: 'PEDAL', title: 'PEDAL', sheet: 'subharness', pins: [pin('1', 'SUB.A.2')] },
+      { id: 'MAP', title: 'New MAP', sheet: 'engine ', pins: [pin('1', 'SPL.5V')] },
+      { id: 'SKIP', title: 'SKIP', sheet: 'subharness', pins: [] }],
+      splices: [{ id: 'SPL.SUB', sheet: 'subharness', wires: [{ end: 'SUB.A.3', wirePn: 'W', wire: '22 AWG White', function: '' }] }] };
+  }
+
+  it('adds, replaces and renames picked blocks, leaving the rest of the harness alone', function () {
+    var m = harnessFromWorkbook(hxWorkbook(), 'Base'), before = m.connectors.length, mapAt = m.connectors.map(function (c) { return c.id; }).indexOf('MAP');
+    var r = harnessMergeBlocks(m, incoming(), [{ id: 'SUB.A', action: 'add' }, { id: 'PEDAL', action: 'rename', newId: 'PEDAL_2' },
+      { id: 'MAP', action: 'replace' }, { id: 'SPL.SUB', action: 'add' }]);
+    assert.deepEqual(r, { added: ['SUB.A', 'SPL.SUB'], replaced: ['MAP'], renamed: [['PEDAL', 'PEDAL_2']] });
+    assert.equal(m.connectors.length, before + 2, 'SUB.A and PEDAL_2; SKIP left out');
+    assert.equal(m.connectors[mapAt].title, 'New MAP', 'replaced in the same place');
+    assert.equal(harnessFindBlock(m, 'PEDAL').pins[0].remote, 'M142.C.14', 'the existing PEDAL is untouched');
+    var sub = harnessFindBlock(m, 'SUB.A');
+    assert.deepEqual(sub.pins.map(function (p) { return p.remote; }), ['MAP.1', 'PEDAL_2.1', 'SPL.SUB'], 'links to the renamed block follow it');
+    assert.ok(sub.images[0].data instanceof Uint8Array, 'picture bytes kept for storing');
+    assert.equal(harnessFindBlock(m, 'PEDAL_2').title, 'PEDAL_2');
+    assert.equal(m.connectors[mapAt].sheet, 'Engine', 'joins the existing sheet, spelled like it');
+    assert.equal(sub.sheet, 'subharness');
+    assert.ok(m.sheets.some(function (s) { return s.name === 'subharness'; }));
+    assert.equal(hxFind(harnessCheck(m), 'SUB.A.2', 'PEDAL_2').length, 0, 'SUB.A.2 and PEDAL_2.1 agree');
+  });
+
+  it('refuses a name that is already used and suggests a free one', function () {
+    var m = harnessFromWorkbook(hxWorkbook(), 'Base');
+    assert.throws(function () { harnessMergeBlocks(m, incoming(), [{ id: 'PEDAL', action: 'add' }]); }, 'already used');
+    assert.throws(function () { harnessMergeBlocks(m, incoming(), [{ id: 'PEDAL', action: 'rename', newId: 'map' }]); }, 'already used');
+    assert.equal(harnessFreeId([m], 'PEDAL'), 'PEDAL_2');
+    assert.equal(harnessFreeId([m], 'NEW'), 'NEW');
+  });
+});

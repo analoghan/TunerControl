@@ -1376,6 +1376,148 @@ $('pdf-dialog').addEventListener('close', function () {
 });
 
 // =========================================================================
+// Add from .xlsx — copy blocks from another workbook into the open harness
+// =========================================================================
+
+var addState = null;   // { file, incoming }
+
+/** Same contents, ignoring the sheet and pictures. */
+function sameBlock(a, b) {
+    function key(x) {
+        return JSON.stringify([x.title, x.connector, x.mateConn, x.matePin, x.type, x.boot, x.notes,
+            (x.pins || x.wires || []).map(function (r) { return (x.pins ? HARNESS_PIN_FIELDS : HARNESS_WIRE_FIELDS).map(function (f) { return harnessText(r[f]); }); })]);
+    }
+    return !!a.pins === !!b.pins && key(a) === key(b);
+}
+
+function openAddDialog(file) {
+    showError('');
+    setStatus('Reading ' + file.name + '…');
+    file.arrayBuffer().then(readXlsx).then(function (wb) {
+        var incoming = harnessFromWorkbook(wb, file.name);
+        addState = { file: file, incoming: incoming };
+        setStatus('');
+        $('add-title').textContent = 'Add from ' + file.name;
+        $('add-list').innerHTML = harnessSheetGroups(incoming).map(function (sheet, si) {
+            var blocks = sheet.connectors.concat(sheet.splices);
+            if (!blocks.length) return '';
+            return '<fieldset class="pdf-options"><legend><label><input type="checkbox" data-add-sheet="' + si + '"> ' + esc(sheet.name) +
+                ' <span class="count">' + blocks.length + '</span></label></legend>' + blocks.map(function (b) {
+                    var mine = harnessFindBlock(state.model, b.id), n = b.pins ? b.pins.length : b.wires.length;
+                    var meta = (b.pins ? 'connector · ' + n + ' cavit' + (n === 1 ? 'y' : 'ies') : 'splice · ' + n + ' wire' + (n === 1 ? '' : 's')) +
+                        ((b.images || []).length ? ' · ' + b.images.length + ' picture' + (b.images.length === 1 ? '' : 's') : '');
+                    var html = '<div class="add-row" data-add-sheet-of="' + si + '"><label><input type="checkbox" data-add-id="' + esc(b.id) + '"' +
+                        (mine ? '' : ' checked') + '> <span class="block-id">' + esc(b.id) + '</span> <span class="count">' + esc(meta) + '</span></label>';
+                    if (mine) {
+                        var kindClash = !!mine.pins !== !!b.pins;
+                        html += '<span class="add-clash">' + (kindClash ? 'Name used by a ' + (mine.pins ? 'connector' : 'splice') + ' here'
+                            : sameBlock(mine, b) ? 'Already here, identical' : 'Already here, different') + '</span>' +
+                            '<select data-add-action aria-label="What to do with ' + esc(b.id) + '">' +
+                            (kindClash ? '' : '<option value="replace">Replace yours</option>') + '<option value="rename">Add as</option></select>' +
+                            '<input type="text" class="text-input" data-add-newid aria-label="New name for ' + esc(b.id) + '" value="' +
+                            esc(harnessFreeId([state.model, incoming], b.id)) + '"' + (kindClash ? '' : ' hidden') + '>';
+                    }
+                    return html + '</div>';
+                }).join('') + '</fieldset>';
+        }).join('') || '<p class="muted">No connectors or splices in this spreadsheet.</p>';
+        $('add-error').hidden = true;
+        addUpdate();
+        $('add-dialog').returnValue = '';
+        $('add-dialog').showModal();
+    }).catch(function (err) {
+        setStatus('');
+        showError('Could not read ' + file.name + ': ' + err.message);
+    }).then(function () { $('add-input').value = ''; });
+}
+
+/** Sheet checkboxes follow their rows; the summary counts what will be added. */
+function addUpdate() {
+    var list = $('add-list'), picks = addPicks();
+    list.querySelectorAll('[data-add-sheet]').forEach(function (box) {
+        var rows = list.querySelectorAll('[data-add-sheet-of="' + box.getAttribute('data-add-sheet') + '"] [data-add-id]');
+        var on = [].filter.call(rows, function (r) { return r.checked; }).length;
+        box.checked = on === rows.length && on > 0;
+        box.indeterminate = on > 0 && on < rows.length;
+    });
+    var n = { add: 0, replace: 0, rename: 0 };
+    picks.forEach(function (p) { n[p.action]++; });
+    $('add-summary').textContent = picks.length ? 'Adds ' + (n.add + n.rename) + (n.rename ? ' (' + n.rename + ' renamed)' : '') +
+        (n.replace ? ', replaces ' + n.replace : '') + '.' : 'Nothing picked.';
+    $('add-ok').disabled = !picks.length;
+}
+
+function addPicks() {
+    var picks = [];
+    $('add-list').querySelectorAll('.add-row').forEach(function (row) {
+        var box = row.querySelector('[data-add-id]'), sel = row.querySelector('[data-add-action]');
+        if (!box.checked) return;
+        picks.push({ id: box.getAttribute('data-add-id'), action: sel ? sel.value : 'add',
+                     newId: sel ? row.querySelector('[data-add-newid]').value.trim() : '' });
+    });
+    return picks;
+}
+
+/** A problem with the picked names, or ''. */
+function addProblem(picks) {
+    var taken = {};
+    state.model.connectors.concat(state.model.splices).forEach(function (b) { taken[b.id.toLowerCase()] = true; });
+    picks.forEach(function (p) { if (p.action === 'replace') delete taken[p.id.toLowerCase()]; });
+    for (var i = 0; i < picks.length; i++) {
+        var p = picks[i], name = p.action === 'rename' ? p.newId : p.id;
+        if (p.action === 'replace') { taken[name.toLowerCase()] = true; continue; }
+        if (!name) return 'Give ' + p.id + ' a new name.';
+        if (p.action === 'rename' && /\s/.test(name)) return '"' + name + '": names cannot contain spaces.';
+        if (taken[name.toLowerCase()]) return '"' + name + '" is already used' + (p.action === 'rename' ? ' — pick another name for ' + p.id : '') + '.';
+        taken[name.toLowerCase()] = true;
+    }
+    return '';
+}
+
+function addPicked() {
+    var picks = addPicks(), file = addState.file, incoming = addState.incoming, result;
+    try { result = harnessMergeBlocks(state.model, incoming, picks); } catch (err) { showError(err.message); return; }
+    addState = null;
+    setStatus('Storing pictures…');
+    hsStoreModelImages(state.model).then(function () {
+        var names = result.added.concat(result.renamed.map(function (r) { return r[1]; }), result.replaced);
+        var first = names.map(function (id) { return findConnector(id); }).filter(Boolean)[0];
+        if (first) state.selConnector = first.id;
+        else if (names.length) state.selSplice = names[0];
+        setDirty(true);
+        runChecks();
+        renderAll();
+        if (!first && names.length) selectTab('splices'); else if (first) selectTab('connectors');
+        var a = result.added.length + result.renamed.length;
+        setStatus('From ' + file.name + ': added ' + a + (result.renamed.length ? ' (' + result.renamed.map(function (r) { return r[0] + ' as ' + r[1]; }).join(', ') + ')' : '') +
+            (result.replaced.length ? ', replaced ' + result.replaced.join(', ') : '') + '. Not saved yet — press Save to keep them.');
+    }).catch(function (err) { setStatus(''); showError('Could not store the pictures: ' + err.message); });
+}
+
+$('add-btn').addEventListener('click', function () { if (state.model) $('add-input').click(); });
+$('add-input').addEventListener('change', function () { if (this.files[0]) openAddDialog(this.files[0]); });
+$('add-list').addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.hasAttribute('data-add-sheet')) {
+        $('add-list').querySelectorAll('[data-add-sheet-of="' + t.getAttribute('data-add-sheet') + '"] [data-add-id]').forEach(function (b) { b.checked = t.checked; });
+    }
+    if (t.hasAttribute('data-add-action')) t.parentNode.querySelector('[data-add-newid]').hidden = t.value !== 'rename';
+    $('add-error').hidden = true;
+    addUpdate();
+});
+$('add-list').addEventListener('input', function () { $('add-error').hidden = true; addUpdate(); });
+$('add-ok').addEventListener('click', function (e) {
+    var problem = addProblem(addPicks());
+    if (!problem) return;
+    e.preventDefault();
+    $('add-error').textContent = problem;
+    $('add-error').hidden = false;
+});
+$('add-dialog').addEventListener('close', function () {
+    if ($('add-dialog').returnValue === 'add' && addState) addPicked();
+    addState = null;
+});
+
+// =========================================================================
 // Events and startup
 // =========================================================================
 
