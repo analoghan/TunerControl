@@ -59,8 +59,9 @@ function harnessTerminal(t) {
 /** Wire values that mean "no wire in this cavity". */
 var HARNESS_NO_WIRE = /^(|n\/a|na|none|empty|-|unused|not used|sealing pin|seal|plug)$/i;
 
+/** Cell text, trimmed. Zero-width characters (pasted from web pages or Word) are dropped and non-breaking spaces become spaces. */
 function harnessText(v) {
-    return v === null || v === undefined ? '' : String(v).trim();
+    return v === null || v === undefined ? '' : String(v).replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/\u00A0/g, ' ').trim();
 }
 
 /**
@@ -133,15 +134,28 @@ function harnessFromWorkbook(workbook, name) {
 }
 
 /**
+ * The harness's sheets in order, each with its connectors and splices: [{ name, connectors, splices }]. Sheet names match
+ * ignoring case and extra spaces ("Subharness", "subharness ", "Sub  harness" are not the same, but the first two are);
+ * the first spelling seen is used. Blocks with no sheet go on "Connectors" / "Splices".
+ */
+function harnessSheetGroups(model) {
+    var groups = [], byKey = {};
+    function group(name) {
+        var n = harnessText(name).replace(/\s+/g, ' '), key = n.toLowerCase();
+        return byKey[key] || (byKey[key] = groups[groups.push({ name: n, connectors: [], splices: [] }) - 1]);
+    }
+    model.sheets.forEach(function (s) { group(s.name); });
+    model.connectors.forEach(function (c) { group(harnessText(c.sheet) || 'Connectors').connectors.push(c); });
+    model.splices.forEach(function (s) { group(harnessText(s.sheet) || 'Splices').splices.push(s); });
+    return groups;
+}
+
+/**
  * Sheets for writeXlsx() in the same block layout harnessFromWorkbook() reads. `imageData` maps image id →
  * bytes (Uint8Array); images without bytes there are left out. Pictures go in column I next to their block.
  */
 function harnessToWorkbook(model, imageData) {
-    var sheetNames = model.sheets.map(function (s) { return s.name; });
-    function addSheet(n) { if (sheetNames.indexOf(n) < 0) sheetNames.push(n); }
-    model.connectors.forEach(function (c) { addSheet(c.sheet || 'Connectors'); });
-    model.splices.forEach(function (s) { addSheet(s.sheet || 'Splices'); });
-    return sheetNames.map(function (sheetName) {
+    return harnessSheetGroups(model).map(function (sheet) {
         var rows = [], bold = [], images = [];
         function block(title, header, columns, records, fields, blockImages) {
             if (rows.length) rows.push([]);
@@ -159,15 +173,15 @@ function harnessToWorkbook(model, imageData) {
             rows.push(columns.slice());
             records.forEach(function (rec) { rows.push(fields.map(function (f) { return rec[f] || ''; })); });
         }
-        model.connectors.filter(function (c) { return (c.sheet || 'Connectors') === sheetName; }).forEach(function (c) {
+        sheet.connectors.forEach(function (c) {
             block(c.title || c.id, [['CONNECTOR', c.connector], ['BOOT', c.boot], ['MATE CONN', c.mateConn],
                 ['MATE PIN', c.matePin], ['NOTES', c.notes]], c.columns || HARNESS_PIN_COLUMNS, c.pins, HARNESS_PIN_FIELDS, c.images);
         });
-        model.splices.filter(function (s) { return (s.sheet || 'Splices') === sheetName; }).forEach(function (s) {
+        sheet.splices.forEach(function (s) {
             block(s.id, [['SPLICE', s.type], ['BOOT', s.boot], ['NOTES', s.notes]],
                 s.columns || HARNESS_WIRE_COLUMNS, s.wires, HARNESS_WIRE_FIELDS, s.images);
         });
-        return { name: sheetName, rows: rows, bold: bold, images: images, widths: [16, 18, 22, 34, 40, 26, 22, 12] };
+        return { name: sheet.name, rows: rows, bold: bold, images: images, widths: [16, 18, 22, 34, 40, 26, 22, 12] };
     });
 }
 
@@ -431,7 +445,7 @@ if (typeof module !== 'undefined' && module.exports) {
         harnessFromWorkbook: harnessFromWorkbook, harnessToWorkbook: harnessToWorkbook, harnessIndex: harnessIndex,
         harnessResolve: harnessResolve, harnessCheck: harnessCheck, harnessConnectorId: harnessConnectorId,
         harnessHasWire: harnessHasWire, harnessEndpointName: harnessEndpointName, harnessText: harnessText,
-        harnessSplitCandidates: harnessSplitCandidates, harnessSplitSheet: harnessSplitSheet,
+        harnessSplitCandidates: harnessSplitCandidates, harnessSheetGroups: harnessSheetGroups, harnessSplitSheet: harnessSplitSheet,
         HARNESS_PIN_FIELDS: HARNESS_PIN_FIELDS, HARNESS_WIRE_FIELDS: HARNESS_WIRE_FIELDS
     };
 }

@@ -479,24 +479,30 @@ function badgeHtml(id) {
     return b.error ? '<span class="badge badge-error">' + b.error + '</span>' : b.warning ? '<span class="badge badge-warning">' + b.warning + '</span>' : '';
 }
 
-function renderBlockList(listId, blocks, selected, filter, countOf, attr) {
-    var f = filter.trim().toLowerCase(), lastSheet = null, html = '';
-    blocks.forEach(function (b) {
-        if (f && (b.id + ' ' + (b.title || '') + ' ' + (b.connector || b.type || '') + ' ' + (b.notes || '')).toLowerCase().indexOf(f) < 0) return;
-        if (b.sheet !== lastSheet) { html += '<li class="sheet-name">' + esc(b.sheet || '') + '</li>'; lastSheet = b.sheet; }
-        html += '<li><button class="block-btn' + (b.id === selected ? ' selected' : '') + '" ' + attr + '="' + esc(b.id) + '">' +
-            '<span class="block-id">' + esc(b.id) + '</span><span class="block-meta">' + countOf(b) + '</span>' + badgeHtml(b.id) + '</button></li>';
+/** One heading per sheet, however the blocks are ordered (`kind` = 'connectors' | 'splices' of harnessSheetGroups). */
+function renderBlockList(listId, kind, selected, filter, countOf, attr) {
+    var f = filter.trim().toLowerCase(), html = '';
+    harnessSheetGroups(state.model).forEach(function (sheet) {
+        var items = sheet[kind].filter(function (b) {
+            return !f || (b.id + ' ' + (b.title || '') + ' ' + (b.connector || b.type || '') + ' ' + (b.notes || '')).toLowerCase().indexOf(f) >= 0;
+        });
+        if (!items.length) return;
+        html += '<li class="sheet-name">' + esc(sheet.name) + '</li>';
+        items.forEach(function (b) {
+            html += '<li><button class="block-btn' + (b.id === selected ? ' selected' : '') + '" ' + attr + '="' + esc(b.id) + '">' +
+                '<span class="block-id">' + esc(b.id) + '</span><span class="block-meta">' + countOf(b) + '</span>' + badgeHtml(b.id) + '</button></li>';
+        });
     });
     $(listId).innerHTML = html || '<li class="muted">None</li>';
 }
 
 function renderConnectorList() {
-    renderBlockList('connector-list', state.model.connectors, state.selConnector, $('connector-filter').value,
+    renderBlockList('connector-list', 'connectors', state.selConnector, $('connector-filter').value,
         function (c) { return c.pins.length; }, 'data-connector');
 }
 
 function renderSpliceList() {
-    renderBlockList('splice-list', state.model.splices, state.selSplice, $('splice-filter').value,
+    renderBlockList('splice-list', 'splices', state.selSplice, $('splice-filter').value,
         function (s) { return s.wires.length; }, 'data-splice');
 }
 
@@ -509,10 +515,13 @@ var CONNECTOR_FIELDS = [['id', 'Name (used in connections)'], ['title', 'Title']
 var SPLICE_FIELDS = [['id', 'Name (used in connections)'], ['sheet', 'Sheet'], ['type', 'Splice type'], ['boot', 'Boot'], ['notes', 'Notes']];
 
 function fieldsHtml(block, fields) {
+    var listId = block.pins ? 'connector-sheets' : 'splice-sheets';   // existing sheet names to pick from
     return '<div class="field-grid">' + fields.map(function (f) {
         return '<label><span>' + esc(f[1]) + '</span><input type="text" class="text-input" data-block-field="' + f[0] + '" value="' +
-            esc(block[f[0]]) + '"></label>';
-    }).join('') + '</div>';
+            esc(block[f[0]]) + '"' + (f[0] === 'sheet' ? ' list="' + listId + '"' : '') + '></label>';
+    }).join('') + '</div><datalist id="' + listId + '">' + harnessSheetGroups(state.model).map(function (s) {
+        return '<option value="' + esc(s.name) + '">';
+    }).join('') + '</datalist>';
 }
 
 function rowsHtml(kind, block, records, fields, columns) {
@@ -686,6 +695,15 @@ function wireEditor(containerId, isConnector) {
     el.addEventListener('change', function (e) {
         var t = e.target, block = current();
         if (block && t.getAttribute('data-block-field') === 'id') renameBlock(block, isConnector, t.value, t);
+        if (block && t.getAttribute('data-block-field') === 'sheet') {
+            // Spell the sheet like the existing sheet it matches (case, spaces), so it joins that sheet.
+            var others = Object.assign({}, state.model, { connectors: state.model.connectors.filter(function (b) { return b !== block; }),
+                splices: state.model.splices.filter(function (b) { return b !== block; }) });
+            var name = harnessText(t.value).replace(/\s+/g, ' ');
+            var same = harnessSheetGroups(others).filter(function (s) { return s.name.toLowerCase() === name.toLowerCase(); })[0];
+            block.sheet = t.value = same ? same.name : name;
+            isConnector ? renderConnectorList() : renderSpliceList();
+        }
         if (block && t.classList.contains('add-image')) addImages(block, t.files);
     });
     el.addEventListener('click', function (e) {

@@ -228,6 +228,8 @@ describe('Harness — connection checks', function () {
     assert.equal(dv.terminal, 'Device'); assert.equal(dv.note, 'fuel pump');
     assert.equal(harnessResolve(idx, 'Horn (Device)').note, 'Horn');
     assert.equal(harnessResolve(idx, 'device').label, 'Device');
+    assert.equal(harnessResolve(idx, 'Device\u200B').terminal, 'Device', 'an invisible character pasted with the text');
+    assert.equal(harnessResolve(idx, 'Device\u00A0(pump)').note, 'pump');
     var e = harnessResolve(idx, 'Eyelet (engine block ground)');
     assert.equal(e.kind, 'none'); assert.equal(e.terminal, 'Eyelet'); assert.equal(e.note, 'engine block ground');
     e = harnessResolve(idx, 'Chassis Ground (Eyelet)');
@@ -456,6 +458,17 @@ describe('Harness — systems of harnesses', function () {
     assert.equal(harnessConnectorId('MoTeC E888 B - 26 Way'), 'E888.B');
     assert.equal(harnessConnectorId('MoTeC M142 A - 34 Way'), 'M142.A');
     assert.equal(harnessResolve(harnessIndex(engine), 'Unused').kind, 'none');
+  });
+
+  it('keeps one sheet per name, whatever the block order, case or spacing', function () {
+    var model = { name: 'C', sheets: [{ name: 'Main', kind: 'connectors' }], splices: [], connectors: [
+      Object.assign(conn('A', '', '', []), { sheet: 'Main' }), Object.assign(conn('B', '', '', []), { sheet: 'Subharness' }),
+      Object.assign(conn('C', '', '', []), { sheet: 'Main' }), Object.assign(conn('D', '', '', []), { sheet: 'subharness ' }),
+      Object.assign(conn('E', '', '', []), { sheet: '' })] };
+    var g = harnessSheetGroups(model);
+    assert.deepEqual(g.map(function (s) { return s.name; }), ['Main', 'Subharness', 'Connectors']);
+    assert.deepEqual(g[1].connectors.map(function (c) { return c.id; }), ['B', 'D']);
+    assert.deepEqual(harnessToWorkbook(model).map(function (s) { return s.name; }), ['Main', 'Subharness', 'Connectors']);
   });
 
   it('splits a sheet that holds the other half of a mating pair into its own harness', function () {
