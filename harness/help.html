@@ -94,7 +94,11 @@ Location | Pin        | Conductor Part Number | Conductor Description | Engine F
       <tr><td><code>M142.C.14</code>, <code>CHAS.A.f</code></td><td>Cavity <code>14</code> of connector <code>M142.C</code> — the connector name, a dot, then the cavity.</td></tr>
       <tr><td><code>M142.SPL.5VA1</code></td><td>A splice, by its name.</td></tr>
       <tr><td><code>CHASSIS</code>, <code>Cylinder Head</code>, <code>C0635-5G</code></td><td>Something outside this harness (no dot): a ground point, the vehicle's own wiring, … Shown as a warning, not an error.</td></tr>
-      <tr><td><code>N/A</code>, <code>Empty</code>, <code>Unused</code>, <code>Unterminated</code>, blank</td><td>No connection.</td></tr>
+      <tr><td><code>Unterminated</code></td><td>The wire is connected at this end only, on purpose — e.g. a cable shield or drain grounded at
+        one end. A valid end: the checks don't look for the other one, and diagrams draw a capped stub. A note may follow in brackets:
+        <code>Unterminated (shield, ECU end)</code>. Also works for a wire in a splice's list.</td></tr>
+      <tr><td><code>N/A</code>, <code>Empty</code>, <code>Unused</code>, blank</td><td>No connection. A cavity with a wire but no connection gets a
+        warning; write <code>Unterminated</code> if that's intended.</td></tr>
     </table>
     <p>Every wire should be listed at both ends: if <code>M142.C.14</code> goes to <code>PEDAL.1</code>, then <code>PEDAL.1</code> should go to
       <code>M142.C.14</code>; a wire into a splice should appear in that splice's list. The <a href="#checks">checks</a> verify this.</p>

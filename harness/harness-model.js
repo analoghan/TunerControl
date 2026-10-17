@@ -32,9 +32,14 @@ var HARNESS_HEADER_FIELDS = { CONNECTOR: 'connector', SPLICE: 'type', BOOT: 'boo
     'MATE PIN': 'matePin', NOTES: 'notes' };
 
 /** Remote values that mean "no connection". */
-var HARNESS_NO_REMOTE = /^(|n\/a|na|none|empty|-|unused|not used|unterminated|open)$/i;
+var HARNESS_NO_REMOTE = /^(|n\/a|na|none|empty|-|unused|not used|open)$/i;
+/**
+ * A wire connected at this end only, on purpose (e.g. a shield drain grounded at one end): a valid end, so the checks don't
+ * ask for the other one. A note may follow in brackets: "Unterminated (shield, ECU end only)".
+ */
+var HARNESS_UNTERMINATED = /^unterminated(\s*\(.*\))?$/i;
 /** Wire values that mean "no wire in this cavity". */
-var HARNESS_NO_WIRE = /^(|n\/a|na|none|empty|-|sealing pin|seal|plug)$/i;
+var HARNESS_NO_WIRE = /^(|n\/a|na|none|empty|-|unused|not used|sealing pin|seal|plug)$/i;
 
 function harnessText(v) {
     return v === null || v === undefined ? '' : String(v).trim();
@@ -172,13 +177,14 @@ function harnessIndex(model) {
 
 /**
  * Resolve a remote reference.
- * Returns { kind: 'none' } | { kind: 'pin', connector, cavity, pin|null } | { kind: 'splice', splice }
+ * Returns { kind: 'none' } (unterminated: true for HARNESS_UNTERMINATED) | { kind: 'pin', connector, cavity, pin|null } | { kind: 'splice', splice }
  *       | { kind: 'external', text } (no dot: CHASSIS, SHIELD …) | { kind: 'unknown', text },
  * plus caseOnly (matched ignoring case) and extra (trailing text such as " (X107.H)" that was ignored).
  */
 function harnessResolve(index, text) {
     var t = harnessText(text);
     if (HARNESS_NO_REMOTE.test(t)) return { kind: 'none' };
+    if (HARNESS_UNTERMINATED.test(t)) return { kind: 'none', unterminated: true };
     var extra = '', m = t.match(/^(\S+)\s+\(.*\)$/);
     if (m) { extra = t.slice(m[1].length).trim(); t = m[1]; }
     function attempt(s, ci) {
@@ -300,7 +306,7 @@ function harnessCheck(model) {
             var back = harnessResolve(index, r.pin.remote);
             if (!backOk(back) && pairOnce('link', here, there)) {
                 add('error', here, 'Goes to ' + there + ', but ' + there + ' goes to ' +
-                    (back.kind === 'none' ? 'nothing' : '"' + harnessText(r.pin.remote) + '"') + '.', there);
+                    (back.unterminated ? 'nothing (Unterminated)' : back.kind === 'none' ? 'nothing' : '"' + harnessText(r.pin.remote) + '"') + '.', there);
             }
             if (harnessHasWire(wire) && !harnessHasWire(r.pin) && pairOnce('empty', here, there)) {
                 add('warning', here, 'Has a wire, but ' + there + ' has no wire listed.', there);
@@ -330,8 +336,15 @@ function harnessCheck(model) {
             if (cavities[p.cavity]) add('error', here, 'Cavity "' + p.cavity + '" appears more than once in ' + c.id + '.');
             cavities[p.cavity] = true;
             var r = harnessResolve(index, p.remote);
+            if (r.unterminated) {
+                if (!harnessHasWire(p)) add('warning', here, 'Marked Unterminated but no wire listed.');
+                return;
+            }
             if (r.kind === 'none') {
-                if (harnessHasWire(p)) add('warning', here, 'Has a wire (' + (p.wire || p.wirePn) + ') but no remote connection.');
+                if (harnessHasWire(p)) {
+                    add('warning', here, 'Has a wire (' + (p.wire || p.wirePn) + ') but no remote connection. If it is connected at this end ' +
+                        'only on purpose, write Unterminated.');
+                }
                 return;
             }
             if (!harnessHasWire(p)) add('warning', here, 'Has a remote connection but no wire listed.');
@@ -347,6 +360,7 @@ function harnessCheck(model) {
         s.wires.forEach(function (w, i) {
             ref = { kind: 'wire', block: s.id, index: i };
             var r = harnessResolve(index, w.end), raw = harnessText(w.end);
+            if (r.unterminated) return;   // a wire that leaves the splice and ends unconnected, on purpose
             if (r.kind === 'none') { add('error', s.id, 'A wire in the splice has no location.'); return; }
             if (r.kind === 'splice' && r.splice.id === s.id) { add('error', s.id, 'Splice lists itself as a wire end.'); return; }
             describe(r, raw, s.id, w, function (back) { return back.kind === 'splice' && back.splice.id === s.id; });

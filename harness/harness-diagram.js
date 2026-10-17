@@ -133,9 +133,10 @@ function harnessBlockDiagram(model, id, opts) {
         if (!byKey[key]) { byKey[key] = make(); byKey[key].order = groups.length; groups.push(byKey[key]); }
         return byKey[key];
     }
-    var links = [];   // { from: row index, group, entry }
+    var links = [], stubs = [];   // links: { from: row index, group, entry }; stubs: Unterminated rows
     rows.forEach(function (r, i) {
         var res = harnessResolve(index, r.remote);
+        if (res.unterminated) stubs.push({ from: i, wire: r.wire, title: r.endpoint + ' → Unterminated' });
         if (res.kind === 'none') return;
         var g, entryKey, entry;
         if (res.kind === 'pin') {
@@ -219,6 +220,15 @@ function harnessBlockDiagram(model, id, opts) {
         var g = l.group, ty = g.kind === 'connector' ? g.box.y(l.entry) : g.box.top + 15;   // splices/missing: header
         wires += hdWirePath(x0 + w0, fbox.y(l.from), x1, ty, hdWireStyle(l.wire), l.title + ' · ' + (l.wire || ''));
     });
+    // Unterminated: a short wire ending in a cap, connected at this end only.
+    stubs.forEach(function (s) {
+        var y = fbox.y(s.from), xs = x0 + w0, xe = xs + 46;
+        wires += hdWirePath(xs, y, xe, y, hdWireStyle(s.wire), s.title + ' · ' + (s.wire || ''));
+        // Cap and label go over the other wires, which may cross here.
+        body += '<g class="unterminated"><title>' + hdEsc(s.title) + '</title><rect x="' + (xe + 3) + '" y="' + (y - 8) + '" width="74" height="16" rx="3" ' +
+            'fill="#fff" stroke="#bbb"/><line x1="' + xe + '" y1="' + (y - 7) + '" x2="' + xe + '" y2="' + (y + 7) + '" stroke="#555" stroke-width="2.5"/>' +
+            '<text class="dim" x="' + (xe + 8) + '" y="' + (y + 4) + '">Unterminated</text></g>';
+    });
     var yImg = 20 + fbox.height + 16, pics = '';
     (focus.images || []).forEach(function (im) {
         var url = opts.imageUrls && opts.imageUrls[im.id];
@@ -229,9 +239,9 @@ function harnessBlockDiagram(model, id, opts) {
         yImg += h + 10;
     });
 
-    var width = (farGroups.length ? x2 + w2 : groups.length ? x1 + w1 : x0 + w0) + 20;
+    var width = (farGroups.length ? x2 + w2 : groups.length ? x1 + w1 : x0 + w0 + (stubs.length ? 130 : 0)) + 20;
     var height = Math.max(yImg, y1, y2, 20 + fbox.height + 20);
-    if (!groups.length) body += '<text class="sub" x="' + x1 + '" y="40">No connections from ' + hdEsc(focus.id) + '.</text>';
+    if (!groups.length && !stubs.length) body += '<text class="sub" x="' + x1 + '" y="40">No connections from ' + hdEsc(focus.id) + '.</text>';
     return { svg: hdSvg(width, height, wires + fbox.svg + body + pics), width: width, height: height };
 }
 

@@ -201,6 +201,34 @@ describe('Harness — connection checks', function () {
     m.splices[1].wires[0].end = 'SPL.5V';
   });
 
+  it('accepts Unterminated as an intentional one-ended wire, on a pin or in a splice', function () {
+    var idx = harnessIndex(m);
+    assert.equal(harnessResolve(idx, 'Unterminated').unterminated, true);
+    assert.equal(harnessResolve(idx, 'unterminated (shield, ECU end)').unterminated, true);
+    assert.equal(harnessResolve(idx, 'N/A').unterminated, undefined);
+    var pin = m.connectors[0].pins[2], wire = m.splices[1].wires[1];
+    pin.remote = 'Unterminated';
+    wire.end = 'Unterminated';
+    var u = harnessCheck(m);
+    assert.equal(hxFind(u, 'M142.C.16', '').length, 0, 'no issue for an unterminated wired cavity');
+    assert.equal(hxFind(u, 'SPL.5V2', 'no location').length, 0, 'an unterminated splice wire is valid');
+    pin.remote = 'N/A';
+    assert.equal(hxFind(harnessCheck(m), 'M142.C.16', 'write Unterminated').length, 1, 'N/A with a wire still warns');
+    pin.wirePn = 'Sealing Pin'; pin.wire = 'N/A'; pin.remote = 'Unterminated';
+    assert.equal(hxFind(harnessCheck(m), 'M142.C.16', 'no wire listed').length, 1);
+    pin.wirePn = 'Unused'; pin.wire = 'Unused'; pin.remote = 'Unused';
+    assert.equal(hxFind(harnessCheck(m), 'M142.C.16', '').length, 0, 'a cavity marked Unused throughout is not a wire');
+    pin.wirePn = 'M22759/32-22-9'; pin.wire = '22 AWG White'; pin.remote = 'SPARE.1';
+    wire.end = 'CHASSIS';
+  });
+
+  it('reports a wire pointing at an Unterminated end', function () {
+    m.connectors[3].pins[0].remote = 'Unterminated';   // PEDAL.1, which M142.C.14 points at
+    var i = hxFind(harnessCheck(m), 'M142.C.14', 'goes to nothing (Unterminated)');
+    m.connectors[3].pins[0].remote = 'M142.C.14';
+    assert.equal(i.length, 1);
+  });
+
   it('flags duplicate cavities and names', function () {
     m.connectors[3].pins.push({ cavity: '1', terminal: '', wirePn: '', wire: '', function: '', note: '', remote: '', status: '' });
     m.splices[1].id = 'pedal';
@@ -335,6 +363,14 @@ describe('Harness — wiring diagrams', function () {
     assert.ok(d.svg.indexOf('data-endpoint="MAP.2"') >= 0);
     assert.ok(d.svg.indexOf('Not in this harness') >= 0, 'SPARE.1 is not in this harness');
     assert.equal((d.svg.match(/class="wire"/g) || []).length, 6, 'C14, C15, C16, C9, then the splice on to MAP.1 and SPL.5V2');
+  });
+
+  it('draws an Unterminated wire as a capped stub', function () {
+    m.connectors[0].pins[2].remote = 'Unterminated';
+    var d = harnessBlockDiagram(m, 'M142.C');
+    m.connectors[0].pins[2].remote = 'SPARE.1';
+    assert.ok(d.svg.indexOf('class="unterminated"') >= 0);
+    assert.ok(d.svg.indexOf('Not in this harness') < 0, 'not drawn as a missing block');
   });
 
   it('follows splices one step to their far ends', function () {
