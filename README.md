@@ -84,7 +84,7 @@ Import MoTeC M1 Tune packages (`.m1pkg`) directly — no export step needed — 
   everywhere it appears, carry across tune versions, are searchable and listed on a My Labels tab
 - **Export PDF:** a printable report of the calibrations, driver switches, Firmware I/O, parameters (optionally with table values),
   labels or a comparison between versions — saved through the browser's print dialog
-- Tune history stored in the browser (IndexedDB) with JSON backup export/restore, or on the optional TunerControl server (SQLite) when served from it
+- Tune history stored in the browser (IndexedDB) or on the optional TunerControl server (SQLite) when served from it
 - Compare any two versions: changed values, table cells (with axis breakpoints), I/O assignments, calibration selections and save notes
 
 ### Harness Builder
@@ -114,6 +114,14 @@ Design and check wiring harnesses built around the M1 ECU.
 - **Export PDF:** overview and system diagrams, checks, connector and splice tables with their problems, per-block diagrams, pictures and
   the tune comparison, in portrait or landscape
 - Every save is a revision (server or browser storage), and single revisions can be deleted; export back to `.xlsx` in the same layout, styled (title bar, shaded headings, alternating rows), pictures included and scaled to at most 320 × 240 px
+
+### Backup & Restore
+
+- One JSON file with everything stored, from the server or browser storage: every tune with its original `.m1pkg`, resource names
+  and labels, the tuning history, harnesses with every revision, harness systems with their joins and CAN networks, harness pictures
+  and page settings
+- Restores into a server or a browser (empty or not): adds what is missing and keeps anything already there with the same id, so it
+  is safe to run twice; older M1 Config Viewer backups restore too
 
 ### Calculators
 Quick bidirectional unit conversions for tuning:
@@ -192,8 +200,10 @@ m1-config/                  — M1 Config Viewer (.m1pkg import, tune history, c
 harness/                    — Harness Builder (.xlsx import/add/export, editor, checks, diagrams, systems, tune comparison, PDF)
   index.html, app.js, harness-model.js, harness-tune.js, harness-diagram.js, harness-system.js, harness-can.js, harness-store.js, styles.css
 
+backup/                     — Backup & Restore page (backup-page.js; the format and both backends are in lib/backup.js)
+
 lib/                        — Vendored libraries (Chart.js, zoom plugin, Hammer.js) and shared code
-                              (ld-parser.js, m1pkg-parser.js, xz-decoder.js, xlsx.js, print-report.js/.css for PDF export)
+                              (ld-parser.js, m1pkg-parser.js, xz-decoder.js, xlsx.js, print-report.js/.css for PDF export, backup.js)
 
 server/                     — Optional Node server: static files + SQLite API for tunes and harnesses (see server/README.md)
 deploy/                     — systemd unit for the server (Dockerfile at the repo root)

@@ -76,11 +76,44 @@ test('backup round-trips packages and resource names', function () {
     a.importFile(sha(V1), 'v1.m1pkg', V1);
     a.setResourceName('M142|0x0000,0x0000,0x6541,0x0000,0x0000', 'E888 AVI2');
     var b = new TuneStore(':memory:');
-    assert.strictEqual(b.importBackup(JSON.parse(JSON.stringify(a.exportBackup()))), 1);
+    assert.strictEqual(b.importBackup(JSON.parse(JSON.stringify(a.exportBackup()))).packages, 1);
     assert.deepStrictEqual(b.getPackage(sha(V1)).items, a.getPackage(sha(V1)).items);
+    assert.deepStrictEqual(Buffer.from(b.getFile(sha(V1)).data), Buffer.from(V1), 'the original .m1pkg comes back too');
     assert.strictEqual(b.listResourceNames()['M142|0x0000,0x0000,0x6541,0x0000,0x0000'], 'E888 AVI2');
-    assert.strictEqual(b.importBackup(a.exportBackup()), 0);
-    assert.throws(function () { b.importBackup({ format: 'other' }); }, /Not a TunerControl M1 backup/);
+    assert.strictEqual(b.importBackup(a.exportBackup()).packages, 0);
+    assert.throws(function () { b.importBackup({ format: 'other' }); }, /Not a TunerControl backup/);
+    // An older M1-only backup (no files, no harnesses) still restores.
+    var old = { format: 'tunercontrol-m1-backup', version: 1, packages: [a.getPackage(sha(V1))], resourceNames: { 'label|g:Fuel': 'Fuel' } };
+    var c = new TuneStore(':memory:');
+    assert.strictEqual(c.importBackup(old).packages, 1);
+    assert.strictEqual(c.listResourceNames()['label|g:Fuel'], 'Fuel');
+});
+
+test('full backup: harnesses with every revision, systems with CAN networks, images, history', function () {
+    var a = new TuneStore(':memory:');
+    a.importFile(sha(V1), 'v1.m1pkg', V1);
+    var model = { name: 'H', sheets: [], connectors: [{ id: 'X1', pins: [], images: [{ id: sha(Buffer.from('png')), mime: 'image/png' }] }], splices: [] };
+    var h = a.saveHarness(null, 'Engine', model, 'import');
+    model.connectors.push({ id: 'X2', pins: [] });
+    a.saveHarness(h.id, 'Engine', model, 'added X2');
+    a.saveHarness(h.id, 'Engine', model, 'third');
+    a.deleteHarnessRevision(h.id, 2);
+    var sys = a.saveHarnessSystem(null, { name: 'Car', harnesses: [h.id], canNetworks: [{ id: 'n1', name: 'CAN 1', hubs: [], devices: [] }] });
+    a.putHarnessImage(sha(Buffer.from('png')), 'image/png', new Uint8Array(Buffer.from('png')));
+    a.saveRun({ tool: 'knock', logName: 'a.ld', summary: { events: 0 } });
+    var backup = JSON.parse(JSON.stringify(a.exportBackup()));
+    assert.strictEqual(backup.format, 'tunercontrol-backup');
+    var b = new TuneStore(':memory:');
+    assert.deepStrictEqual(b.importBackup(backup), { packages: 1, resourceNames: 0, runs: 1, harnesses: 1, revisions: 2, systems: 1, images: 1 });
+    var got = b.getHarness(h.id);
+    assert.deepStrictEqual(got.revisions.map(function (r) { return r.revision + ' ' + r.note; }), ['3 third', '1 import'], 'revisions keep their numbers and notes');
+    assert.deepStrictEqual(got.data, model);
+    assert.strictEqual(b.saveHarness(h.id, 'Engine', model, 'next').revision, 4, 'numbering carries on');
+    var s2 = b.listHarnessSystems()[0];
+    assert.deepStrictEqual([s2.id, s2.harnesses, s2.canNetworks[0].name], [sys.id, [h.id], 'CAN 1']);
+    assert.deepStrictEqual(Buffer.from(b.getHarnessImage(sha(Buffer.from('png'))).data).toString(), 'png');
+    assert.deepStrictEqual(b.importBackup(backup), { packages: 0, resourceNames: 0, runs: 0, harnesses: 0, revisions: 0, systems: 0, images: 0 },
+        'restoring twice adds nothing');
 });
 
 test('re-parses packages stored with an older parser version', function () {

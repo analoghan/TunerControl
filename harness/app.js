@@ -33,8 +33,8 @@ function setStatus(text) { $('status').textContent = text || ''; $('status').hid
 function showError(text) { $('error').textContent = text || ''; $('error').hidden = !text; }
 
 var STORAGE_HINTS = {
-    server: 'Harnesses are stored on the TunerControl server, with every saved revision.',
-    browser: 'Harnesses are stored in this browser only, with every saved revision. Export .xlsx to keep a copy elsewhere.',
+    server: 'Harnesses are stored on the TunerControl server, with every saved revision. Backup & Restore saves them all with everything else.',
+    browser: 'Harnesses are stored in this browser only, with every saved revision. Backup & Restore saves them all with everything else.',
     memory: 'Browser storage is unavailable here — harnesses are kept only until the page is closed. Export .xlsx to keep your work.'
 };
 

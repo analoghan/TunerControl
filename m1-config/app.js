@@ -14,8 +14,6 @@ var historyBody = document.querySelector('#history-table tbody');
 var cmpFrom = $('cmp-from');
 var cmpTo = $('cmp-to');
 var cmpBtn = $('cmp-btn');
-var exportBtn = $('export-btn');
-var backupInput = $('backup-input');
 var searchInput = $('search-input');
 
 var state = {
@@ -233,14 +231,6 @@ function storeSaveResourceName(key, name) {
     return Promise.resolve();
 }
 
-function storeExport() {
-    return state.backend === 'server' ? apiExportBackup() : exportTuneDb();
-}
-
-function storeImportBackup(backup) {
-    return state.backend === 'server' ? apiImportBackup(backup) : importTuneDb(backup);
-}
-
 /** Upload (server) or parse locally and save. Resolves { record, duplicate }. */
 function importOne(file, of) {
     if (state.backend === 'server') {
@@ -383,7 +373,6 @@ function renderHistory() {
     if (from) cmpFrom.value = from;
     if (to) cmpTo.value = to;
     cmpBtn.disabled = state.packages.length < 2;
-    exportBtn.disabled = state.backend === 'memory';
 }
 
 function previousPackageId(id) {
@@ -691,35 +680,6 @@ historyBody.addEventListener('click', function (e) {
             }
         }).catch(function (err) { showError('Could not delete: ' + err.message); });
     }
-});
-
-exportBtn.addEventListener('click', function () {
-    storeExport().then(function (backup) {
-        var blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'tunercontrol-m1-backup-' + new Date().toISOString().slice(0, 10) + '.json';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
-    }).catch(function (err) { showError('Could not export: ' + err.message); });
-});
-
-backupInput.addEventListener('change', function () {
-    var file = backupInput.files[0];
-    backupInput.value = '';
-    if (!file) return;
-    hideError();
-    if (state.backend === 'memory') { showError('Browser storage is unavailable, so backups cannot be restored here.'); return; }
-    setStatus('Restoring ' + file.name + '…');
-    file.text().then(function (text) { return storeImportBackup(JSON.parse(text)); })
-        .then(function (added) {
-            setStatus('Restored ' + added + ' package' + (added === 1 ? '' : 's') + ' from backup.');
-            return storeResourceNames().then(function (names) { state.resourceNames = names; }).then(refreshHistory);
-        }).then(function () {
-            if (!state.current && state.packages.length) return viewPackage(state.packages[state.packages.length - 1].id);
-        }).catch(function (err) { showError('Could not restore backup: ' + err.message); });
 });
 
 function selectTab(tab) {

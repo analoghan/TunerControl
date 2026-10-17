@@ -73,7 +73,3 @@ function apiLoadPackage(id) { return tuneApi('GET', 'packages/' + encodeURICompo
 function apiDeletePackage(id) { return tuneApi('DELETE', 'packages/' + encodeURIComponent(id)); }
 function apiListResourceNames() { return tuneApi('GET', 'resource-names'); }
 function apiSaveResourceName(key, name) { return tuneApi('PUT', 'resource-names', { body: { key: key, name: name } }); }
-function apiExportBackup() { return tuneApi('GET', 'backup'); }
-function apiImportBackup(backup) {
-    return tuneApi('POST', 'backup', { body: backup }).then(function (r) { return r.added; });
-}

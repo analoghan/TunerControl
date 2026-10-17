@@ -10,7 +10,7 @@
  *              when the parser improves (see parserVersion)
  *   resourceNames : { key, name }  — user names for I/O resources, key = 'HARDWARE|signature', and the Config Viewer's
  *              labels, key = 'label|<entity key>' (e.g. 'label|g:Auxiliary.Output 3')
- * Data stays in this browser; exportTuneDb/importTuneDb give JSON backups.
+ * Data stays in this browser; lib/backup.js (the Backup & Restore page) backs it up with everything else.
  */
 
 var TUNE_DB_NAME = 'tunercontrol-m1';
@@ -174,44 +174,4 @@ function saveResourceName(key, name) {
         if (name) tx.objectStore('resourceNames').put({ key: key, name: name });
         else tx.objectStore('resourceNames').delete(key);
     });
-}
-
-/** JSON backup of all parsed packages and resource names (original files are not included). */
-function exportTuneDb() {
-    return listTunePackages().then(function (list) {
-        return Promise.all([
-            Promise.all(list.map(function (p) { return loadTunePackage(p.id); })),
-            listResourceNames()
-        ]);
-    }).then(function (r) {
-        return {
-            format: 'tunercontrol-m1-backup', version: 1, exportedAt: new Date().toISOString(),
-            packages: r[0], resourceNames: r[1]
-        };
-    });
-}
-
-/** Restore a JSON backup. Existing packages with the same id are kept. Resolves to count added. */
-function importTuneDb(backup) {
-    if (!backup || backup.format !== 'tunercontrol-m1-backup' || !Array.isArray(backup.packages)) {
-        return Promise.reject(new Error('Not a TunerControl M1 backup file'));
-    }
-    var added = 0, names = backup.resourceNames || {};
-    var namesSaved = Object.keys(names).reduce(function (chain, key) {
-        return chain.then(function () { return saveResourceName(key, names[key]); });
-    }, Promise.resolve());
-    return backup.packages.reduce(function (chain, p) {
-        return chain.then(function () {
-            return saveTunePackage(p.id, p, p.fileName, null).then(function (r) {
-                if (!r.duplicate) {
-                    added++;
-                    // keep the original import time from the backup
-                    return tuneDbTransaction(['packages'], 'readwrite', function (tx) {
-                        r.record.importedAt = p.importedAt || r.record.importedAt;
-                        tx.objectStore('packages').put(r.record);
-                    });
-                }
-            });
-        });
-    }, namesSaved).then(function () { return added; });
 }

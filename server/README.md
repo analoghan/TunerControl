@@ -69,7 +69,7 @@ Update by pulling, rebuilding and re-creating the container; the `tunercontrol-d
 ## HTTPS with a reverse proxy
 
 Keep the server on `127.0.0.1:8080` (with Docker, publish `-p 127.0.0.1:8080:8080`) and let the proxy
-handle the public side. A single tune upload is limited to 64 MB, but a **Restore backup** JSON can be up
+handle the public side. A single tune upload is limited to 64 MB, but a backup restored on the **Backup & Restore** page can be up
 to 512 MB, so the proxy's request size limit must allow that. The server already compresses its responses,
 so the proxy doesn't need to.
 
@@ -128,17 +128,15 @@ tune.example.com {
 Either way, open `https://tune.example.com/m1-config/`; the note under the import button should say tunes
 are stored on the server. Keep `TUNERCONTROL_TOKEN` set even behind HTTPS.
 
-## Moving tunes from browser storage
+## Moving everything from browser storage
 
-1. Open the M1 Config Viewer the way you used it before (it still reads browser storage) and click
-   **Export backup**.
-2. Open the viewer from the server and click **Restore backup** with that file. Pin names come across too.
+1. Open the **Backup & Restore** page (`/backup/`) the way you used the tools before (it reads browser storage) and
+   click **Download backup**.
+2. Open the same page from the server, choose that file and click **Restore**.
 
-Packages restored from a backup have no original file, so they are not re-parsed on parser updates —
-re-import the `.m1pkg` files instead if you still have them.
-
-Harnesses from browser storage: open each one in the Harness Builder the old way, click **Export .xlsx**,
-then import that file in the Harness Builder opened from the server.
+Tunes (with their original `.m1pkg` files), resource names and labels, the tuning history, harnesses with every
+revision, harness systems with their CAN networks and harness pictures all come across, with the same ids, so systems
+still point at their harnesses.
 
 ## Backups
 
@@ -148,7 +146,10 @@ The database is one file. A consistent copy while the server runs:
 sqlite3 /var/lib/tunercontrol/tunercontrol.db ".backup '/backups/tunercontrol-$(date +%F).db'"
 ```
 
-`GET /api/backup` also returns a JSON backup (parsed data, pin names and tuning history runs, without the original files).
+`GET /api/backup` returns the same full JSON backup the **Backup & Restore** page downloads — tunes with their original
+files, resource names and labels, tuning history runs, harnesses with every revision, systems and CAN networks, and
+harness pictures — and `POST /api/backup` restores one into an empty or existing database (anything already stored with
+the same id is kept). That file also restores into browser storage, so it is the way to recover if the server is lost.
 
 ## Querying the data
 

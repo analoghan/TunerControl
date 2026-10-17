@@ -152,26 +152,60 @@ TuneStore.prototype.importFile = function (id, fileName, bytes) {
     return { record: summary, duplicate: false };
 };
 
-/** Import a browser JSON backup (packages carry parsed items, no original file). Returns count added. */
+/**
+ * Restore a backup: a full backup (format 'tunercontrol-backup', exportBackup) or an older M1-only one
+ * ('tunercontrol-m1-backup': packages, resource names, runs). Adds what is missing and keeps what is already stored
+ * (same id); resource names are set. Returns counts { packages, resourceNames, runs, harnesses, revisions, systems, images }.
+ */
 TuneStore.prototype.importBackup = function (backup) {
-    if (!backup || backup.format !== 'tunercontrol-m1-backup' || !Array.isArray(backup.packages)) {
-        throw new Error('Not a TunerControl M1 backup file');
+    var full = backup && backup.format === 'tunercontrol-backup';
+    if (!backup || (!full && backup.format !== 'tunercontrol-m1-backup') || !Array.isArray(backup.packages)) {
+        throw new Error('Not a TunerControl backup file');
     }
-    var self = this, added = 0;
+    var self = this, n = { packages: 0, resourceNames: 0, runs: 0, harnesses: 0, revisions: 0, systems: 0, images: 0 };
+    var files = {};
+    (backup.packageFiles || []).forEach(function (f) { if (f && f.id && f.data) files[f.id] = f; });
     this.transaction(function () {
         backup.packages.forEach(function (p) {
             if (!p.id || !Array.isArray(p.items) || self.getSummary(p.id)) return;
-            var summary = summaryOf(p.id, p, p.fileName, p.fileSize, p.importedAt || new Date().toISOString());
-            self.writeParsed(summary, p, null);
-            added++;
+            var file = files[p.id] ? new Uint8Array(Buffer.from(files[p.id].data, 'base64')) : null;
+            var summary = summaryOf(p.id, p, p.fileName, p.fileSize || (file ? file.length : null), p.importedAt || new Date().toISOString());
+            self.writeParsed(summary, p, file);
+            n.packages++;
         });
-        var names = backup.resourceNames || {};
-        Object.keys(names).forEach(function (k) { self.setResourceName(k, names[k]); });
+        var names = backup.resourceNames || {}, have = self.listResourceNames();
+        Object.keys(names).forEach(function (k) {
+            if (names[k] && have[k] !== names[k]) { self.setResourceName(k, names[k]); n.resourceNames++; }
+        });
         (Array.isArray(backup.runs) ? backup.runs : []).forEach(function (run) {
-            if (run && run.id && !self.getRun(run.id) && RUN_TOOLS.indexOf(run.tool) >= 0 && run.summary) self.saveRun(run);
+            if (run && run.id && !self.getRun(run.id) && RUN_TOOLS.indexOf(run.tool) >= 0 && run.summary) { self.saveRun(run); n.runs++; }
+        });
+        (backup.harnessImages || []).forEach(function (im) {
+            if (!im || !/^[0-9a-f]{64}$/.test(im.id) || !im.data || self.getHarnessImage(im.id)) return;
+            self.putHarnessImage(im.id, im.mime || 'application/octet-stream', new Uint8Array(Buffer.from(im.data, 'base64')));
+            n.images++;
+        });
+        (backup.harnesses || []).forEach(function (h) {
+            if (!h || !h.id || !Array.isArray(h.revisions) || !h.revisions.length) return;
+            if (self.db.prepare('SELECT 1 FROM harnesses WHERE id = ?').get(h.id)) return;
+            var revs = h.revisions.filter(function (r) { return r && r.revision > 0 && r.data; });
+            if (!revs.length) return;
+            var top = Math.max.apply(null, revs.map(function (r) { return r.revision; }));
+            self.db.prepare('INSERT INTO harnesses (id, name, created, updated, revision) VALUES (?, ?, ?, ?, ?)')
+                .run(h.id, h.name || 'Harness', h.created || revs[0].saved, h.updated || revs[revs.length - 1].saved, Math.max(top, h.revision || 0));
+            var ins = self.db.prepare('INSERT INTO harness_revisions (harness_id, revision, saved, note, data_json) VALUES (?, ?, ?, ?, ?)');
+            revs.forEach(function (r) { ins.run(h.id, r.revision, r.saved || new Date().toISOString(), r.note || '', JSON.stringify(r.data)); n.revisions++; });
+            n.harnesses++;
+        });
+        (backup.harnessSystems || []).forEach(function (sys) {
+            if (!sys || !sys.id || self.db.prepare('SELECT 1 FROM harness_systems WHERE id = ?').get(sys.id)) return;
+            self.db.prepare('INSERT INTO harness_systems (id, name, updated, data_json) VALUES (?, ?, ?, ?)').run(sys.id, sys.name || 'System',
+                sys.updated || new Date().toISOString(), JSON.stringify({ harnesses: sys.harnesses || [], manual: sys.manual || [],
+                    rejected: sys.rejected || [], canNetworks: sys.canNetworks || [] }));
+            n.systems++;
         });
     });
-    return added;
+    return n;
 };
 
 /** Re-parse stored files that were imported with an older parser. Returns count updated. */
@@ -358,13 +392,34 @@ TuneStore.prototype.deleteHarness = function (id) {
     });
 };
 
+/**
+ * Full backup of everything stored (the same format as the browser's lib/backup.js export):
+ *   { format: 'tunercontrol-backup', version: 2, exportedAt, source: 'server',
+ *     packages: [parsed package with summary fields], packageFiles: [{ id, name, data (base64 .m1pkg) }],
+ *     resourceNames: { key: name }, runs: [full run], harnesses: [{ id, name, created, updated, revision,
+ *     revisions: [{ revision, saved, note, data }] }], harnessSystems: [system], harnessImages: [{ id, mime, data (base64) }] }
+ */
 TuneStore.prototype.exportBackup = function () {
-    var self = this;
+    var self = this, summaries = this.listSummaries();
     return {
-        format: 'tunercontrol-m1-backup', version: 1, exportedAt: new Date().toISOString(),
-        packages: this.listSummaries().map(function (s) { return self.getPackage(s.id); }),
+        format: 'tunercontrol-backup', version: 2, exportedAt: new Date().toISOString(), source: 'server',
+        packages: summaries.map(function (s) { return self.getPackage(s.id); }),
+        packageFiles: summaries.map(function (s) {
+            var f = self.getFile(s.id);
+            return f ? { id: s.id, name: f.name, data: Buffer.from(f.data).toString('base64') } : null;
+        }).filter(Boolean),
         resourceNames: this.listResourceNames(),
-        runs: this.listRuns(null, true)
+        runs: this.listRuns(null, true),
+        harnesses: this.db.prepare('SELECT id, name, created, updated, revision FROM harnesses ORDER BY created').all().map(function (h) {
+            return Object.assign({}, h, { revisions: self.db.prepare(
+                'SELECT revision, saved, note, data_json FROM harness_revisions WHERE harness_id = ? ORDER BY revision').all(h.id).map(function (r) {
+                    return { revision: r.revision, saved: r.saved, note: r.note || '', data: JSON.parse(r.data_json) };
+                }) });
+        }),
+        harnessSystems: this.listHarnessSystems(),
+        harnessImages: this.db.prepare('SELECT id, mime, data FROM harness_images ORDER BY id').all().map(function (r) {
+            return { id: r.id, mime: r.mime, data: Buffer.from(r.data).toString('base64') };
+        })
     };
 };
 

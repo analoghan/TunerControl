@@ -20,8 +20,9 @@
  *   GET    /api/history?item=NAME[&cell=KEY] value history of one item across packages
  *   GET    /api/resource-names               { 'HARDWARE|signature': name }
  *   PUT    /api/resource-names               body { key, name } (empty name removes)
- *   GET    /api/backup                       JSON backup (same format as the browser export)
- *   POST   /api/backup                       restore a JSON backup → { added }
+ *   GET    /api/backup                       full JSON backup of everything stored (tunes with their files, names and labels,
+ *                                            tuning history, harnesses with every revision, systems and CAN networks, images)
+ *   POST   /api/backup                       restore a backup (full, or an older M1-only one) → { added, counts }
  *   GET    /api/harnesses                    wiring harness summaries, newest first
  *   POST   /api/harnesses                    body { name, data, note } → { id, revision, saved }
  *   GET    /api/harnesses/:id[?revision=N]   latest (or given) revision with data and revision list
@@ -288,9 +289,9 @@ function handleApi(req, res, url, store) {
         if (method === 'GET') return sendJson(req, res, 200, store.exportBackup());
         if (method === 'POST') {
             return readJson(req).then(function (body) {
-                var added;
-                try { added = store.importBackup(body); } catch (err) { throw new HttpError(400, err.message); }
-                sendJson(req, res, 200, { added: added });
+                var counts;
+                try { counts = store.importBackup(body); } catch (err) { throw new HttpError(400, err.message); }
+                sendJson(req, res, 200, { added: counts.packages, counts: counts });
             });
         }
     }

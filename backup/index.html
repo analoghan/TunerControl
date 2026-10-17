@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Backup &amp; Restore — TunerControl</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .app-container { max-width: 900px; }
+    .bk-section { margin: 22px 0; }
+    .bk-section h2 { font-size: 1.05rem; color: #fff; margin: 0 0 8px; }
+    .bk-section p { color: #b0b0b0; font-size: 0.88rem; line-height: 1.5; margin: 0 0 10px; }
+    .bk-btn { display: inline-block; padding: 8px 18px; font: inherit; font-size: 0.9rem; font-weight: 600; color: #fff; background: #E31837;
+      border: 1px solid #E31837; border-radius: 4px; cursor: pointer; }
+    .bk-btn:hover:not(:disabled) { background: #ff2d4a; }
+    .bk-btn:disabled { background: #333; border-color: #333; color: #777; cursor: not-allowed; }
+    .bk-btn.secondary { background: #222; }
+    .bk-btn.secondary:hover:not(:disabled) { background: #333; }
+    .bk-table { border-collapse: collapse; font-size: 0.85rem; margin: 6px 0 10px; }
+    .bk-table th, .bk-table td { padding: 4px 14px 4px 0; border-bottom: 1px solid #2a2a2a; text-align: left; color: #ccc; }
+    .bk-table td.num { text-align: right; color: #fff; font-variant-numeric: tabular-nums; }
+    .bk-status { color: #81c784; font-size: 0.9rem; min-height: 1.2em; }
+    .bk-error { color: #f44336; font-size: 0.9rem; }
+    .bk-storage { color: #888; font-size: 0.85rem; }
+    #bk-preview { border: 1px solid #333; border-radius: 6px; padding: 10px 14px; margin: 10px 0; background: #151515; }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Backup &amp; Restore</h1>
+    <p class="subtitle">One file with everything TunerControl stores, so it can be put back after a server failure, or moved to another
+      computer, browser or server.</p>
+    <p id="bk-storage" class="bk-storage">Checking storage…</p>
+
+    <section class="bk-section">
+      <h2>Stored now</h2>
+      <div id="bk-now"><p>Reading…</p></div>
+    </section>
+
+    <section class="bk-section">
+      <h2>Download a backup</h2>
+      <p>Saves every imported tune with its original <code>.m1pkg</code> file, your resource names and labels, the tuning history, every
+        harness with all of its revisions, harness systems with their joins and CAN networks, harness pictures, and this browser's page
+        settings. Keep it somewhere other than the server.</p>
+      <button id="bk-export" class="bk-btn" disabled>Download backup</button>
+    </section>
+
+    <section class="bk-section">
+      <h2>Restore a backup</h2>
+      <p>Adds everything in the backup that isn't stored here yet. Anything already here with the same id is kept as it is — nothing is
+        deleted or overwritten (resource names, labels and page settings are set from the backup) — so restoring twice is safe. Backups
+        from the M1 Config Viewer's older <em>Export backup</em> restore too.</p>
+      <label class="bk-btn secondary" for="bk-file">Choose backup file…</label>
+      <input type="file" id="bk-file" accept=".json,application/json" hidden>
+      <div id="bk-preview" hidden></div>
+    </section>
+
+    <p id="bk-status" class="bk-status" role="status"></p>
+    <p id="bk-error" class="bk-error" role="alert" hidden></p>
+  </div>
+  <script src="../m1-config/tune-api.js"></script>
+  <script src="../m1-config/tune-db.js"></script>
+  <script src="../harness/harness-store.js"></script>
+  <script src="../history/run-store.js"></script>
+  <script src="../lib/backup.js"></script>
+  <script src="backup-page.js"></script>
+</body>
+</html>
