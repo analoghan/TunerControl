@@ -268,7 +268,9 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
     <table>
       <tr><th>Status</th><th>Meaning</th></tr>
       <tr><td><strong>OK</strong> (Match)</td><td>The harness function describes the same thing as the tune assignment.</td></tr>
-      <tr><td><strong>Check</strong></td><td>The names don't look alike — e.g. tune <em>Transmission Temperature</em> on a pin the harness calls <em>Inlet Air Temp</em>. Often a real mismatch, sometimes just different wording (<em>Auxiliary Output 2</em> vs <em>IC Pump</em>).</td></tr>
+      <tr><td><strong>Check</strong></td><td>The names don't look alike — e.g. tune <em>Transmission Temperature</em> on a pin the harness calls <em>Inlet Air Temp</em>. Often a real mismatch, sometimes just different wording (<em>Auxiliary Output 2</em> vs <em>IC Pump</em>). Your labels from the
+        M1 Config Viewer count too: label Auxiliary Output 2 <em>Blower bypass</em> and a harness pin called <em>Blower Bypass</em> matches.
+        The label is shown next to the tune name, and a match made through it says so.</td></tr>
       <tr><td><strong>No wire</strong></td><td>The tune uses the pin, but the harness has no wire there or marks it as spare.</td></tr>
       <tr><td><strong>Not matched</strong></td><td>The harness wires an ECU input/output that no named tune assignment uses — a function the tune doesn't use, something the package doesn't store (e.g. the crank reference), or an assignment that isn't named yet.</td></tr>
       <tr><td><strong>Not in harness</strong></td><td>The pin's connector isn't in this harness (e.g. the E888 when comparing the engine harness alone).</td></tr>

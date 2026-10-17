@@ -4,12 +4,13 @@
  * Uses the pin tables in m1-config/resource-names.js: each assigned I/O resource in the tune gives a
  * connector pin ("M142 pin C15"), which is matched to harness connector "M142.C" cavity "15".
  *
- * harnessTuneCompare(model, pkg, hardware, userNames) →
+ * harnessTuneCompare(model, pkg, hardware, userNames) →  (userNames: the M1 Config Viewer's resource names and labels)
  *   model may also be a list of harnesses [{ name, model }] (a harness system); rows then say which harness
  *   each pin is in (harnessName) and connectors are looked up in all of them.
- *   { rows: [{ pin, connectorId, cavity, resource, tune: [names], harness: pin|null, status, note }],
+ *   { rows: [{ pin, connectorId, cavity, resource, tune: [names], labels: [your labels], harness: pin|null, status, note }],
  *     unnamed: [{ ids, tune: [names] }]  — tune assignments whose pin is not known (not named yet),
  *     labelIssues: [{ where, label, expected }], summary: { ok, check, missing, 'not-in-tune', 'no-connector' } }
+ * Your labels on the tune's settings (e.g. "IC pump" on Auxiliary.Output 3) count as names too, so a generic tune name can match.
  * status: 'ok' | 'check' (functions look different) | 'missing' (tune uses the pin, harness has no wire)
  *       | 'not-in-tune' (harness wires an ECU input/output that no named tune assignment uses — the tune may
  *         still use it through an assignment listed in `unnamed`)
@@ -66,6 +67,32 @@ function htParsePin(text) {
     return p;
 }
 
+/** The group a tune item belongs to, as the M1 Config Viewer labels it (m1lOwnerGroup in m1-config/links.js). */
+function htOwnerGroup(name) {
+    if (/\.Value$/.test(name) && name.split('.').length > 2) name = name.slice(0, -6);
+    var i = name.lastIndexOf('.');
+    return i > 0 ? name.slice(0, i) : name;
+}
+
+/**
+ * Your labels for a tune item: the label on its group (or the nearest labelled group above it, as the M1 Config Viewer shows
+ * them) and the label on its I/O resource. Labels are stored with the resource names as 'label|g:<group>' / 'label|r:<resource>'.
+ */
+function htItemLabels(itemName, resourceName, userNames) {
+    if (!userNames) return [];
+    var out = [], g = htOwnerGroup(itemName);
+    for (;;) {
+        var t = userNames['label|g:' + g];
+        if (t) { out.push(t); break; }
+        var i = g.lastIndexOf('.');
+        if (i <= 0) break;
+        g = g.slice(0, i);
+    }
+    var r = resourceName ? userNames['label|r:' + String(resourceName).toLowerCase().replace(/[^a-z0-9]/g, '')] : '';
+    if (r && out.indexOf(r) < 0) out.push(r);
+    return out;
+}
+
 /** Short tune item name for display: drop trailing ".Resource.Value" style suffixes. */
 function htItemName(name) {
     return name.replace(/(\.Resource)?(\.Value)?$/, '').replace(/[ .](Input |Output |Sensor )?Resource$/, '');
@@ -117,9 +144,10 @@ function harnessTuneCompare(model, pkg, hardware, userNames) {
             var key = p.unit + '.' + connector + '.' + cavity;
             if (!byPin[key]) {
                 byPin[key] = { pin: p.unit + ' ' + connector + String(cavity).padStart(2, '0'), connectorId: p.unit + '.' + connector,
-                               cavity: cavity, resource: resource, resources: [], tune: [], partnerNote: partnerNote || '' };
+                               cavity: cavity, resource: resource, resources: [], tune: [], labels: [], partnerNote: partnerNote || '' };
             }
             byPin[key].tune.push(htItemName(item.name));
+            htItemLabels(item.name, n.name, userNames).forEach(function (l) { if (byPin[key].labels.indexOf(l) < 0) byPin[key].labels.push(l); });
             if (byPin[key].resources.indexOf(resource) < 0) byPin[key].resources.push(resource);
         }
         add(p.connector, p.cavity, n.name);
@@ -142,7 +170,13 @@ function harnessTuneCompare(model, pkg, hardware, userNames) {
             r.note = 'The tune uses this pin but the harness marks it as ' + harnessText(r.harness.function).toLowerCase() +
                 (harnessText(r.harness.remote) && !/^n\/a$/i.test(harnessText(r.harness.remote)) ? ' (wired to ' + harnessText(r.harness.remote) + ')' : '') + '.';
         } else if (htSameFunction(r.tune, r.harness.function)) r.status = 'ok';
-        else { r.status = 'check'; r.note = 'The harness function does not look like the tune assignment.'; }
+        else if (r.labels.length && htSameFunction(r.labels, r.harness.function)) {
+            r.status = 'ok';
+            r.note = 'Matched by your label "' + r.labels.filter(function (l) { return htSameFunction([l], r.harness.function); })[0] + '".';
+        } else {
+            r.status = 'check';
+            r.note = 'The harness function does not look like the tune assignment' + (r.labels.length ? ' or your label' : '') + '.';
+        }
         if (r.tune.length > 1) r.note = (r.note ? r.note + ' ' : '') + 'The tune assigns ' + r.tune.length + ' items to this pin.';
         if (r.partnerNote) r.note = r.partnerNote + (r.note ? ' ' + r.note : '');
         r.resource = r.resources.sort().join(', ');
@@ -166,7 +200,7 @@ function harnessTuneCompare(model, pkg, hardware, userNames) {
             if (byPin[hardware + '.' + m[2] + '.' + cav] || !harnessHasWire(p)) return;
             if (HT_NOT_SIGNAL.test(harnessText(p.function)) || !expected || /^(can|rs232|lin)/.test(expected)) return;
             rows.push({ pin: hardware + ' ' + m[2] + cav.padStart(2, '0'), connectorId: c.id, cavity: cav, resource: null,
-                        tune: [], harness: p, harnessName: member.name, status: 'not-in-tune',
+                        tune: [], labels: [], harness: p, harnessName: member.name, status: 'not-in-tune',
                         note: 'Wired in the harness, but no named tune assignment uses this pin.' });
         });
     }); });

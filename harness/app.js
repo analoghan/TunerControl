@@ -1244,7 +1244,8 @@ function tuneCompareHtml(show) {
         var hasConn = !!findConnector(x.connectorId);
         html += '<tr class="status-row-' + x.status + '"><td class="param-pin">' +
             (hasConn ? '<button class="link-btn" data-goto-pin="' + esc(x.connectorId + '.' + x.cavity) + '">' + esc(x.pin) + '</button>' : esc(x.pin)) +
-            '</td>' + (useSystem ? '<td>' + esc(x.harnessName || '—') + '</td>' : '') + '<td class="param-name">' + esc(x.tune.join(', ') || '—') + '</td><td>' + esc(x.resource || '—') + '</td><td>' +
+            '</td>' + (useSystem ? '<td>' + esc(x.harnessName || '—') + '</td>' : '') + '<td class="param-name">' + esc(x.tune.join(', ') || '—') +
+            x.labels.map(function (l) { return ' <span class="user-label" title="Your label in the M1 Config Viewer">' + esc(l) + '</span>'; }).join('') + '</td><td>' + esc(x.resource || '—') + '</td><td>' +
             esc(x.harness ? x.harness.function : '—') + '</td><td>' + esc(x.harness ? x.harness.note : '') + '</td>' +
             '<td class="status-cell status-' + x.status + '" title="' + esc(x.note || '') + '">' + esc(STATUS_LABELS[x.status]) +
             (x.note ? '<span class="status-note">' + esc(x.note) + '</span>' : '') + '</td></tr>';

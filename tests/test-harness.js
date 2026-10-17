@@ -391,6 +391,20 @@ describe('Harness — tune comparison', function () {
     assert.equal(named.rows.filter(function (x) { return x.pin === 'M142 D06'; })[0].status, 'missing', 'AT4 = D06, not in harness');
   });
 
+  it('matches by your labels on the tune\'s settings and resources', function () {
+    function d03(names) { return harnessTuneCompare(m, pkg, 'M142', names).rows.filter(function (x) { return x.pin === 'M142 D03'; })[0]; }
+    var g = d03({ 'label|g:Transmission.Temperature': 'Inlet air temp' });
+    assert.equal(g.status, 'ok', 'the tune says transmission temp, your label and the harness say inlet air');
+    assert.deepEqual(g.labels, ['Inlet air temp']);
+    assert.ok(g.note.indexOf('Matched by your label "Inlet air temp"') >= 0, g.note);
+    assert.equal(d03({ 'label|g:Transmission': 'Inlet air' }).status, 'ok', 'a label on a group above it');
+    assert.equal(d03({ 'label|r:at1': 'IAT sensor' }).status, 'ok', 'a label on the I/O resource (AT1)');
+    var no = d03({ 'label|g:Transmission.Temperature': 'Gearbox oil' });
+    assert.equal(no.status, 'check');
+    assert.ok(/or your label/.test(no.note));
+    assert.deepEqual(d03({}).labels, []);
+  });
+
   it('treats direct injector + pins as part of the assigned - output and checks harness labels', function () {
     var di = { items: [io('Fuel.Cylinder 1.Primary Output Resource', ['0x0000', '0x640f', '0x6110', '0x0000', '0x644c'])] };
     var model = { name: 'x', sheets: [], splices: [], connectors: [{ id: 'M142.A', sheet: 's', columns: [], pins: [
