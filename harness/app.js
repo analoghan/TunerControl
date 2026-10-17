@@ -482,12 +482,17 @@ function badgeHtml(id) {
 }
 
 /** One heading per sheet, however the blocks are ordered (`kind` = 'connectors' | 'splices' of harnessSheetGroups). */
+/** Alphabetical by name, numbers in order (X106 before X160, CAN2 before CAN10), ignoring case. */
+function byName(a, b) {
+    return a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: 'base' });
+}
+
 function renderBlockList(listId, kind, selected, filter, countOf, attr) {
     var f = filter.trim().toLowerCase(), html = '';
     harnessSheetGroups(state.model).forEach(function (sheet) {
         var items = sheet[kind].filter(function (b) {
             return !f || (b.id + ' ' + (b.title || '') + ' ' + (b.connector || b.type || '') + ' ' + (b.notes || '')).toLowerCase().indexOf(f) >= 0;
-        });
+        }).sort(byName);
         if (!items.length) return;
         html += '<li class="sheet-name">' + esc(sheet.name) + '</li>';
         items.forEach(function (b) {
@@ -825,7 +830,7 @@ function renderDiagram() {
     var sel = $('diagram-select'), opts = '<option value="">Overview — all connectors and splices</option>';
     function group(label, blocks) {
         if (!blocks.length) return '';
-        return '<optgroup label="' + esc(label) + '">' + blocks.map(function (b) {
+        return '<optgroup label="' + esc(label) + '">' + blocks.slice().sort(byName).map(function (b) {
             return '<option value="' + esc(b.id) + '">' + esc(b.id) + '</option>';
         }).join('') + '</optgroup>';
     }
@@ -1654,7 +1659,7 @@ function openAddDialog(file) {
         setStatus('');
         $('add-title').textContent = 'Add from ' + file.name;
         $('add-list').innerHTML = harnessSheetGroups(incoming).map(function (sheet, si) {
-            var blocks = sheet.connectors.concat(sheet.splices);
+            var blocks = sheet.connectors.slice().sort(byName).concat(sheet.splices.slice().sort(byName));
             if (!blocks.length) return '';
             return '<fieldset class="pdf-options"><legend><label><input type="checkbox" data-add-sheet="' + si + '"> ' + esc(sheet.name) +
                 ' <span class="count">' + blocks.length + '</span></label></legend>' + blocks.map(function (b) {
