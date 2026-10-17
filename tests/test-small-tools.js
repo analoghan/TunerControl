@@ -216,6 +216,56 @@ test('idle: needs the pedal and Idle Aim, not the throttle blade', function () {
     assert.ok(err && /Throttle Pedal and Idle Aim/.test(err.message));
 });
 
+// ---- Injector settings from the tune ------------------------------------------------------------------------------
+
+function injPkg() {
+    function item(name, unit, value) { return { name: name, kind: 'Parameter', unit: unit, value: value }; }
+    return { tuneName: 'Test V1', items: [
+        item('Fuel.Injector.Primary.Minimum Volume', 'm3', 4e-9), item('Fuel.Injector.Primary.Minimum Volume Hysteresis.Value', 'm3', 5e-10),
+        item('Fuel.Injector.Primary.Open Time', 's', 0.00032), item('Fuel.Injector.Primary.Reference Flow', 'm3/s', 0.0000357),
+        item('Fuel.Injector.Primary.Reference Pressure', 'dPa', 10000000),
+        { name: 'Fuel.Injector.Primary.Linearisation', kind: 'Table', unit: 's', axes: [
+            { axis: 'X', input: 'Fuel.Volume.Value', unit: 'm3', maxSites: 21, sites: 1, values: [0] },
+            { axis: 'Y', input: 'Fuel.Injector.Primary.Differential Pressure.Value', unit: 'dPa', maxSites: 3, sites: 3, values: [0, 1000000, 4000000] }],
+          values: (function () { var v = new Array(63).fill(0); v[0] = 0.00003863; v[21] = 0.00001105; return v; })() }] };
+}
+
+test('injector: reads Minimum Volume and Linearisation in display units', function () {
+    var c = load(['injector/m1pkg-injector.js']);
+    var t = JSON.parse(JSON.stringify(c.m1pkgInjector(injPkg())));
+    assert.deepStrictEqual([t.minVolume, t.minVolumeHysteresis, t.openTime, Math.round(t.referenceFlow), t.referencePressure], [4, 0.5, 320, 2142, 100]);
+    assert.deepStrictEqual(t.linearisation.pressures, [0, 10, 40]);
+    assert.deepStrictEqual(t.linearisation.volumes, [0]);
+    assert.deepStrictEqual(t.linearisation.values, [[38.63], [11.05], [0]]);
+});
+
+test('injector: with the tune, injection cuts are explained by its Minimum Volume and Linearisation is checked', function () {
+    var c = load(['injector/worker.js', 'injector/m1pkg-injector.js'], { Map: Map, self: { postMessage: function () {} } });
+    var tune = c.m1pkgInjector(injPkg());
+    var cols = ['Time', 'Engine Speed', 'Exhaust Lambda Bank 1', 'Exhaust Lambda Bank 2', 'Fuel Cylinder 1 Primary Output Pulse Width 1',
+                'Engine Overrun State', 'Fuel Volume Primary', 'Fuel Pressure Direct Bank 1', 'Inlet Manifold Pressure'];
+    var rows = build(cols, [
+        { seconds: 5, row: function () { return { 'Engine Speed': 2000, 'Exhaust Lambda Bank 1': 1, 'Exhaust Lambda Bank 2': 1,
+            'Fuel Cylinder 1 Primary Output Pulse Width 1': 0.8, 'Engine Overrun State': 0, 'Fuel Volume Primary': 7, 'Fuel Pressure Direct Bank 1': 2, 'Inlet Manifold Pressure': 30 }; } },
+        { seconds: 1, row: function () { return { 'Engine Speed': 2400, 'Exhaust Lambda Bank 1': 3, 'Exhaust Lambda Bank 2': 3,
+            'Fuel Cylinder 1 Primary Output Pulse Width 1': 0, 'Engine Overrun State': 0, 'Fuel Volume Primary': 4.6, 'Fuel Pressure Direct Bank 1': 2, 'Inlet Manifold Pressure': 10 }; } },
+        { seconds: 5, row: function () { return { 'Engine Speed': 2000, 'Exhaust Lambda Bank 1': 1, 'Exhaust Lambda Bank 2': 1,
+            'Fuel Cylinder 1 Primary Output Pulse Width 1': 1.5, 'Engine Overrun State': 0, 'Fuel Volume Primary': 9, 'Fuel Pressure Direct Bank 1': 2, 'Inlet Manifold Pressure': 30 }; } }]);
+    var ch = c.resolveInjectorChannels(cols);
+    var lean = c.analyzeLeanSpikes(rows, ch, tune);
+    assert.strictEqual(lean.injectionOffCount, 1);
+    assert.strictEqual(lean.injectionOff[0].minVolume, 4.6);
+    assert.ok(/Minimum Volume 4 µl with 0\.5 µl hysteresis/.test(lean.diagnostics[0]) && /got down to 4\.6 µl/.test(lean.diagnostics[0]), lean.diagnostics[0]);
+    var lin = c.analyzeLinearisation(rows, ch, tune);
+    assert.ok(Math.abs(lin.runningPressure.p50 - 20) < 1e-9, '2 MPa = 20 bar');
+    assert.strictEqual(lin.atRunning[0], 7.37, 'a third of the way from 10 bar (11.05 µs) to 40 bar (0)');
+    assert.ok(Math.abs(lin.shortPulsePct - 50) < 1, 'half the injecting time is below 1 ms: ' + lin.shortPulsePct);
+    assert.ok(/single Fuel Volume site/.test(lin.diagnostics[0]));
+    assert.ok(/only has values at 0, 10 bar/.test(lin.diagnostics[1]));
+    assert.strictEqual(c.analyzeLinearisation(rows, ch, null), null, 'nothing without the tune');
+    assert.ok(/usual cause is Fuel Injector Primary Minimum Volume/.test(c.analyzeLeanSpikes(rows, ch, null).diagnostics[0]), 'the general text without it');
+});
+
 var failed = 0;
 tests.forEach(function (t) {
     try { t.fn(); console.log('PASS ' + t.name); } catch (e) { failed++; console.log('FAIL ' + t.name + '\n     ' + (e && e.message)); }

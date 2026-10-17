@@ -30,6 +30,21 @@ var reportPWStability = document.getElementById('report-pw-stability');
 var reportFuelPressure = document.getElementById('report-fuel-pressure');
 var reportInjectionTiming = document.getElementById('report-injection-timing');
 var reportClosedLoop = document.getElementById('report-closed-loop');
+var reportLinearisation = document.getElementById('report-linearisation');
+
+/** The optional tune: Minimum Volume and Linearisation (m1pkg-injector.js), suggested from the log's ECU serial and time. */
+var tunePicker = tsPicker({
+    pkgInput: document.getElementById('pkg-input'), select: document.getElementById('tune-select'), row: document.getElementById('tune-row'),
+    hint: document.getElementById('tune-hint'), status: document.getElementById('tune-status'), extract: m1pkgInjector,
+    none: 'No tune chosen: the injector findings use general M1 behaviour. With the tune, its Minimum Volume and Linearisation are checked against the log.',
+    describe: function (t) {
+        return [t.minVolume !== null ? 'Minimum Volume ' + t.minVolume + ' µl' + (t.minVolumeHysteresis ? ' (+' + t.minVolumeHysteresis + ' µl hysteresis)' : '') : '',
+            t.linearisation ? 'Linearisation ' + t.linearisation.volumes.length + ' volume × ' + t.linearisation.pressures.length + ' pressure sites' : '',
+            t.referenceFlow ? 'reference flow ' + Math.round(t.referenceFlow) + ' cc/min at ' + t.referencePressure + ' bar' : ''].filter(Boolean).join(', ') + '.' +
+            (t.notes.length ? ' ' + t.notes.join(' ') : '');
+    },
+    onError: function (msg) { showErrorBanner(msg); }
+});
 
 // ---------------------------------------------------------------------------
 // State
@@ -68,6 +83,7 @@ function handleFileSelect(event) {
         selectedFile = file;
         analyzeBtn.disabled = false;
         fileError.hidden = true;
+        tunePicker.suggest(file);
     } else {
         selectedFile = null;
         analyzeBtn.disabled = true;
@@ -145,10 +161,10 @@ function handleAnalyzeClick() {
 
         if (isLD) {
             // Post ArrayBuffer for .ld binary parsing
-            worker.postMessage({ type: 'analyze_ld', buffer: reader.result });
+            worker.postMessage({ type: 'analyze_ld', buffer: reader.result, tune: tunePicker.current() });
         } else {
             // Post text for CSV parsing
-            worker.postMessage({ type: 'analyze', logText: reader.result });
+            worker.postMessage({ type: 'analyze', logText: reader.result, tune: tunePicker.current() });
         }
     };
 
@@ -324,6 +340,28 @@ function renderReport(analyses) {
     renderFuelPressureReport(analyses.fuelPressure);
     renderInjectionTimingReport(analyses.injectionTiming);
     renderClosedLoopReport(analyses.closedLoop);
+    renderLinearisationReport(analyses.linearisation);
+}
+
+/** Linearisation and Minimum Volume from the tune, against the log (analyzeLinearisation). */
+function renderLinearisationReport(result) {
+    var content = reportLinearisation.querySelector('.report-content');
+    clearElement(content);
+    if (!result) {
+        renderUnavailable(content, 'Choose the tune above to check its Minimum Volume and Linearisation against this log.');
+        return;
+    }
+    var table = document.createElement('table');
+    table.className = 'lin-table';
+    var head = '<thead><tr><th>Differential pressure (bar)</th>' + result.volumes.map(function (v) { return '<th>' + (result.volumes.length > 1 ? v + ' µl' : 'Added time') + '</th>'; }).join('') + '</tr></thead>';
+    table.innerHTML = head + '<tbody>' + result.pressures.map(function (p, k) {
+        return '<tr><td>' + p + '</td>' + result.values[k].map(function (v) { return '<td class="num">' + v + ' µs</td>'; }).join('') + '</tr>';
+    }).join('') + '</tbody>';
+    var caption = document.createElement('h3');
+    caption.textContent = 'Fuel Injector Primary Linearisation' + (result.tuneName ? ' — ' + result.tuneName : '');
+    content.appendChild(caption);
+    content.appendChild(table);
+    renderDiagnostics(content, result.diagnostics);
 }
 
 // ---------------------------------------------------------------------------

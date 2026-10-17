@@ -61,6 +61,7 @@ const CHANNEL_MAP = {
     cl_trim_b2:       ["Fuel Closed Loop Control Bank 2 Trim"],
     fuel_mix_aim:     ["Fuel Mixture Aim"],
     overrun:          ["Engine Overrun State"],
+    fuel_vol:         ["Fuel Volume Primary", "Fuel Volume"],
 };
 
 // ---------------------------------------------------------------------------
@@ -716,7 +717,7 @@ function injRunning(data, channels, i) {
  *
  * Returns null without a lambda channel.
  */
-function analyzeLeanSpikes(data, channels) {
+function analyzeLeanSpikes(data, channels, tune) {
     var banks = ['lambda_b1', 'lambda_b2'].filter(function (k) { return channels[k] !== -1; });
     var lambdaCols = banks.length ? banks : (channels.lambda_avg !== -1 ? ['lambda_avg'] : []);
     if (!lambdaCols.length) return null;
@@ -752,10 +753,11 @@ function analyzeLeanSpikes(data, channels) {
         if (duration < THRESHOLDS.LEAN_MIN_EPISODE_S) return;
         var from = e.start;
         while (from > 0 && injSampleTime(data, channels, from - 1) >= e.startTime - THRESHOLDS.LEAN_LOOKBACK_S) from--;
-        var pwOff = false, overrunCut = false, minPW = Infinity, minPressErr = Infinity, maxLambda = 0, b1 = false, b2 = false;
+        var pwOff = false, overrunCut = false, minPW = Infinity, minPressErr = Infinity, maxLambda = 0, b1 = false, b2 = false, minVol = Infinity;
         for (var k = from; k <= e.end; k++) {
             if (!injRunning(data, channels, k)) continue;
             if (hasOverrun && Math.round(data[k][channels.overrun]) === 2) overrunCut = true;
+            if (channels.fuel_vol !== undefined && channels.fuel_vol !== -1 && data[k][channels.fuel_vol] > 0 && data[k][channels.fuel_vol] < minVol) minVol = data[k][channels.fuel_vol];
             if (hasPW) {
                 var pw = data[k][channels.inj_pw];
                 if (!(pw > 0.05)) pwOff = true; else if (pw < minPW) minPW = pw;
@@ -779,7 +781,8 @@ function analyzeLeanSpikes(data, channels) {
             cause: overrunCut ? 'overrun' : pwOff ? 'injection-off' : 'fuelled',
             minPW: minPW < Infinity ? Math.round(minPW * 1000) / 1000 : null,
             banks: b1 && b2 ? 'both' : b1 ? 'b1' : b2 ? 'b2' : null,
-            lowPressure: minPressErr < -THRESHOLDS.LOW_FUEL_PRESS_BELOW_AIM_BAR
+            lowPressure: minPressErr < -THRESHOLDS.LOW_FUEL_PRESS_BELOW_AIM_BAR,
+            minVolume: minVol < Infinity ? Math.round(minVol * 10) / 10 : null
         });
     });
 
@@ -808,6 +811,8 @@ function analyzeLeanSpikes(data, channels) {
         injectionOff: off.slice(0, 200),
         fuelled: fuelled.slice(0, 200),
         rpmDistribution: rpmDistribution,
+        hasVolume: channels.fuel_vol !== undefined && channels.fuel_vol !== -1,
+        tune: tune || null,
         diagnostics: []
     };
     result.diagnostics = generateLeanSpikeDiagnostics(result);
@@ -819,6 +824,91 @@ function injRange(list, key) {
     if (!v.length) return null;
     var lo = v[Math.floor(v.length * 0.1)], hi = v[Math.min(v.length - 1, Math.floor(v.length * 0.9))];
     return lo === hi ? String(lo) : lo + '–' + hi;
+}
+
+/**
+ * The injection-off explanation with the tune's Minimum Volume and the logged fuel volume around those episodes; noAdvice leaves
+ * out what to change (for callers that give it separately).
+ */
+function leanMinVolumeText(result, noAdvice) {
+    var t = result.tune, resume = Math.round((t.minVolume + (t.minVolumeHysteresis || 0)) * 100) / 100;
+    var text = 'The tune' + (t.tuneName ? ' (' + t.tuneName + ')' : '') + ' has Fuel Injector Primary Minimum Volume ' + t.minVolume + ' µl' +
+        (t.minVolumeHysteresis ? ' with ' + t.minVolumeHysteresis + ' µl hysteresis: once any cylinder\'s request falls below ' + t.minVolume +
+         ' µl every injector stops until all of them are above ' + resume + ' µl' : '') + '.';
+    var vols = result.injectionOff.map(function (e) { return e.minVolume; }).filter(function (v) { return v !== null; }).sort(function (a, b) { return a - b; });
+    if (vols.length) {
+        var med = vols[Math.floor(vols.length / 2)];
+        text += ' Around these episodes the logged nominal fuel volume got down to ' + injRange(result.injectionOff, 'minVolume') + ' µl per cylinder (median ' + med +
+            ') — ' + (med <= resume + 3 ? 'close to that limit; the request after the fuel film decrease and other compensations is what falls below it.'
+                : 'well above it, so something takes the per-cylinder request down a long way (the fuel film decrease is the usual one).');
+    } else if (!result.hasVolume) {
+        text += ' Log Fuel Volume Primary to see how close the volume gets to it.';
+    }
+    if (noAdvice) return text;
+    return text + ' Log Fuel Cylinder 1 Primary Volume to see the request itself. To stop the cutting: lower Minimum Volume as far as the injector ' +
+        'maker\'s data allows, raise the hysteresis to stop the on/off cycling, or spread the fuel film decrease (Transient Fuel tool).';
+}
+
+/**
+ * Fuel Injector Primary Linearisation from the tune against the log: what it adds at the rail pressures the engine ran, and how
+ * much injecting time is in the short-pulse region it should cover. Needs the tune; returns null without it.
+ */
+function analyzeLinearisation(data, channels, tune) {
+    if (!tune || !tune.linearisation) return null;
+    var lin = tune.linearisation, press = [], shortTime = 0, firing = 0, nearMin = 0, volSamples = 0;
+    var resume = tune.minVolume !== null ? tune.minVolume + (tune.minVolumeHysteresis || 0) : null;
+    for (var i = 0; i < data.length; i++) {
+        if (!injRunning(data, channels, i)) continue;
+        var pw = channels.inj_pw !== -1 ? data[i][channels.inj_pw] : NaN;
+        if (!(pw > 0.05)) continue;
+        firing++;
+        if (pw < THRESHOLDS.SHORT_PW_MS) shortTime++;
+        if (channels.fuel_press_di !== -1 && data[i][channels.fuel_press_di] > 0) press.push(data[i][channels.fuel_press_di] * THRESHOLDS.MPA_TO_BAR);
+        if (channels.fuel_vol !== -1 && resume !== null && data[i][channels.fuel_vol] > 0) {
+            volSamples++;
+            if (data[i][channels.fuel_vol] < resume + 1) nearMin++;
+        }
+    }
+    press.sort(function (a, b) { return a - b; });
+    var running = press.length ? { p10: computePercentile(press, 0.1), p50: computePercentile(press, 0.5), p90: computePercentile(press, 0.9) } : null;
+    function at(bar) {
+        var p = lin.pressures, rows = lin.values;
+        if (p.length < 2 || bar <= p[0]) return rows[0];
+        for (var k = 0; k < p.length - 1; k++) {
+            if (bar <= p[k + 1]) {
+                var f = (bar - p[k]) / (p[k + 1] - p[k]);
+                return rows[k].map(function (v, j) { return Math.round((v + f * (rows[k + 1][j] - v)) * 100) / 100; });
+            }
+        }
+        return rows[rows.length - 1];
+    }
+    var result = {
+        volumes: lin.volumes, pressures: lin.pressures, values: lin.values, runningPressure: running,
+        atRunning: running ? at(running.p50) : null, shortPulsePct: firing ? shortTime / firing * 100 : null,
+        nearMinVolumePct: volSamples ? nearMin / volSamples * 100 : null, minVolume: tune.minVolume, tuneName: tune.tuneName, diagnostics: []
+    };
+    var d = result.diagnostics, name = tune.tuneName ? ' in ' + tune.tuneName : '', nonZero = [];
+    lin.values.forEach(function (row, k) { if (row.some(function (v) { return v !== 0; })) nonZero.push(lin.pressures[k]); });
+    if (lin.volumes.length <= 1) {
+        d.push('Fuel Injector Primary Linearisation' + name + ' has a single Fuel Volume site, so it adds the same time to every pulse at a given ' +
+            'pressure — it can\'t shape the short-pulse region, where a DI injector delivers more or less than its flow rate says.');
+    }
+    if (running) {
+        var zero = result.atRunning.every(function (v) { return v === 0; });
+        d.push('While injecting, rail pressure ran ' + running.p10.toFixed(0) + '–' + running.p90.toFixed(0) + ' bar (median ' + running.p50.toFixed(0) +
+            '). There Linearisation adds ' + (zero ? 'nothing (0 µs)' : result.atRunning.join(' / ') + ' µs') +
+            (nonZero.length && nonZero.length < lin.pressures.length ? '; it only has values at ' + nonZero.join(', ') + ' bar' : '') + '.');
+    }
+    if (result.shortPulsePct !== null) {
+        d.push(result.shortPulsePct.toFixed(1) + ' % of injecting time is below ' + THRESHOLDS.SHORT_PW_MS + ' ms. ' + (result.shortPulsePct > 5
+            ? 'Enter the injector maker\'s small-pulse data (volume against pulse width at each rail pressure) as Fuel Volume sites in Linearisation, so that region is fuelled correctly.'
+            : 'Little time is spent in the short-pulse region, so Linearisation matters less here.'));
+    }
+    if (result.nearMinVolumePct >= 0.05) {
+        d.push(result.nearMinVolumePct.toFixed(1) + ' % of injecting time the nominal fuel volume is within 1 µl of where injection is allowed again after a ' +
+            'Minimum Volume cut (' + (Math.round(resume * 100) / 100) + ' µl).');
+    }
+    return result;
 }
 
 /**
@@ -839,9 +929,10 @@ function generateLeanSpikeDiagnostics(result) {
         d.push(result.injectionOffCount + ' of ' + result.episodeCount + ' lean episodes are the injectors switched OFF' +
             (result.hasOverrunChannel ? ' without the overrun fuel cut' : '') + ' (rpm ' + injRange(off, 'rpm') +
             (injRange(off, 'map') ? ', MAP ' + injRange(off, 'map') + ' kPa' : '') + '). Lambda then reads air, not lean combustion. ' +
+            (result.tune && result.tune.minVolume !== null ? leanMinVolumeText(result) :
             'On an M1 the usual cause is Fuel Injector Primary Minimum Volume: when any cylinder\'s request falls below it, all ' +
             'injectors stop until every cylinder is above Minimum Volume + Hysteresis — typically on closed-throttle decel, often ' +
-            'pushed there by the fuel film decrease compensation. Log Fuel Cylinder 1 Primary Volume to confirm.');
+            'pushed there by the fuel film decrease compensation. Log Fuel Cylinder 1 Primary Volume to confirm.'));
     }
     if (result.overrunCount) {
         d.push(result.overrunCount + ' lean episodes are the overrun fuel cut (Engine Overrun State Enabled) — expected.');
@@ -1406,7 +1497,8 @@ self.onmessage = function (event) {
             }
 
             // Run all analysis modules
-            var leanSpikes = analyzeLeanSpikes(data, channels);
+            var leanSpikes = analyzeLeanSpikes(data, channels, event.data.tune);
+            var linearisation = analyzeLinearisation(data, channels, event.data.tune);
             var pwStability = analyzePWStability(data, channels);
             var fuelPressure = analyzeFuelPressure(data, channels);
             var injectionTiming = analyzeInjectionTiming(data, channels);
@@ -1430,6 +1522,7 @@ self.onmessage = function (event) {
                 fuelPressure: fuelPressure,
                 injectionTiming: injectionTiming,
                 closedLoop: closedLoop,
+                linearisation: linearisation,
                 channelWarnings: channels.warnings,
                 channelMapping: channelMapping
             };
@@ -1478,7 +1571,8 @@ self.onmessage = function (event) {
         }
 
         // Step 5: Run all analysis modules in sequence
-        const leanSpikes = analyzeLeanSpikes(data, channels);
+        const leanSpikes = analyzeLeanSpikes(data, channels, event.data.tune);
+        const linearisation = analyzeLinearisation(data, channels, event.data.tune);
         const pwStability = analyzePWStability(data, channels);
         const fuelPressure = analyzeFuelPressure(data, channels);
         const injectionTiming = analyzeInjectionTiming(data, channels);
@@ -1502,6 +1596,7 @@ self.onmessage = function (event) {
             fuelPressure: fuelPressure,
             injectionTiming: injectionTiming,
             closedLoop: closedLoop,
+            linearisation: linearisation,
             channelWarnings: channels.warnings,
             channelMapping: channelMapping
         };

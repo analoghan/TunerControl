@@ -184,6 +184,19 @@
     </div>
 
     <!-- Report Sections -->
+    <h2 id="tune">With the tune</h2>
+    <p>Choose the tune that was in the ECU — a <code>.m1pkg</code>, or a stored tune from the M1 Config Viewer (the one saved before the log is
+      suggested from the ECU serial and time). The tool then reads Fuel Injector Primary Minimum Volume and its Hysteresis, Linearisation,
+      Open Time and the reference flow:</p>
+    <ul>
+      <li><strong>Injection cuts</strong> — the lean episodes with the injectors off are explained with the tune's own Minimum Volume (V55: 4 µl,
+        resume above 4.5 µl), with the lowest nominal Fuel Volume Primary logged around each one.</li>
+      <li><strong>Injector Settings From the Tune</strong> — the Linearisation table, what it adds at the rail pressures the engine actually ran
+        (median and 10–90 % while injecting), whether it has more than one Fuel Volume site (one site adds the same time to every pulse and
+        can't shape the short-pulse region), and how much injecting time is below 1 ms.</li>
+    </ul>
+    <p>The Cross-Tool Diagnostics page takes the same tune and uses it in its injector findings.</p>
+
     <h2 id="reports">Report Sections</h2>
 
     <h3>Lean Episodes</h3>

@@ -106,7 +106,7 @@ function parseLogCsv(text, onProgress) {
 // Cross-Domain Analysis
 // ---------------------------------------------------------------------------
 
-function runCrossDiagnostics(columnNames, data) {
+function runCrossDiagnostics(columnNames, data, tune) {
     var ch = resolveChannels(columnNames);
     var n = data.length;
     var findings = [];
@@ -188,7 +188,11 @@ function runCrossDiagnostics(columnNames, data) {
     // --- Lean episodes (injector/worker.js): overrun cut, injectors off without overrun, lean while fuelling ---
     var lean = null;
     if (typeof analyzeLeanSpikes === 'function') {
-        try { lean = analyzeLeanSpikes(data, resolveInjectorChannels(columnNames)); } catch (e) { lean = null; }
+        try { lean = analyzeLeanSpikes(data, resolveInjectorChannels(columnNames), tune); } catch (e) { lean = null; }
+    }
+    var lin = null;
+    if (tune && typeof analyzeLinearisation === 'function') {
+        try { lin = analyzeLinearisation(data, resolveInjectorChannels(columnNames), tune); } catch (e) { lin = null; }
     }
 
     // --- Build Summary ---
@@ -212,7 +216,8 @@ function runCrossDiagnostics(columnNames, data) {
             title: 'Injection Cut Without Overrun',
             body: lean.injectionOffCount + ' lean episodes are the injectors switched off without the overrun fuel cut (mostly at ' +
                 injRange(lean.injectionOff, 'rpm') + ' rpm' + (injRange(lean.injectionOff, 'map') ? ', ' + injRange(lean.injectionOff, 'map') + ' kPa' : '') +
-                '). Lambda then reads air. On an M1 this is usually Fuel Injector Primary Minimum Volume: when any cylinder\'s request falls below it, all injectors stop until every cylinder is above Minimum Volume + Hysteresis.',
+                '). Lambda then reads air. ' + (lean.tune && lean.tune.minVolume !== null ? leanMinVolumeText(lean, true)
+                    : 'On an M1 this is usually Fuel Injector Primary Minimum Volume: when any cylinder\'s request falls below it, all injectors stop until every cylinder is above Minimum Volume + Hysteresis.'),
             action: 'See the Injector tool\'s Lean Episodes. Log Fuel Cylinder 1 Primary Volume to confirm; set Minimum Volume from the injector maker\'s data, raise its Hysteresis to stop the on/off cycling, and spread the fuel film decrease (longer Decrease time constants — Transient Fuel tool).'
         });
     }
@@ -224,6 +229,18 @@ function runCrossDiagnostics(columnNames, data) {
             title: 'Lean at Short Pulse Widths',
             body: lean.fuelledShortPW + ' of ' + lean.fuelledCount + ' lean episodes while fuelling had pulses under ' + SHORT_PW_MS + ' ms, where a DI injector is non-linear.',
             action: 'Check Fuel Injector Primary Linearisation against the injector maker\'s small-pulse data (volume vs pulse width by rail pressure).'
+        });
+    }
+
+    // Finding (with the tune): Linearisation can't cover the short-pulse region the engine spends time in
+    if (lin && lin.volumes.length <= 1 && lin.shortPulsePct > 5) {
+        findings.push({
+            severity: 'warning',
+            title: 'Linearisation Doesn\'t Cover Short Pulses',
+            body: lin.shortPulsePct.toFixed(1) + ' % of injecting time is below 1 ms, but Fuel Injector Primary Linearisation' + (lin.tuneName ? ' in ' + lin.tuneName : '') +
+                ' has a single Fuel Volume site, so it adds the same time to every pulse at a pressure' + (lin.atRunning ? ' (' + lin.atRunning.join(' / ') +
+                ' µs at the ' + lin.runningPressure.p50.toFixed(0) + ' bar median rail pressure)' : '') + ' and cannot correct the short-pulse region.',
+            action: 'Enter the injector maker\'s small-pulse data (volume against pulse width at each rail pressure) as Fuel Volume sites in Linearisation. See the Injector tool\'s Injector Settings From the Tune.'
         });
     }
 
@@ -471,7 +488,7 @@ self.onmessage = function(event) {
         }
 
         self.postMessage({ type: 'progress', phase: 'Running cross-domain analysis...', percent: 40 });
-        var diagnostics = runCrossDiagnostics(columnNames, data);
+        var diagnostics = runCrossDiagnostics(columnNames, data, msg.tune || null);
 
         self.postMessage({ type: 'progress', phase: 'Complete', percent: 100 });
         self.postMessage({ type: 'result', diagnostics: diagnostics });

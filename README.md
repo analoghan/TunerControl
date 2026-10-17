@@ -51,11 +51,13 @@ dBTDC with 360 = overlap TDC). Explains the Fuel Timing Primary Main table, revi
 injection window.
 
 ### Injector Characterization
-Lean spike analysis, injector pulsewidth stability (short-pulse region vs the tune's Minimum Volume), DI fuel pressure tracking, injection
-timing and closed-loop fuel trim diagnostics.
+Lean spike analysis, injector pulsewidth stability, DI fuel pressure tracking, injection timing and closed-loop fuel trim diagnostics. With
+the tune (stored or .m1pkg): injection cuts explained by its Minimum Volume and the logged fuel volume, and its Linearisation table against
+the rail pressures and short pulses in the log.
 
 ### Diagnostics
-Load one log and get correlated diagnostics across fueling, knock, rail pressure and idle on one page.
+Load one log and get correlated diagnostics across fueling, knock, rail pressure and idle on one page; with the tune, the injector findings
+use its Minimum Volume and Linearisation.
 
 ### Idle, Duty Cycle and Charge Cooling
 - **Idle Behavior Analyzer** — returns to idle (gear changes left out), settle times and idle hangs against the logged Idle Aim, and
@@ -180,7 +182,7 @@ ve-table/                   — VE Table Tuning Tool
   help.html                 — Comprehensive documentation and usage guide
 
 injector/                   — Injector Characterization Tool
-  index.html, app.js, charts.js, worker.js, styles.css
+  index.html, app.js, charts.js, worker.js, m1pkg-injector.js (tune settings, also used by diagnostics/), styles.css
 
 knock/                      — Knock Analyzer
   index.html, app.js, charts.js, worker.js, styles.css

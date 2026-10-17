@@ -16,6 +16,18 @@ var findingsContainer = document.getElementById('findings-container');
 var selectedFile = null;
 var worker = null;
 
+/** The optional tune: its Minimum Volume and Linearisation make the injector findings exact (injector/m1pkg-injector.js). */
+var tunePicker = tsPicker({
+    pkgInput: document.getElementById('pkg-input'), select: document.getElementById('tune-select'), row: document.getElementById('tune-row'),
+    hint: document.getElementById('tune-hint'), status: document.getElementById('tune-status'), extract: m1pkgInjector,
+    none: 'No tune chosen: the injector findings use general M1 behaviour. With the tune, its Minimum Volume and Linearisation are used.',
+    describe: function (t) {
+        return (t.minVolume !== null ? 'Minimum Volume ' + t.minVolume + ' µl' + (t.minVolumeHysteresis ? ' (+' + t.minVolumeHysteresis + ' µl hysteresis)' : '') : '') +
+            (t.linearisation ? ', Linearisation ' + t.linearisation.volumes.length + ' volume × ' + t.linearisation.pressures.length + ' pressure sites' : '') + '.';
+    },
+    onError: function (msg) { showError(msg); }
+});
+
 // ---------------------------------------------------------------------------
 // File Input
 // ---------------------------------------------------------------------------
@@ -28,6 +40,7 @@ logInput.addEventListener('change', function() {
             selectedFile = file;
             analyzeBtn.disabled = false;
             errorContainer.hidden = true;
+            tunePicker.suggest(file);
         } else {
             selectedFile = null;
             analyzeBtn.disabled = true;
@@ -93,9 +106,9 @@ analyzeBtn.addEventListener('click', function() {
         };
 
         if (isLd) {
-            worker.postMessage({ type: 'analyze_ld', buffer: reader.result });
+            worker.postMessage({ type: 'analyze_ld', buffer: reader.result, tune: tunePicker.current() });
         } else {
-            worker.postMessage({ type: 'analyze', logText: reader.result });
+            worker.postMessage({ type: 'analyze', logText: reader.result, tune: tunePicker.current() });
         }
     };
 
