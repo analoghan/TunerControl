@@ -43,6 +43,7 @@
 .cell-cavity { min-width: 44px; width: 52px; }
 .cell-terminal { min-width: 70px; }
 .cell-chassis { min-width: 180px; }
+.chassis-toggle { margin: 8px 0 4px; }
 .check-label { display: inline-flex; align-items: center; gap: 6px; color: #ccc; font-size: 0.85rem; white-space: nowrap; }
 .cell-remote, .cell-end { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; min-width: 130px; }
 .cell-function { min-width: 180px; }

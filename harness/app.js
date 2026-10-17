@@ -60,7 +60,7 @@ function confirmDiscard() {
 function openHarness(id, revision) {
     showError('');
     return hsLoad(id, revision).then(function (h) {
-        state.id = h.id; state.name = h.name; state.model = h.data;
+        state.id = h.id; state.name = h.name; state.model = harnessUpgrade(h.data);
         state.revision = h.revision; state.latest = h.latest; state.revisions = h.revisions;
         state.selConnector = state.model.connectors[0] ? state.model.connectors[0].id : null;
         state.selSplice = state.model.splices[0] ? state.model.splices[0].id : null;
@@ -259,7 +259,6 @@ function showEditor() {
     $('revision-hint').textContent = older ? 'Viewing revision ' + state.revision + ' of ' + state.latest +
         '. Saving makes it the newest revision; Export saves a copy without changing anything.' : '';
     $('delete-btn').textContent = state.id ? 'Delete' : 'Close';
-    $('chassis-toggle').checked = !!state.model.chassisFunction;
     runChecks();
     renderAll();
 }
@@ -559,7 +558,10 @@ function renderConnectorEditor() {
         return;
     }
     el.innerHTML = editorHeadHtml(c, 'connector') +
-        fieldsHtml(c, CONNECTOR_FIELDS) + imagesHtml(c) + rowsHtml('pin', c, c.pins, harnessPinFields(state.model), harnessPinColumns(c, harnessPinFields(state.model))) +
+        fieldsHtml(c, CONNECTOR_FIELDS) +
+        '<label class="check-label chassis-toggle" title="A free-text column for what each wire connects to outside this harness">' +
+        '<input type="checkbox" id="chassis-toggle"' + (c.chassisFunction ? ' checked' : '') + '> Chassis Function column</label>' +
+        imagesHtml(c) + rowsHtml('pin', c, c.pins, harnessPinFields(c), harnessPinColumns(c, harnessPinFields(c))) +
         '<button class="btn btn-secondary btn-small" id="add-row">Add cavity</button>';
     loadThumbnails(el);
 }
@@ -696,6 +698,11 @@ function wireEditor(containerId, isConnector) {
     el.addEventListener('change', function (e) {
         var t = e.target, block = current();
         if (block && t.getAttribute('data-block-field') === 'id') renameBlock(block, isConnector, t.value, t);
+        if (block && t.id === 'chassis-toggle') {
+            block.chassisFunction = t.checked;
+            setDirty(true);
+            renderConnectorEditor();
+        }
         if (block && t.getAttribute('data-block-field') === 'sheet') {
             // Spell the sheet like the existing sheet it matches (case, spaces), so it joins that sheet.
             var others = Object.assign({}, state.model, { connectors: state.model.connectors.filter(function (b) { return b !== block; }),
@@ -1291,7 +1298,7 @@ function pdfBlockHtml(block, isConnector, opts, urls) {
         html += '<p class="pr-note">' + fields.map(function (f) { return '<strong>' + esc(f[1]) + ':</strong> ' + esc(block[f[0]]); }).join(' · ') + '</p>';
     }
     var kind = isConnector ? 'pin' : 'wire', recs = isConnector ? block.pins : block.wires;
-    var keys = isConnector ? harnessPinFields(state.model) : HARNESS_WIRE_FIELDS;
+    var keys = isConnector ? harnessPinFields(block) : HARNESS_WIRE_FIELDS;
     var problems = recs.some(function (r, i) { return rowIssues(kind, block.id, i).length; });
     var headers = (isConnector ? harnessPinColumns(block, keys) : keys.map(function (k, i) { return (block.columns || [])[i] || HARNESS_WIRE_COLUMNS[i] || k; }))
         .map(esc);
@@ -1537,11 +1544,6 @@ $('export-btn').addEventListener('click', exportXlsx);
 $('delete-btn').addEventListener('click', deleteHarness);
 $('delete-revision-btn').addEventListener('click', deleteRevision);
 $('name-input').addEventListener('input', function () { setDirty(true); });
-$('chassis-toggle').addEventListener('change', function () {
-    state.model.chassisFunction = this.checked;
-    setDirty(true);
-    renderConnectorEditor();
-});
 $('revision-select').addEventListener('change', function () {
     var rev = parseInt(this.value, 10);
     if (!state.id || !rev) return;

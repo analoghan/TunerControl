@@ -153,32 +153,44 @@ describe('Harness — workbook import and export', function () {
   it('reads Chassis Function by its heading, renames Engine Function and leaves out Status', function () {
     var wb = hxWorkbook();
     var m = harnessFromWorkbook(wb, 'Test');
-    assert.ok(!m.chassisFunction, 'off when no sheet has the column');
+    assert.ok(!m.connectors[0].chassisFunction, 'off when the block has no such column');
     assert.equal(m.connectors[0].columns[4], 'ECU Function');
     assert.equal(m.connectors[0].pins[0].status, undefined);
-    assert.deepEqual(harnessPinColumns(m.connectors[0], harnessPinFields(m)).slice(4), ['ECU Function', 'MoTeC Function', 'Remote Connection']);
+    assert.deepEqual(harnessPinColumns(m.connectors[0], harnessPinFields(m.connectors[0])).slice(4), ['ECU Function', 'MoTeC Function', 'Remote Connection']);
     // A block with Status then Chassis Function after Remote Connection.
     wb.sheets[1].rows = hxRows([{ title: 'BULK', header: [['CONNECTOR', 'DT']],
       columns: HX_PIN_COLUMNS.concat(['Chassis Function']),
-      rows: [['1', 'T', 'W', '22 AWG White', 'Brake Switch', '', 'Unterminated', 'x', 'Brake pedal switch, chassis loom']] }]);
+      rows: [['1', 'T', 'W', '22 AWG White', 'Brake Switch', '', 'Unterminated', 'x', 'Brake pedal switch, chassis loom']] },
+      { title: 'OTHER', header: [['CONNECTOR', 'DT']], columns: HX_PIN_COLUMNS, rows: [['1', 'T', 'W', '22 AWG White', 'X', '', 'Unterminated', '']] }]);
     m = harnessFromWorkbook(wb, 'Test');
     var bulk = harnessFindBlock(m, 'BULK');
-    assert.ok(m.chassisFunction, 'switched on by the heading');
+    assert.ok(bulk.chassisFunction, 'switched on by the heading');
+    assert.ok(!harnessFindBlock(m, 'OTHER').chassisFunction, 'only for the block that has the column');
+    assert.equal(harnessPinFields(harnessFindBlock(m, 'OTHER')).indexOf('chassis'), -1);
     assert.equal(bulk.pins[0].chassis, 'Brake pedal switch, chassis loom');
     assert.equal(bulk.pins[0].status, undefined);
-    assert.deepEqual(harnessPinFields(m).slice(-2), ['remote', 'chassis']);
+    assert.deepEqual(harnessPinFields(bulk).slice(-2), ['remote', 'chassis']);
     return readXlsx(writeXlsx(harnessToWorkbook(m))).then(function (out) {
-      var heads = out.sheets[1].rows.filter(function (r) { return r && r[0] === 'Location'; })[0];
-      assert.deepEqual(heads.slice(4), ['ECU Function', 'MoTeC Function', 'Remote Connection', 'Chassis Function']);
+      var heads = out.sheets[1].rows.filter(function (r) { return r && r[0] === 'Location'; });
+      assert.deepEqual(heads[0].slice(4), ['ECU Function', 'MoTeC Function', 'Remote Connection', 'Chassis Function']);
+      assert.equal(heads[1].length, 7, 'OTHER is written without the column');
       var again = harnessFromWorkbook(out, 'Test');
       assert.equal(harnessFindBlock(again, 'BULK').pins[0].chassis, 'Brake pedal switch, chassis loom');
       // Switched off with text still in it: hidden in the editor, kept in the export.
-      m.chassisFunction = false;
-      assert.equal(harnessPinFields(m).indexOf('chassis'), -1);
+      harnessFindBlock(m, 'BULK').chassisFunction = false;
+      assert.equal(harnessPinFields(harnessFindBlock(m, 'BULK')).indexOf('chassis'), -1);
       return readXlsx(writeXlsx(harnessToWorkbook(m)));
     }).then(function (out) {
       assert.equal(harnessFindBlock(harnessFromWorkbook(out, 'Test'), 'BULK').pins[0].chassis, 'Brake pedal switch, chassis loom');
     });
+  });
+
+  it('turns an older harness-wide Chassis Function switch into one per connector', function () {
+    var m = harnessFromWorkbook(hxWorkbook(), 'Test');
+    m.chassisFunction = true;
+    harnessUpgrade(m);
+    assert.equal(m.chassisFunction, undefined);
+    assert.ok(m.connectors.every(function (c) { return c.chassisFunction; }));
   });
 
   it('explains what is missing when a workbook has no blocks', function () {
