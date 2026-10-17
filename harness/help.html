@@ -236,16 +236,24 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
         same cable as CAN-H/CAN-L).</li>
       <li><strong>Power feeds</strong> — where power enters the network: a name, where it comes from (e.g. <em>PDM30 OUT 5</em>) and the hub
         or device it feeds into.</li>
+      <li><strong>Pins</strong> — <em>Link pins</em> on a device or feed links each of its wires (CAN-H, CAN-L, and +12 V and ground when it
+        carries power) to a connector cavity in any harness of the system. Pick the connector and the pins are filled in from their functions —
+        <em>CAN 1 High</em>, <em>M142 CAN2 Low</em>, <em>CAN 1 Power</em>, <em>CAN 1 Ground</em> — using the bus number in the network's name
+        (<em>CAN 2</em>) when the connector has several buses; change any pin by hand. The arrow goes to the pin. In the Connectors tab a linked
+        pin shows a CAN-H / CAN-L / +12 V / GND tag next to its function; click it to go to the device.</li>
     </ul>
     <p>Each network is checked: a bus needs <strong>exactly two terminations</strong> (60 Ω between CAN-H and CAN-L) — none or one is an
       error, more than two a warning with the resistance it gives; every device must use the network's speed; devices and terminators should
       be plugged into a hub; and all of a network's hubs must be wired together. Terminators not plugged into a hub don't count. A device
       powered from CAN needs a power feed that reaches it — power fed into a hub reaches every hub wired to it — and each feed needs a source
-      and somewhere to go in.</p>
+      and somewhere to go in. Linked pins are checked against the harnesses: the connector and cavity must exist, a pin whose function says
+      something else (CAN-H linked to a <em>CAN 1 Low</em> pin) or another bus than the network's name is a warning, and one pin used for two
+      wires is an error. Renaming a connector keeps its links.</p>
     <p><strong>Diagram</strong> (or <em>CAN networks</em> in the Diagram tab's list) draws the network: hubs in a row with their devices and
       terminators above and below, every connection as a twisted pair (yellow CAN-H, green CAN-L), each device's speed and termination, and
       anything not on a hub underneath. A connection that carries power gets two more wires beside its pair (red +12 V, black ground); a
-      power feed is drawn as its own box with those two wires into its hub, or next to the device it feeds. Click a device, feed or hub to edit it. Export PDF can include the networks' tables and diagrams.</p>
+      power feed is drawn as its own box with those two wires into its hub, or next to the device it feeds. Linked pins are written beside
+      the wires (<em>H M142.D.17</em>). Click a device, feed or hub to edit it. Export PDF can include the networks' tables and diagrams.</p>
 
     <h2 id="tune">Tune comparison</h2>
     <p>Pick a tune imported in the <a href="../m1-config/index.html">M1 Config Viewer</a>. Every I/O assignment in the tune is turned into its ECU

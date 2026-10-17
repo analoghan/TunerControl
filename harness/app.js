@@ -18,7 +18,8 @@ var state = {
     systems: [],          // all harness systems
     system: null,         // the system this harness belongs to (or null)
     sysMembers: [],       // other harnesses of that system: [{ id, name, model, revision }]
-    tuneScope: 'system'
+    tuneScope: 'system',
+    canPinsOpen: {}       // CAN device/feed id → true while its pin links are shown
 };
 
 function $(id) { return document.getElementById(id); }
@@ -277,6 +278,7 @@ function selectTab(tab) {
     });
     ['connectors', 'splices', 'diagram', 'system', 'can', 'checks', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
     if (tab === 'system') renderSystem();
+    if (tab === 'connectors' && state.model) renderConnectorEditor();   // CAN pin tags may have changed
     if (tab === 'can') renderCan();
     if (tab === 'checks') renderChecks();
     if (tab === 'diagram') renderDiagram();
@@ -535,7 +537,7 @@ function rowsHtml(kind, block, records, fields, columns) {
     var html = '<div class="table-scroll"><table class="event-table data-table edit-table"><thead><tr><th class="mark-col"></th>' +
         fields.map(function (f, i) { return '<th>' + esc(columns[i] || f) + '</th>'; }).join('') +
         '<th><span class="sr-only">Actions</span></th></tr></thead><tbody>';
-    var remoteField = kind === 'pin' ? 'remote' : 'end';
+    var remoteField = kind === 'pin' ? 'remote' : 'end', canUses = kind === 'pin' && state.system ? canPinUses(canNetworks(), currentKey()) : {};
     records.forEach(function (rec, i) {
         var open = !!state.openIssues[issueKey(kind, block.id, i)];
         html += '<tr data-row="' + i + '"><td class="mark-col" data-marker="' + kind + '|' + esc(block.id) + '|' + i + '">' +
@@ -546,6 +548,13 @@ function rowsHtml(kind, block, records, fields, columns) {
             if (f === remoteField) {
                 input = '<div class="remote-cell">' + input + '<button class="link-btn" data-goto="' + i + '" title="Go to the other end" ' +
                     'aria-label="Go to the other end of row ' + (i + 1) + '">&rarr;</button></div>';
+            }
+            var uses = f === 'function' ? canUses[block.id + '|' + String(rec.cavity).trim().toLowerCase()] : null;
+            if (uses) {
+                input = '<div class="remote-cell">' + input + uses.map(function (u) {
+                    return '<button class="can-pin-tag" data-can-goto="' + esc(u.item.id) + '" title="' + esc(u.net.name + ' · ' + u.item.name + ' · ' +
+                        CAN_PIN_LABELS[u.role] + ' — show in the CAN tab') + '">' + esc(CAN_PIN_LABELS[u.role]) + '</button>';
+                }).join('') + '</div>';
             }
             html += '<td>' + input + '</td>';
         });
@@ -673,6 +682,7 @@ function renameBlock(block, isConnector, newId, input) {
         refs.forEach(function (r) { r[0][r[1]] = isConnector ? newId + r[2].slice(oldId.length) : newId; });
     }
     block.id = newId;
+    if (isConnector && state.system && canRenameConnector(canNetworks(), currentKey(), oldId, newId)) canSave();
     if (isConnector) state.selConnector = newId; else state.selSplice = newId;
     showError('');
     setDirty(true);
@@ -724,6 +734,7 @@ function wireEditor(containerId, isConnector) {
     el.addEventListener('click', function (e) {
         var block = current(), t = e.target.closest('button');
         if (!block || !t) return;
+        if (t.hasAttribute('data-can-goto')) { canShowItem(t.getAttribute('data-can-goto')); return; }
         var recs = isConnector ? block.pins : block.wires;
         var kind = isConnector ? 'pin' : 'wire';
         if (t.hasAttribute('data-view-image')) {
@@ -983,6 +994,7 @@ function loadSystemContext() {
     }).then(function (members) {
         state.sysMembers = members.filter(Boolean);
         renderSystemSelect();
+        if (state.tab === 'connectors' && state.model) renderConnectorEditor();
         if (state.tab === 'system') renderSystem();
         if (state.tab === 'diagram') renderDiagram();
         if (state.tab === 'tune') renderTune();
@@ -1301,18 +1313,24 @@ function openPdfDialog() {
 /** One CAN network: devices, hubs and terminators, its checks, then its diagram. */
 function pdfCanHtml(net) {
     function hubName(id) { var h = id ? net.hubs.filter(function (x) { return x.id === id; })[0] : null; return h ? esc(h.name) : 'Not connected'; }
-    var speed = canBitrate(net.bitrate), checks = canNetworkChecks(net);
+    var speed = canBitrate(net.bitrate), checks = canNetworkChecks(net, systemMembers());
     var html = '<div class="pr-block"><h3>' + esc(net.name) + '</h3><p class="pr-note"><strong>Speed:</strong> ' + esc(speed ? canBitrateText(speed) : 'not set') +
         ' · <strong>Terminations:</strong> ' + canTerminations(net) + (net.notes ? ' · ' + esc(net.notes) : '') + '</p>';
-    html += prTable(['Device', 'Hub', 'Termination', 'Power', 'Speed', 'Notes'], net.devices.map(function (d) {
+    function pins(item, isFeed) {
+        return canPinRoles(item, isFeed).map(function (r) {
+            var ref = (item.pins || {})[r];
+            return ref && ref.cavity ? esc(CAN_PIN_LABELS[r] + ' ' + (memberName(ref.harness) ? memberName(ref.harness) + ' · ' : '') + canPinText(ref)) : '';
+        }).filter(Boolean).join('<br>');
+    }
+    html += prTable(['Device', 'Hub', 'Termination', 'Power', 'Speed', 'Pins', 'Notes'], net.devices.map(function (d) {
         var own = canBitrate(d.bitrate);
         return [esc(d.name), hubName(d.hub), d.termination ? '120 Ω on' : 'off', d.power ? 'From CAN' : '',
-            esc(own ? canBitrateText(own) : speed ? canBitrateText(speed) + ' (network)' : ''), esc(d.notes)];
+            esc(own ? canBitrateText(own) : speed ? canBitrateText(speed) + ' (network)' : ''), pins(d, false), esc(d.notes)];
     }));
     if (canFeeds(net).length) {
-        html += prTable(['Power feed', 'Power comes from', 'Feeds into', 'Notes'], canFeeds(net).map(function (f) {
+        html += prTable(['Power feed', 'Power comes from', 'Feeds into', 'Pins', 'Notes'], canFeeds(net).map(function (f) {
             var to = canFeedTarget(net, f);
-            return [esc(f.name), esc(f.source), to ? esc(to.hub ? 'Hub ' + to.hub.name : to.device.name) : 'Not connected', esc(f.notes)];
+            return [esc(f.name), esc(f.source), to ? esc(to.hub ? 'Hub ' + to.hub.name : to.device.name) : 'Not connected', pins(f, true), esc(f.notes)];
         }));
     }
     if (net.hubs.length) {
@@ -1477,7 +1495,7 @@ function canCountText() {
 }
 
 function canChecksHtml(net) {
-    var checks = canNetworkChecks(net);
+    var checks = canNetworkChecks(net, systemMembers());
     return checks.length ? '<ul class="can-checks">' + checks.map(function (c) {
         return '<li>' + markerHtml([c]) + ' <strong>' + esc(c.where) + '</strong> — ' + esc(c.message) + '</li>';
     }).join('') + '</ul>' : '<p class="ok-banner">Two terminations, one speed, everything connected.</p>';
@@ -1515,6 +1533,68 @@ function canRemoveBtn(net, kind, item) {
         esc(item.id) + '" aria-label="Remove ' + esc(item.name) + '">&times;</button>';
 }
 
+/** The Pins cell: what is linked, and a button to show the pin pickers. */
+function canPinsButton(net, kind, item) {
+    var linked = canPinRoles(item, kind === 'feed').map(function (r) {
+        var ref = (item.pins || {})[r];
+        return ref && ref.cavity ? CAN_PIN_SHORT[r] + ' ' + canPinText(ref) : '';
+    }).filter(Boolean);
+    return '<button class="btn btn-small btn-secondary can-pins-btn" data-can-action="pins" data-net="' + esc(net.id) + '" data-id="' + esc(item.id) + '"' +
+        ' aria-expanded="' + (state.canPinsOpen[item.id] ? 'true' : 'false') + '" title="' + esc(linked.length ? linked.join(', ') : 'Link this connection to harness pins') + '">' +
+        esc(linked.length ? linked.join(' · ') : 'Link pins') + '</button>';
+}
+
+/** Connectors of every harness in the system, by harness, as select options (value = JSON [harnessId, connectorId]). */
+function canConnectorOptions(ref) {
+    var value = ref ? JSON.stringify([ref.harness, ref.connector]) : '', found = false;
+    var html = systemMembers().slice().sort(byName).map(function (m) {
+        return '<optgroup label="' + esc(m.name) + '">' + m.model.connectors.slice().sort(byName).map(function (c) {
+            var v = JSON.stringify([m.id, c.id]);
+            if (v === value) found = true;
+            return '<option value="' + esc(v) + '"' + (v === value ? ' selected' : '') + '>' + esc(c.id + (c.title && c.title !== c.id ? ' — ' + c.title : '')) + '</option>';
+        }).join('') + '</optgroup>';
+    }).join('');
+    // A link to a connector that is gone stays visible until it is changed.
+    if (ref && !found) html = '<option value="' + esc(value) + '" selected>' + esc(canPinText({ connector: ref.connector }) + ' (not found)') + '</option>' + html;
+    return '<option value="">Not linked</option>' + html;
+}
+
+/** The pin pickers under a device or feed row: one line per wire. */
+function canPinsHtml(net, kind, item, colspan) {
+    var members = systemMembers();
+    function attrs(role, part) {
+        return ' class="can-pin-input" data-net="' + esc(net.id) + '" data-kind="' + kind + '" data-id="' + esc(item.id) + '" data-role="' + role +
+            '" data-part="' + part + '"';
+    }
+    var rows = canPinRoles(item, kind === 'feed').map(function (role) {
+        var ref = (item.pins || {})[role], f = ref ? canFindPin(members, ref) : null, pins = f && f.connector ? f.connector.pins : [];
+        var cav = ref ? String(ref.cavity || '').trim().toLowerCase() : '';
+        var pinSel = '<select' + attrs(role, 'cavity') + (f && f.connector ? '' : ' disabled') + ' aria-label="' + esc(CAN_PIN_LABELS[role] + ' pin') + '">' +
+            '<option value="">' + (f && f.connector ? 'Pick a pin' : '—') + '</option>' + pins.map(function (p) {
+                var fn = harnessText(p.function);
+                return '<option value="' + esc(p.cavity) + '"' + (String(p.cavity).trim().toLowerCase() === cav ? ' selected' : '') + '>' +
+                    esc(p.cavity + (fn ? ' — ' + hdClip(fn, 34) : '')) + '</option>';
+            }).join('') + (ref && ref.cavity && !(f && f.pin) ? '<option value="' + esc(ref.cavity) + '" selected>' + esc(ref.cavity + ' (not found)') + '</option>' : '') + '</select>';
+        var pin = f && f.pin;
+        return '<tr><td><span class="can-swatch can-swatch-' + role + '"></span>' + esc(CAN_PIN_LABELS[role]) + '</td>' +
+            '<td><select' + attrs(role, 'connector') + ' aria-label="' + esc(CAN_PIN_LABELS[role] + ' connector') + '">' + canConnectorOptions(ref) + '</select></td>' +
+            '<td>' + pinSel + '</td><td class="hint">' + esc(pin ? harnessText(pin.function) : '') + '</td><td class="hint">' + esc(pin ? harnessText(pin.wire) : '') + '</td>' +
+            '<td class="actions">' + (pin ? '<button class="link-btn" data-can-action="goto-pin" data-net="' + esc(net.id) + '" data-key="' +
+                esc(ref.harness + '|' + harnessEndpointName(ref.connector, pin.cavity)) + '" title="Go to this pin" aria-label="Go to ' +
+                esc(canPinText(ref)) + '">&rarr;</button>' : '') + '</td></tr>';
+    }).join('');
+    return '<tr class="can-pins-row"><td colspan="' + colspan + '"><table class="can-pin-table"><thead><tr><th>Wire</th><th>Connector</th><th>Pin</th>' +
+        '<th>Function</th><th>Wire</th><th><span class="sr-only">Go</span></th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<p class="hint">Pick the connector and the pins are filled in from their functions ("CAN 1 High", "CAN 1 Low", …) where that is clear.</p></td></tr>';
+}
+
+/** Show a device or feed in the CAN tab with its pin links open. */
+function canShowItem(id) {
+    state.canPinsOpen[id] = true;
+    selectTab('can');
+    canFocus(id);
+}
+
 function canNetworkHtml(net) {
     var html = '<section class="system-section can-network" data-net-section="' + esc(net.id) + '"><div class="can-head">' +
         '<label>Network ' + canInput(net, 'net', null, 'name', ' aria-label="Network name"') + '</label>' +
@@ -1526,14 +1606,15 @@ function canNetworkHtml(net) {
 
     html += '<h4>Devices</h4>' + (net.devices.length ? '<div class="table-scroll"><table class="event-table data-table can-table"><thead><tr>' +
         '<th>Device</th><th>Hub</th><th>Termination</th><th title="Powered through its CAN connection (+12 V and ground in the CAN cable)">Power</th>' +
-        '<th>Speed (kbit/s)</th><th>Notes</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
+        '<th>Speed (kbit/s)</th><th>Pins</th><th>Notes</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
         net.devices.map(function (d) {
             return '<tr><td>' + canInput(net, 'device', d, 'name', ' aria-label="Device name"') + '</td><td>' + canHubSelect(net, 'device', d) + '</td>' +
                 '<td>' + canCheckbox(net, 'device', d, 'termination', '120 Ω on') + '</td>' +
                 '<td>' + canCheckbox(net, 'device', d, 'power', 'From CAN') + '</td>' +
                 '<td>' + canInput(net, 'device', d, 'bitrate', ' list="can-bitrates" placeholder="' + esc(net.bitrate ? 'network' : 'kbit/s') +
-                    '" aria-label="Device speed (kbit/s)"') + '</td>' +
-                '<td>' + canInput(net, 'device', d, 'notes', ' aria-label="Device notes"') + '</td><td class="actions">' + canRemoveBtn(net, 'device', d) + '</td></tr>';
+                    '" aria-label="Device speed (kbit/s)"') + '</td><td>' + canPinsButton(net, 'device', d) + '</td>' +
+                '<td>' + canInput(net, 'device', d, 'notes', ' aria-label="Device notes"') + '</td><td class="actions">' + canRemoveBtn(net, 'device', d) + '</td></tr>' +
+                (state.canPinsOpen[d.id] ? canPinsHtml(net, 'device', d, 8) : '');
         }).join('') + '</tbody></table></div>' : '<p class="muted">No devices yet.</p>') +
         '<button class="btn btn-small btn-secondary" data-can-action="add-device" data-net="' + esc(net.id) + '">Add device</button>';
 
@@ -1560,12 +1641,13 @@ function canNetworkHtml(net) {
 
     var feeds = canFeeds(net), names = net.devices.map(function (d) { return d.name; }).filter(Boolean);
     html += '<h4>Power feeds</h4>' + (feeds.length ? '<div class="table-scroll"><table class="event-table data-table can-table"><thead><tr>' +
-        '<th>Feed</th><th>Power comes from</th><th>Feeds into</th><th>Notes</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
+        '<th>Feed</th><th>Power comes from</th><th>Feeds into</th><th>Pins</th><th>Notes</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
         feeds.map(function (f) {
             return '<tr><td>' + canInput(net, 'feed', f, 'name', ' aria-label="Feed name"') + '</td>' +
                 '<td>' + canInput(net, 'feed', f, 'source', ' list="can-sources-' + esc(net.id) + '" placeholder="e.g. PDM30 OUT 5" aria-label="Where the power comes from"') + '</td>' +
-                '<td>' + canFeedSelect(net, f) + '</td><td>' + canInput(net, 'feed', f, 'notes', ' aria-label="Feed notes"') + '</td>' +
-                '<td class="actions">' + canRemoveBtn(net, 'feed', f) + '</td></tr>';
+                '<td>' + canFeedSelect(net, f) + '</td><td>' + canPinsButton(net, 'feed', f) + '</td>' +
+                '<td>' + canInput(net, 'feed', f, 'notes', ' aria-label="Feed notes"') + '</td>' +
+                '<td class="actions">' + canRemoveBtn(net, 'feed', f) + '</td></tr>' + (state.canPinsOpen[f.id] ? canPinsHtml(net, 'feed', f, 6) : '');
         }).join('') + '</tbody></table></div>' : '<p class="muted">No power feeds.</p>') +
         '<datalist id="can-sources-' + esc(net.id) + '">' + names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>' +
         '<button class="btn btn-small btn-secondary" data-can-action="add-feed" data-net="' + esc(net.id) + '">Add power feed</button>';
@@ -1608,6 +1690,14 @@ $('can').addEventListener('click', function (e) {
     if (action === 'delete-network') {
         if (!window.confirm('Delete the CAN network "' + net.name + '" with its ' + net.devices.length + ' devices and ' + net.hubs.length + ' hubs?')) return;
         state.system.canNetworks = canNetworks().filter(function (x) { return x !== net; });
+    } else if (action === 'pins') {
+        var pid = b.getAttribute('data-id');
+        if (state.canPinsOpen[pid]) delete state.canPinsOpen[pid]; else state.canPinsOpen[pid] = true;
+        renderCan();
+        return;
+    } else if (action === 'goto-pin') {
+        gotoSystemEndpoint(b.getAttribute('data-key'));
+        return;
     } else if (action === 'diagram') {
         state.diagram = 'can:' + net.id;
         selectTab('diagram');
@@ -1667,6 +1757,7 @@ $('can').addEventListener('input', function (e) {
 
 $('can').addEventListener('change', function (e) {
     var t = e.target;
+    if (t.classList.contains('can-pin-input')) { canPinChange(t); return; }
     if (!t.classList.contains('can-input') || (t.type !== 'checkbox' && t.tagName !== 'SELECT')) return;
     var net = canFindNet(t.getAttribute('data-net'));
     if (!net) return;
@@ -1678,6 +1769,28 @@ $('can').addEventListener('change', function (e) {
     else if (field === 'hub' || field === 'to') target[field] = t.value;
     renderCan(); canSave();
 });
+
+/** A connector or pin picked for one of a device's or feed's wires. Picking a connector fills the wires it can tell from the functions. */
+function canPinChange(t) {
+    var net = canFindNet(t.getAttribute('data-net'));
+    if (!net) return;
+    var kind = t.getAttribute('data-kind'), role = t.getAttribute('data-role');
+    var item = canList(net, kind).filter(function (x) { return x.id === t.getAttribute('data-id'); })[0];
+    if (!item) return;
+    var pins = item.pins = item.pins || {};
+    if (t.getAttribute('data-part') === 'cavity') {
+        if (pins[role]) pins[role].cavity = t.value;
+    } else if (!t.value) {
+        delete pins[role];
+    } else {
+        var hc = JSON.parse(t.value), s = canSuggestPins(net, item, kind === 'feed', systemMembers(), hc[0], hc[1]);
+        pins[role] = { harness: hc[0], connector: hc[1], cavity: s[role] || '' };
+        canPinRoles(item, kind === 'feed').forEach(function (r) {
+            if (r !== role && !pins[r] && s[r]) pins[r] = { harness: hc[0], connector: hc[1], cavity: s[r] };
+        });
+    }
+    renderCan(); canSave();
+}
 
 // =========================================================================
 // Add from .xlsx — copy blocks from another workbook into the open harness

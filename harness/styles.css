@@ -138,6 +138,21 @@ tr.issue-row li.issue-warning .issue-text { color: #ffb74d; }
 .can-table select { font-size: 0.85rem; }
 .can-link { margin-right: 10px; }
 .can-network > .btn { margin-top: 6px; }
+.can-pins-btn { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.can-pins-row > td { background: rgba(255,255,255,0.03); padding: 6px 10px 10px !important; }
+.can-pin-table { border-collapse: collapse; font-size: 0.85rem; }
+.can-pin-table th { text-align: left; color: #999; font-weight: 600; padding: 2px 10px 4px 0; }
+.can-pin-table td { padding: 2px 10px 2px 0; white-space: nowrap; }
+.can-pin-table select { font-size: 0.85rem; max-width: 280px; }
+.can-pins-row .hint { margin: 6px 0 0; }
+.can-swatch { display: inline-block; width: 14px; height: 4px; border-radius: 2px; margin-right: 6px; vertical-align: middle; border: 1px solid #555; }
+.can-swatch-h { background: #f9c80e; }
+.can-swatch-l { background: #2e7d32; }
+.can-swatch-plus { background: #d32f2f; }
+.can-swatch-gnd { background: #1b1b1b; }
+.can-pin-tag { flex: none; border: 1px solid #3a5f8a; background: #1c2a3a; color: #90caf9; border-radius: 3px; padding: 0 5px; font-size: 0.7rem;
+  font-weight: 600; cursor: pointer; font-family: inherit; }
+.can-pin-tag:hover { border-color: #ff2d4a; }
 
 /* Add from .xlsx dialog */
 .add-dialog { width: min(720px, 95vw); }

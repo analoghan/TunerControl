@@ -167,3 +167,102 @@ describe('CAN networks — power', function () {
     assert.equal((pair.match(/<polyline/g) || []).length, 4, '+12 V and ground, each with an edge');
   });
 });
+
+function hcPin(cavity, fn) {
+  return { cavity: cavity, terminal: '', wirePn: '', wire: 'TXL 22 YEL', function: fn, note: '', remote: '' };
+}
+
+function hcMembers() {
+  // An engine harness with the M142's three buses and a chassis harness with the dash connector.
+  return [{ id: 'eng', name: 'Engine', model: { connectors: [{ id: 'M142.C', title: '', pins: [
+      hcPin('14', 'M142 CAN1 High'), hcPin('15', 'M142 CAN1 Low'), hcPin('16', 'M142 CAN2 High'), hcPin('17', 'M142 CAN2 Low'),
+      hcPin('18', 'CAN Bus 3 High'), hcPin('19', 'CAN Bus 3 Low')] }], splices: [] } },
+    { id: 'chas', name: 'Chassis', model: { connectors: [{ id: 'DASH', title: '', pins: [
+      hcPin('1', 'CAN 1 High'), hcPin('2', 'CAN 1 Low'), hcPin('3', 'CAN 1 Power'), hcPin('4', 'CAN 1 Ground'), hcPin('5', 'Canister Vent Ground')] }],
+      splices: [] } }];
+}
+
+function hcLinked() {
+  var n = hcNet();
+  n.devices[0].pins = { h: { harness: 'eng', connector: 'M142.C', cavity: '14' }, l: { harness: 'eng', connector: 'M142.C', cavity: '15' } };
+  n.devices[1].power = true;
+  n.devices[1].pins = { h: { harness: 'chas', connector: 'DASH', cavity: '1' }, l: { harness: 'chas', connector: 'DASH', cavity: '2' },
+    plus: { harness: 'chas', connector: 'DASH', cavity: '3' }, gnd: { harness: 'chas', connector: 'DASH', cavity: '4' } };
+  n.feeds = [{ id: 'f1', name: 'Switched 12V', source: 'PDM30 OUT 5', to: 'hub:B', notes: '' }];
+  return n;
+}
+
+describe('CAN networks — harness pins', function () {
+  it('reads CAN wires from pin functions', function () {
+    assert.deepEqual(canFunctionRole('CAN 1 High'), { role: 'h', buses: ['1'] });
+    assert.deepEqual(canFunctionRole('M142 CAN2 Low'), { role: 'l', buses: ['2'] });
+    assert.deepEqual(canFunctionRole('CAN Bus 3 High'), { role: 'h', buses: ['3'] });
+    assert.deepEqual(canFunctionRole('CAN 1/2 Power'), { role: 'plus', buses: ['1', '2'] });
+    assert.deepEqual(canFunctionRole('CAN Power Ground'), { role: 'gnd', buses: [] });
+    assert.equal(canFunctionRole('CANH').role, 'h');
+    assert.equal(canFunctionRole('Canister Vent Ground'), null, 'not CAN');
+    assert.equal(canFunctionRole('E888 CAN Connection'), null, 'no wire named');
+    assert.equal(canNetBus({ name: 'CAN 2' }), '2');
+    assert.equal(canNetBus({ name: 'Main bus' }), '');
+  });
+
+  it('suggests pins from a connector, using the bus number when it has several', function () {
+    var m = hcMembers(), n = hcNet(), d = n.devices[0];
+    assert.deepEqual(canSuggestPins(n, d, false, m, 'eng', 'M142.C'), { h: '14', l: '15' }, 'network CAN 1');
+    n.name = 'Main bus';
+    assert.deepEqual(canSuggestPins(n, d, false, m, 'eng', 'M142.C'), {}, 'three buses and no number: unsure');
+    d.pins = { h: { harness: 'eng', connector: 'M142.C', cavity: '18' } };
+    assert.deepEqual(canSuggestPins(n, d, false, m, 'eng', 'M142.C'), { h: '18', l: '19' }, 'the bus of the pin already linked');
+    var dash = n.devices[1];
+    dash.power = true;
+    assert.deepEqual(canSuggestPins(n, dash, false, m, 'chas', 'DASH'), { h: '1', l: '2', plus: '3', gnd: '4' });
+    assert.deepEqual(canSuggestPins(n, { id: 'f' }, true, m, 'chas', 'DASH'), { plus: '3', gnd: '4' }, 'a feed has power wires only');
+  });
+
+  it('accepts pins that exist and match their functions', function () {
+    assert.deepEqual(canNetworkChecks(hcLinked(), hcMembers()), []);
+    assert.deepEqual(canNetworkChecks(hcLinked()), [], 'no pin checks without the harnesses');
+  });
+
+  it('flags pins that are gone, swapped, used twice or on another bus', function () {
+    var m = hcMembers(), n = hcLinked(), ecu = n.devices[0], dash = n.devices[1];
+    ecu.pins.h.cavity = '99';
+    assert.equal(hcFind(canNetworkChecks(n, m), 'has no cavity 99').length, 1);
+    ecu.pins.h = { harness: 'gone', connector: 'X', cavity: '1' };
+    assert.equal(hcFind(canNetworkChecks(n, m), 'not in this system').length, 1);
+    ecu.pins.h = { harness: 'eng', connector: 'M142.X', cavity: '1' };
+    assert.equal(hcFind(canNetworkChecks(n, m), 'has no connector M142.X').length, 1);
+    ecu.pins.h = { harness: 'eng', connector: 'M142.C', cavity: '' };
+    assert.equal(hcFind(canNetworkChecks(n, m), 'pick the pin').length, 1);
+    ecu.pins.h = { harness: 'eng', connector: 'M142.C', cavity: '15' };
+    var c = canNetworkChecks(n, m);
+    assert.equal(hcFind(c, 'whose function is "M142 CAN1 Low"').length, 1, 'CAN-H on a CAN-L pin');
+    assert.equal(hcFind(c, 'is used for both M142 CAN-H and M142 CAN-L')[0].severity, 'error');
+    ecu.pins = { h: { harness: 'eng', connector: 'M142.C', cavity: '16' }, l: { harness: 'eng', connector: 'M142.C', cavity: '15' } };
+    c = canNetworkChecks(n, m);
+    assert.equal(hcFind(c, 'but this network is CAN 1').length, 1);
+    assert.equal(hcFind(c, 'different CAN buses (CAN 1, CAN 2)').length, 1);
+    dash.power = false;
+    dash.pins.plus.cavity = '99';
+    assert.equal(hcFind(canNetworkChecks(n, m), 'cavity 99').length, 0, 'power pins of an unpowered device are not checked');
+  });
+
+  it('follows a renamed connector and lists the pins each harness has linked', function () {
+    var n = hcLinked(), nets = [n];
+    assert.ok(canRenameConnector(nets, 'eng', 'M142.C', 'ECU.C'));
+    assert.equal(n.devices[0].pins.h.connector, 'ECU.C');
+    assert.equal(canRenameConnector(nets, 'chas', 'M142.C', 'X'), false, 'only links into that harness');
+    var uses = canPinUses(nets, 'chas');
+    assert.deepEqual(Object.keys(uses).sort(), ['DASH|1', 'DASH|2', 'DASH|3', 'DASH|4']);
+    assert.equal(uses['DASH|3'][0].role, 'plus');
+    assert.equal(uses['DASH|3'][0].item.name, 'Dash');
+  });
+
+  it('labels the wires with their pins in the diagram', function () {
+    var svg = canNetworkDiagram(hcLinked()).svg;
+    assert.ok(svg.indexOf('>H M142.C.14<') >= 0 && svg.indexOf('>L M142.C.15<') >= 0, 'CAN pins');
+    assert.ok(svg.indexOf('>+ DASH.3<') >= 0 && svg.indexOf('>− DASH.4<') >= 0, 'power pins');
+    assert.ok(svg.indexOf('M142 ⇄ Hub A — CAN-H M142.C.14, CAN-L M142.C.15') >= 0, 'tooltip');
+    assert.equal(canPinText({ connector: 'M142.C', cavity: '14' }), 'M142.C.14');
+  });
+});
