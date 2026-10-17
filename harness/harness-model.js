@@ -34,10 +34,27 @@ var HARNESS_HEADER_FIELDS = { CONNECTOR: 'connector', SPLICE: 'type', BOOT: 'boo
 /** Remote values that mean "no connection". */
 var HARNESS_NO_REMOTE = /^(|n\/a|na|none|empty|-|unused|not used|open)$/i;
 /**
- * A wire connected at this end only, on purpose (e.g. a shield drain grounded at one end): a valid end, so the checks don't
- * ask for the other one. A note may follow in brackets: "Unterminated (shield, ECU end only)".
+ * Valid ends that need no other end in this harness. A note may follow in brackets, or the keyword may be the bracket at the end:
+ *   Unterminated — connected at this end only, on purpose (e.g. a shield drain grounded at one end)
+ *   Eyelet       — a ring terminal on a stud or bolt: "Eyelet (chassis ground)", "Chassis Ground (Eyelet)"
+ *   Battery      — the battery post; "+" / "-" (or pos/neg) gives the side: "Battery +", "Battery (-)"
  */
-var HARNESS_UNTERMINATED = /^unterminated(\s*\(.*\))?$/i;
+var HARNESS_TERMINALS = { unterminated: 'Unterminated', eyelet: 'Eyelet', battery: 'Battery' };
+var HARNESS_TERMINAL = /^(unterminated|eyelet|battery)\s*(\+|-|pos(?:itive)?|neg(?:ative)?)?\s*(?:\((.*)\))?$/i;
+var HARNESS_TERMINAL_AFTER = /^(.+?)\s*\((unterminated|eyelet|battery)\s*(\+|-|pos(?:itive)?|neg(?:ative)?)?\)$/i;
+
+/** { terminal, polarity, note, label } for a HARNESS_TERMINAL value, else null. */
+function harnessTerminal(t) {
+    var m = t.match(HARNESS_TERMINAL), kw, pol, note;
+    if (m) { kw = m[1]; pol = m[2]; note = harnessText(m[3]); }
+    else if ((m = t.match(HARNESS_TERMINAL_AFTER))) { kw = m[2]; pol = m[3]; note = harnessText(m[1]); }
+    else return null;
+    var terminal = HARNESS_TERMINALS[kw.toLowerCase()];
+    if (!pol && terminal === 'Battery' && /^(\+|-|pos(itive)?|neg(ative)?)$/i.test(note)) { pol = note; note = ''; }
+    var polarity = !pol ? '' : /^(\+|pos)/i.test(pol) ? '+' : '\u2212';
+    return { terminal: terminal, polarity: polarity, note: note, label: terminal + (polarity ? ' ' + polarity : '') };
+}
+
 /** Wire values that mean "no wire in this cavity". */
 var HARNESS_NO_WIRE = /^(|n\/a|na|none|empty|-|unused|not used|sealing pin|seal|plug)$/i;
 
@@ -177,14 +194,15 @@ function harnessIndex(model) {
 
 /**
  * Resolve a remote reference.
- * Returns { kind: 'none' } (unterminated: true for HARNESS_UNTERMINATED) | { kind: 'pin', connector, cavity, pin|null } | { kind: 'splice', splice }
+ * Returns { kind: 'none' } (+ terminal, polarity, note, label for a HARNESS_TERMINAL end) | { kind: 'pin', connector, cavity, pin|null } | { kind: 'splice', splice }
  *       | { kind: 'external', text } (no dot: CHASSIS, SHIELD …) | { kind: 'unknown', text },
  * plus caseOnly (matched ignoring case) and extra (trailing text such as " (X107.H)" that was ignored).
  */
 function harnessResolve(index, text) {
     var t = harnessText(text);
     if (HARNESS_NO_REMOTE.test(t)) return { kind: 'none' };
-    if (HARNESS_UNTERMINATED.test(t)) return { kind: 'none', unterminated: true };
+    var term = harnessTerminal(t);
+    if (term) { term.kind = 'none'; return term; }
     var extra = '', m = t.match(/^(\S+)\s+\(.*\)$/);
     if (m) { extra = t.slice(m[1].length).trim(); t = m[1]; }
     function attempt(s, ci) {
@@ -306,7 +324,7 @@ function harnessCheck(model) {
             var back = harnessResolve(index, r.pin.remote);
             if (!backOk(back) && pairOnce('link', here, there)) {
                 add('error', here, 'Goes to ' + there + ', but ' + there + ' goes to ' +
-                    (back.unterminated ? 'nothing (Unterminated)' : back.kind === 'none' ? 'nothing' : '"' + harnessText(r.pin.remote) + '"') + '.', there);
+                    (back.terminal === 'Unterminated' ? 'nothing (Unterminated)' : back.terminal ? back.label : back.kind === 'none' ? 'nothing' : '"' + harnessText(r.pin.remote) + '"') + '.', there);
             }
             if (harnessHasWire(wire) && !harnessHasWire(r.pin) && pairOnce('empty', here, there)) {
                 add('warning', here, 'Has a wire, but ' + there + ' has no wire listed.', there);
@@ -336,14 +354,14 @@ function harnessCheck(model) {
             if (cavities[p.cavity]) add('error', here, 'Cavity "' + p.cavity + '" appears more than once in ' + c.id + '.');
             cavities[p.cavity] = true;
             var r = harnessResolve(index, p.remote);
-            if (r.unterminated) {
-                if (!harnessHasWire(p)) add('warning', here, 'Marked Unterminated but no wire listed.');
+            if (r.terminal) {
+                if (!harnessHasWire(p)) add('warning', here, 'Marked ' + r.terminal + ' but no wire listed.');
                 return;
             }
             if (r.kind === 'none') {
                 if (harnessHasWire(p)) {
                     add('warning', here, 'Has a wire (' + (p.wire || p.wirePn) + ') but no remote connection. If it is connected at this end ' +
-                        'only on purpose, write Unterminated.');
+                        'only on purpose, write Unterminated (Eyelet or Battery for a ring terminal or the battery).');
                 }
                 return;
             }
@@ -360,7 +378,7 @@ function harnessCheck(model) {
         s.wires.forEach(function (w, i) {
             ref = { kind: 'wire', block: s.id, index: i };
             var r = harnessResolve(index, w.end), raw = harnessText(w.end);
-            if (r.unterminated) return;   // a wire that leaves the splice and ends unconnected, on purpose
+            if (r.terminal) return;   // a wire that leaves the splice to an eyelet, the battery, or nothing on purpose
             if (r.kind === 'none') { add('error', s.id, 'A wire in the splice has no location.'); return; }
             if (r.kind === 'splice' && r.splice.id === s.id) { add('error', s.id, 'Splice lists itself as a wire end.'); return; }
             describe(r, raw, s.id, w, function (back) { return back.kind === 'splice' && back.splice.id === s.id; });

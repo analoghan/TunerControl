@@ -97,8 +97,12 @@ Location | Pin        | Conductor Part Number | Conductor Description | Engine F
       <tr><td><code>Unterminated</code></td><td>The wire is connected at this end only, on purpose — e.g. a cable shield or drain grounded at
         one end. A valid end: the checks don't look for the other one, and diagrams draw a capped stub. A note may follow in brackets:
         <code>Unterminated (shield, ECU end)</code>. Also works for a wire in a splice's list.</td></tr>
+      <tr><td><code>Eyelet</code></td><td>A ring terminal on a stud or bolt (e.g. a ground point). A valid end, drawn as a ring. Add where it goes in
+        brackets — <code>Eyelet (engine block)</code> — or put the keyword in brackets after it: <code>Chassis Ground (Eyelet)</code>.</td></tr>
+      <tr><td><code>Battery</code></td><td>The battery post. A valid end, drawn as a cell. Give the side with <code>+</code> or <code>-</code>:
+        <code>Battery +</code>, <code>Battery (-)</code>, <code>Battery Negative (main ground)</code>.</td></tr>
       <tr><td><code>N/A</code>, <code>Empty</code>, <code>Unused</code>, blank</td><td>No connection. A cavity with a wire but no connection gets a
-        warning; write <code>Unterminated</code> if that's intended.</td></tr>
+        warning; write <code>Unterminated</code>, <code>Eyelet</code> or <code>Battery</code> if that's intended.</td></tr>
     </table>
     <p>Every wire should be listed at both ends: if <code>M142.C.14</code> goes to <code>PEDAL.1</code>, then <code>PEDAL.1</code> should go to
       <code>M142.C.14</code>; a wire into a splice should appear in that splice's list. The <a href="#checks">checks</a> verify this.</p>

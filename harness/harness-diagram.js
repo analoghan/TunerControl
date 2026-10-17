@@ -133,10 +133,10 @@ function harnessBlockDiagram(model, id, opts) {
         if (!byKey[key]) { byKey[key] = make(); byKey[key].order = groups.length; groups.push(byKey[key]); }
         return byKey[key];
     }
-    var links = [], stubs = [];   // links: { from: row index, group, entry }; stubs: Unterminated rows
+    var links = [], stubs = [];   // links: { from: row index, group, entry }; stubs: Unterminated / Eyelet / Battery rows
     rows.forEach(function (r, i) {
         var res = harnessResolve(index, r.remote);
-        if (res.unterminated) stubs.push({ from: i, wire: r.wire, title: r.endpoint + ' → Unterminated' });
+        if (res.terminal) stubs.push({ from: i, wire: r.wire, end: res, title: r.endpoint + ' → ' + harnessText(r.remote) });
         if (res.kind === 'none') return;
         var g, entryKey, entry;
         if (res.kind === 'pin') {
@@ -220,14 +220,25 @@ function harnessBlockDiagram(model, id, opts) {
         var g = l.group, ty = g.kind === 'connector' ? g.box.y(l.entry) : g.box.top + 15;   // splices/missing: header
         wires += hdWirePath(x0 + w0, fbox.y(l.from), x1, ty, hdWireStyle(l.wire), l.title + ' · ' + (l.wire || ''));
     });
-    // Unterminated: a short wire ending in a cap, connected at this end only.
+    // Unterminated / Eyelet / Battery: a short wire ending in a symbol (cap, ring terminal, battery cell), connected at this end only.
     stubs.forEach(function (s) {
-        var y = fbox.y(s.from), xs = x0 + w0, xe = xs + 46;
+        var y = fbox.y(s.from), xs = x0 + w0, xe = xs + 46, sym, xl;
+        if (s.end.terminal === 'Eyelet') {
+            sym = '<circle cx="' + (xe + 6) + '" cy="' + y + '" r="5.5" fill="#fff" stroke="#555" stroke-width="2.5"/>';
+            xl = xe + 14;
+        } else if (s.end.terminal === 'Battery') {
+            sym = '<line x1="' + xe + '" y1="' + (y - 8) + '" x2="' + xe + '" y2="' + (y + 8) + '" stroke="#555" stroke-width="1.5"/>' +
+                '<line x1="' + (xe + 5) + '" y1="' + (y - 4) + '" x2="' + (xe + 5) + '" y2="' + (y + 4) + '" stroke="#555" stroke-width="3"/>';
+            xl = xe + 9;
+        } else {
+            sym = '<line x1="' + xe + '" y1="' + (y - 7) + '" x2="' + xe + '" y2="' + (y + 7) + '" stroke="#555" stroke-width="2.5"/>';
+            xl = xe + 3;
+        }
         wires += hdWirePath(xs, y, xe, y, hdWireStyle(s.wire), s.title + ' · ' + (s.wire || ''));
-        // Cap and label go over the other wires, which may cross here.
-        body += '<g class="unterminated"><title>' + hdEsc(s.title) + '</title><rect x="' + (xe + 3) + '" y="' + (y - 8) + '" width="74" height="16" rx="3" ' +
-            'fill="#fff" stroke="#bbb"/><line x1="' + xe + '" y1="' + (y - 7) + '" x2="' + xe + '" y2="' + (y + 7) + '" stroke="#555" stroke-width="2.5"/>' +
-            '<text class="dim" x="' + (xe + 8) + '" y="' + (y + 4) + '">Unterminated</text></g>';
+        // Symbol and label go over the other wires, which may cross here. A note stays in the tooltip.
+        body += '<g class="terminal ' + s.end.terminal.toLowerCase() + '"><title>' + hdEsc(s.title) + '</title><rect x="' + xl + '" y="' + (y - 8) +
+            '" width="' + (s.end.label.length * 6 + 12) + '" height="16" rx="3" fill="#fff" stroke="#bbb"/>' + sym +
+            '<text class="dim" x="' + (xl + 5) + '" y="' + (y + 4) + '">' + hdEsc(s.end.label) + '</text></g>';
     });
     var yImg = 20 + fbox.height + 16, pics = '';
     (focus.images || []).forEach(function (im) {

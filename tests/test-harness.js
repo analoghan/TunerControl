@@ -203,9 +203,9 @@ describe('Harness — connection checks', function () {
 
   it('accepts Unterminated as an intentional one-ended wire, on a pin or in a splice', function () {
     var idx = harnessIndex(m);
-    assert.equal(harnessResolve(idx, 'Unterminated').unterminated, true);
-    assert.equal(harnessResolve(idx, 'unterminated (shield, ECU end)').unterminated, true);
-    assert.equal(harnessResolve(idx, 'N/A').unterminated, undefined);
+    assert.equal(harnessResolve(idx, 'Unterminated').terminal, 'Unterminated');
+    assert.equal(harnessResolve(idx, 'unterminated (shield, ECU end)').note, 'shield, ECU end');
+    assert.equal(harnessResolve(idx, 'N/A').terminal, undefined);
     var pin = m.connectors[0].pins[2], wire = m.splices[1].wires[1];
     pin.remote = 'Unterminated';
     wire.end = 'Unterminated';
@@ -220,6 +220,33 @@ describe('Harness — connection checks', function () {
     assert.equal(hxFind(harnessCheck(m), 'M142.C.16', '').length, 0, 'a cavity marked Unused throughout is not a wire');
     pin.wirePn = 'M22759/32-22-9'; pin.wire = '22 AWG White'; pin.remote = 'SPARE.1';
     wire.end = 'CHASSIS';
+  });
+
+  it('accepts Eyelet and Battery ends, with a note or polarity', function () {
+    var idx = harnessIndex(m);
+    var e = harnessResolve(idx, 'Eyelet (engine block ground)');
+    assert.equal(e.kind, 'none'); assert.equal(e.terminal, 'Eyelet'); assert.equal(e.note, 'engine block ground');
+    e = harnessResolve(idx, 'Chassis Ground (Eyelet)');
+    assert.equal(e.terminal, 'Eyelet'); assert.equal(e.note, 'Chassis Ground');
+    assert.equal(harnessResolve(idx, 'Battery +').label, 'Battery +');
+    assert.equal(harnessResolve(idx, 'battery-').polarity, '\u2212');
+    assert.equal(harnessResolve(idx, 'Battery (neg)').label, 'Battery \u2212');
+    assert.equal(harnessResolve(idx, 'Battery Positive (main feed)').note, 'main feed');
+    assert.equal(harnessResolve(idx, 'Battery').label, 'Battery');
+    assert.equal(harnessResolve(idx, 'Battery Box').kind, 'external', 'only the keyword itself');
+    var pin = m.connectors[0].pins[2], wire = m.splices[1].wires[1];
+    pin.remote = 'Battery +'; wire.end = 'Eyelet';
+    var u = harnessCheck(m);
+    assert.equal(hxFind(u, 'M142.C.16', '').length, 0, 'a wired cavity to the battery is valid');
+    assert.equal(hxFind(u, 'SPL.5V2', '').length, 0, 'a splice wire to an eyelet is valid');
+    pin.wirePn = 'N/A'; pin.wire = 'N/A';
+    assert.equal(hxFind(harnessCheck(m), 'M142.C.16', 'Marked Battery but no wire listed').length, 1);
+    pin.wirePn = 'M22759/32-22-9'; pin.wire = '22 AWG White'; pin.remote = 'SPARE.1';
+    wire.end = 'CHASSIS';
+    m.connectors[3].pins[0].remote = 'Eyelet';   // PEDAL.1, which M142.C.14 points at
+    var i = hxFind(harnessCheck(m), 'M142.C.14', 'goes to Eyelet');
+    m.connectors[3].pins[0].remote = 'M142.C.14';
+    assert.equal(i.length, 1);
   });
 
   it('reports a wire pointing at an Unterminated end', function () {
@@ -365,11 +392,18 @@ describe('Harness — wiring diagrams', function () {
     assert.equal((d.svg.match(/class="wire"/g) || []).length, 6, 'C14, C15, C16, C9, then the splice on to MAP.1 and SPL.5V2');
   });
 
-  it('draws an Unterminated wire as a capped stub', function () {
+  it('draws Unterminated, Eyelet and Battery wires as stubs with their symbol', function () {
     m.connectors[0].pins[2].remote = 'Unterminated';
+    m.connectors[0].pins[1].remote = 'Eyelet (block)';
+    m.connectors[0].pins[0].remote = 'Battery -';
     var d = harnessBlockDiagram(m, 'M142.C');
     m.connectors[0].pins[2].remote = 'SPARE.1';
-    assert.ok(d.svg.indexOf('class="unterminated"') >= 0);
+    m.connectors[0].pins[1].remote = 'MAP.2';
+    m.connectors[0].pins[0].remote = 'PEDAL.1';
+    assert.ok(d.svg.indexOf('class="terminal unterminated"') >= 0);
+    assert.ok(d.svg.indexOf('class="terminal eyelet"') >= 0 && d.svg.indexOf('<circle') >= 0);
+    assert.ok(d.svg.indexOf('class="terminal battery"') >= 0 && d.svg.indexOf('Battery \u2212') >= 0);
+    assert.ok(d.svg.indexOf('Eyelet (block)') >= 0, 'the note is in the tooltip');
     assert.ok(d.svg.indexOf('Not in this harness') < 0, 'not drawn as a missing block');
   });
 
