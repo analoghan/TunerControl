@@ -491,3 +491,11 @@ h1 {
     overflow-x: auto;
   }
 }
+
+.file-row select.tune-select { background: #222; color: #fff; border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font-family: inherit; max-width: 420px; }
+.tune-hint { font-size: 0.8rem; color: #888; }
+.tune-hint.suggested { color: #4caf50; }
+.tune-status { font-size: 0.85rem; color: #b0b0b0; margin: 0 0 12px; }
+.ff-cells { border-collapse: collapse; font-size: 0.85rem; margin: 10px 0; }
+.ff-cells th, .ff-cells td { border-bottom: 1px solid #2a2a2a; padding: 4px 12px 4px 0; text-align: left; color: #ccc; }
+.ff-cells td.num { text-align: right; font-variant-numeric: tabular-nums; }

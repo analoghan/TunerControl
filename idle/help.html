@@ -126,6 +126,21 @@
       <li><strong>More than 100 rpm of spread</strong> (10–90 %) at steady idle — hunting, misfire or a sticking throttle.</li>
     </ul>
 
+    <h3>With the tune</h3>
+    <p>Choose the tune that was in the ECU (a <code>.m1pkg</code>, or a stored tune from the M1 Config Viewer — the one saved before the log
+      is suggested from the ECU serial and time) and steady idle is also checked against its idle settings:</p>
+    <ul>
+      <li><strong>Integral</strong> — the controller's integral is worked out from the log: Idle Mass Flow − feed forward − Proportional
+        Gain × (aim − rpm). When it sits at Idle Mass Flow Integral Minimum (or Maximum) for half the steady idle or more, the controller
+        has run out of room, and the tool says so instead of guessing. When it is inside its limits, the feed forward isn't what holds the
+        idle off the aim.</li>
+      <li><strong>Feed Forward Main cells</strong> — the cells the steady idle used (by Idle Aim and coolant temperature, with the share of
+        time on each), their values, and the value with the controller's change applied. The logged feed forward is also split into Feed
+        Forward Main and the compensations added on top (coolant fan, A/C and the other Idle Mass Flow Feed Forward tables).</li>
+      <li><strong>Idle Aim Main</strong> — the logged aim against the table at the logged coolant temperature: a difference means
+        compensations raise it, or the log was recorded with a different tune.</li>
+    </ul>
+
     <h2 id="hang">Idle Hang Classification</h2>
     <p>A decel event is classified as "idle hang" if:</p>
     <div class="example-box">

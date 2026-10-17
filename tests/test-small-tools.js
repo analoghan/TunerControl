@@ -161,6 +161,53 @@ test('idle: returns to idle, gear changes left out, idle above aim with air take
     assert.ok(/takes 3\.8 % of air away/.test(st.diags[0].text) && /Lower Idle Mass Flow Feed Forward Main/.test(st.diags[0].text));
 });
 
+function idlePkg() {
+    function item(name, unit, value) { return { name: name, kind: 'Value', type: 'f32', unit: unit, value: value }; }
+    var aimSites = [4800, 5400, 6000, 0], coolSites = [60, 80, 0];
+    return { tuneName: 'Test V1', items: [
+        item('Idle.Mass Flow.Integral.Minimum', 'ratio', -0.03), item('Idle.Mass Flow.Integral.Maximum', 'ratio', 0.35),
+        item('Idle.Mass Flow.Proportional.Gain', 'ratio/(deg/s)', 0.0000166667),
+        { name: 'Idle.Mass Flow.Feed Forward.Main', kind: 'Table', unit: 'ratio', axes: [
+            { axis: 'X', input: 'Idle.Aim.Value', unit: 'deg/s', maxSites: 4, sites: 3, values: aimSites },
+            { axis: 'Y', input: 'Coolant.Temperature.Value', unit: 'C', maxSites: 3, sites: 2, values: coolSites }],
+          // 800 / 900 / 1000 rpm at 60 °C, then at 80 °C
+          values: [0.47, 0.475, 0.50, 0, 0.445, 0.455, 0.48, 0, 0, 0, 0, 0] },
+        { name: 'Idle.Aim.Main', kind: 'Table', unit: 'deg/s', axes: [{ axis: 'X', input: 'Coolant.Temperature.Value', unit: 'C', maxSites: 2, sites: 2, values: [60, 80] }],
+          values: [5700, 5220] }] };
+}
+
+test('idle: reads the idle settings from a tune in display units', function () {
+    var c = load(['idle/m1pkg-idle.js']);
+    var t = JSON.parse(JSON.stringify(c.m1pkgIdle(idlePkg())));   // plain objects (the result comes from the vm context)
+    assert.deepStrictEqual([t.integralMin, t.integralMax, t.pGain], [-3, 35, 0.01]);
+    assert.deepStrictEqual(t.feedForward.aim, [800, 900, 1000]);
+    assert.deepStrictEqual(t.feedForward.coolant, [60, 80]);
+    assert.deepStrictEqual(t.feedForward.values, [[47, 47.5, 50], [44.5, 45.5, 48]]);
+    assert.deepStrictEqual(t.aimMain.values, [950, 870]);
+});
+
+test('idle: with the tune, finds the integral at its minimum and the feed forward cells used', function () {
+    var out = [];
+    var c = load(['idle/worker.js', 'idle/m1pkg-idle.js'], { self: { postMessage: function (m) { out.push(m); } } });
+    var tune = c.m1pkgIdle(idlePkg());
+    // Idle aim 900, rpm 980 (+80): P = 0.01 × (900 − 980) = −0.8 %; feed forward 54 % (Main 45.5 % at 80 °C + 8.5 % compensations);
+    // Idle Mass Flow = 54 − 3 − 0.8 = 50.2 % → integral −3 % (its minimum).
+    function row(i) {
+        return { 'Engine Speed': 980, 'Throttle Pedal': 0, 'Idle Aim': 900, 'Vehicle Speed': 0, 'Clutch Switch Position': 1,
+                 'Idle Mass Flow': 50.2, 'Idle Mass Flow Feed Forward': 54, 'Coolant Temperature': 80, 'Engine Post Start Idle Mass Flow': 0 };
+    }
+    c.runAnalysis(IDLE_COLS, build(IDLE_COLS, [{ seconds: 20, row: row }]), 100, tune);
+    var st = out.filter(function (m) { return m.type === 'result'; })[0].analysis.steadyIdle;
+    assert.ok(Math.abs(st.integral.p50 + 3) < 1e-6, 'integral ' + st.integral.p50);
+    assert.strictEqual(st.integralAtMin, 1);
+    assert.ok(Math.abs(st.ffMain.p50 - 45.5) < 1e-9 && Math.abs(st.ffCompensation.p50 - 8.5) < 1e-9);
+    assert.strictEqual(st.ffCells.length, 1);
+    assert.deepStrictEqual([st.ffCells[0].aim, st.ffCells[0].coolant, st.ffCells[0].value, st.ffCells[0].suggested], [900, 80, 45.5, 41.7]);
+    assert.ok(/integral is at its minimum of -3 % in Test V1 for 100 %/.test(st.diags[0].text), st.diags[0].text);
+    assert.ok(st.diags.every(function (d) { return !/probably at the Idle Mass Flow Integral Minimum/.test(d.text); }), 'no guess when the tune says');
+    assert.ok(Math.abs(st.aimVsTable.p50 - 30) < 1e-9, 'logged aim 900 vs table 870 at 80 °C');
+});
+
 test('idle: needs the pedal and Idle Aim, not the throttle blade', function () {
     var out = [];
     var c = load(['idle/worker.js'], { self: { postMessage: function (m) { out.push(m); } } });

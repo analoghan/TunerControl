@@ -30,6 +30,88 @@ var warningsList = document.getElementById('warnings-list');
 var selectedFile = null;
 var worker = null;
 var collectedWarnings = [];
+var tuneIdle = null;          // m1pkgIdle() of the chosen tune, or null
+var tunePicked = false, storedTunes = [];
+
+// ---------------------------------------------------------------------------
+// Tune (optional): a .m1pkg or a stored tune, suggested from the log's ECU serial and time
+// ---------------------------------------------------------------------------
+
+var pkgInput = document.getElementById('pkg-input'), tuneSelect = document.getElementById('tune-select');
+var tuneHint = document.getElementById('tune-hint'), tuneStatus = document.getElementById('tune-status');
+
+function setTune(idle, sourceLabel) {
+    tuneIdle = idle;
+    if (!idle) {
+        tuneStatus.textContent = 'No tune chosen: the idle is judged from the log alone. With the tune, the integral limits and the Feed Forward Main cells the idle used are checked too.';
+        return;
+    }
+    var bits = [];
+    if (idle.integralMin !== null) bits.push('Integral ' + idle.integralMin + ' to ' + idle.integralMax + ' %');
+    if (idle.pGain !== null) bits.push('proportional ' + idle.pGain + ' % per rpm');
+    if (idle.feedForward) bits.push('Feed Forward Main ' + idle.feedForward.aim.length + ' × ' + idle.feedForward.coolant.length + ' sites');
+    if (idle.aimMain) bits.push('Idle Aim Main ' + idle.aimMain.values.map(Math.round).join('/') + ' rpm');
+    tuneStatus.textContent = sourceLabel + ': ' + (idle.tuneName || 'tune') + '. ' + bits.join(', ') + '.' + (idle.notes.length ? ' ' + idle.notes.join(' ') : '');
+}
+
+pkgInput.addEventListener('change', function () {
+    var file = pkgInput.files[0];
+    if (!file) return;
+    tunePicked = true;
+    tuneSelect.value = '';
+    tuneHint.textContent = '';
+    file.arrayBuffer().then(function (buf) { setTune(m1pkgIdle(parseM1Pkg(buf)), 'Tune file ' + file.name); }).catch(function (err) {
+        setTune(null);
+        showErrorBanner('Could not read the idle settings from ' + file.name + ': ' + err.message);
+    });
+});
+
+function useStoredTune(id, hint, suggested) {
+    if (!id) { setTune(null); tuneHint.textContent = ''; return Promise.resolve(); }
+    tuneSelect.value = id;
+    tuneHint.textContent = 'Loading…';
+    return tsLoad(id).then(function (pkg) {
+        if (tuneSelect.value !== id) return;
+        pkgInput.value = '';
+        setTune(m1pkgIdle(pkg), 'Stored tune');
+        tuneHint.textContent = hint || '';
+        tuneHint.classList.toggle('suggested', !!suggested);
+    }).catch(function (err) {
+        setTune(null);
+        tuneHint.textContent = '';
+        showErrorBanner('Could not read the idle settings from the stored tune: ' + err.message);
+    });
+}
+
+tuneSelect.addEventListener('change', function () {
+    tunePicked = !!tuneSelect.value;
+    useStoredTune(tuneSelect.value, '', false);
+});
+
+function suggestStoredTune(file) {
+    if (!storedTunes.length || tunePicked || typeof tsLogInfo === 'undefined') return;
+    tsLogInfo(file).then(function (info) {
+        var sug = tsSuggest(storedTunes, info);
+        if (sug.tune) return useStoredTune(sug.tune.id, sug.reason, true);
+        tuneHint.textContent = sug.reason;
+        tuneHint.classList.remove('suggested');
+    });
+}
+
+if (typeof tsInit !== 'undefined') {
+    tsInit().then(tsList).then(function (list) {
+        storedTunes = list;
+        if (!list.length) return;
+        list.forEach(function (t) {
+            var o = document.createElement('option');
+            o.value = t.id;
+            o.textContent = tsLabel(t);
+            tuneSelect.appendChild(o);
+        });
+        document.getElementById('tune-row').hidden = false;
+        if (selectedFile) suggestStoredTune(selectedFile);
+    }).catch(function () { /* no stored tunes: the file input still works */ });
+}
 
 // ---------------------------------------------------------------------------
 // File Input Handling
@@ -60,6 +142,7 @@ function handleFileSelect(event) {
         selectedFile = file;
         analyzeBtn.disabled = false;
         fileError.hidden = true;
+        suggestStoredTune(file);
     } else {
         selectedFile = null;
         analyzeBtn.disabled = true;
@@ -116,9 +199,9 @@ function handleAnalyzeClick() {
         };
 
         if (isLD) {
-            worker.postMessage({ type: 'analyze_ld', buffer: reader.result });
+            worker.postMessage({ type: 'analyze_ld', buffer: reader.result, tune: tuneIdle });
         } else {
-            worker.postMessage({ type: 'analyze', logText: reader.result });
+            worker.postMessage({ type: 'analyze', logText: reader.result, tune: tuneIdle });
         }
     };
 
@@ -471,6 +554,8 @@ function renderSteadyIdle(steady) {
         if (steady.map) addStat(grid, range(steady.map, ' kPa', 0), 'Manifold Pressure', '');
         if (steady.ignition) addStat(grid, range(steady.ignition, '°', 1), 'Ignition Timing', '');
         if (steady.coolant) addStat(grid, steady.coolant.p50.toFixed(0) + ' °C', 'Coolant', '');
+        if (steady.integral) addStat(grid, steady.integral.p50.toFixed(1) + ' %', 'Idle integral (from the tune)', steady.integralAtMin >= 0.5 || steady.integralAtMax >= 0.5 ? 'stat-warning' : '');
+        if (steady.ffMain) addStat(grid, steady.ffMain.p50.toFixed(1) + ' % + ' + steady.ffCompensation.p50.toFixed(1) + ' %', 'Feed forward: Main + compensations', '');
         content.appendChild(grid);
     }
     steady.diags.forEach(function (d) {
@@ -479,6 +564,16 @@ function renderSteadyIdle(steady) {
         div.textContent = d.text;
         content.appendChild(div);
     });
+    if (steady.ffCells && steady.ffCells.length) {
+        var table = document.createElement('table'), head = '<thead><tr><th>Feed Forward Main cell</th><th class="num">Share of steady idle</th>' +
+            '<th class="num">Value</th><th class="num">With the controller\'s change</th></tr></thead>';
+        table.className = 'ff-cells';
+        table.innerHTML = head + '<tbody>' + steady.ffCells.map(function (k) {
+            return '<tr><td>Idle Aim ' + Math.round(k.aim) + ' rpm' + (k.coolant !== null ? ', coolant ' + k.coolant + ' °C' : '') + '</td><td class="num">' +
+                Math.round(k.share * 100) + ' %</td><td class="num">' + k.value.toFixed(1) + ' %</td><td class="num">' + k.suggested.toFixed(1) + ' %</td></tr>';
+        }).join('') + '</tbody>';
+        content.appendChild(table);
+    }
 }
 
 // ---------------------------------------------------------------------------

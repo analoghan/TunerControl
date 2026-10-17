@@ -60,7 +60,8 @@ Load one log and get correlated diagnostics across fueling, knock, rail pressure
 ### Idle, Duty Cycle and Charge Cooling
 - **Idle Behavior Analyzer** — returns to idle (gear changes left out), settle times and idle hangs against the logged Idle Aim, and
   steady idle: rpm against the aim and Idle Mass Flow against its feed forward (e.g. idle held above the aim while the controller takes
-  air away = feed forward too high)
+  air away = feed forward too high). With the tune (stored or .m1pkg): the idle integral against its limits, the Feed Forward Main cells
+  the idle used with suggested values, the feed forward split into Main and compensations, and the aim against Idle Aim Main
 - **Injector Duty Cycle** — duty cycle per rpm band in seconds and held peaks (not single samples), episodes above the warning level, the
   implied DI injection window (the M1's DI duty cycle is a share of it) and how much of the load range the log covers
 - **Charge Cooling Gain** — finds the aim steps of a closed-loop-off step test, compares the change in lambda with the change in aim, and

@@ -779,7 +779,103 @@ function idlePercentile(values, p) {
  * no post-start idle air. Measured over time, not samples: rpm against the aim, and Idle Mass Flow against its feed forward.
  * Returns { seconds, rpmAboveAim: { p10, p50, p90 }, spread, massFlowMinusFF: { p10, p50, p90 }, coolant, map, ignition, diags }.
  */
-function computeSteadyIdle(data, channels, sampleRate) {
+/** Position on an axis: { i, f } with value = axis[i] + f × (axis[i+1] − axis[i]), clamped to the ends. */
+function idleAxisPos(axis, v) {
+    if (axis.length < 2 || v <= axis[0]) return { i: 0, f: 0 };
+    for (var i = 0; i < axis.length - 1; i++) if (v <= axis[i + 1]) return { i: i, f: (v - axis[i]) / (axis[i + 1] - axis[i]) };
+    return { i: axis.length - 2, f: 1 };
+}
+
+/** Bilinear value of table.values[y][x] at (x on table[xKey], y on table[yKey]), plus the corner weights. */
+function idleTableAt(table, xKey, x, yKey, y) {
+    var px = idleAxisPos(table[xKey], x), py = yKey ? idleAxisPos(table[yKey], y) : { i: 0, f: 0 };
+    var rows = table.values, value = 0, corners = [];
+    [[0, 0], [1, 0], [0, 1], [1, 1]].forEach(function (c) {
+        var w = (c[0] ? px.f : 1 - px.f) * (c[1] ? py.f : 1 - py.f), yi = Math.min(rows.length - 1, py.i + c[1]), xi = Math.min(rows[0].length - 1, px.i + c[0]);
+        if (w <= 0) return;
+        value += w * rows[yi][xi];
+        corners.push({ x: xi, y: yi, w: w });
+    });
+    return { value: value, corners: corners };
+}
+
+/**
+ * With the tune: the idle controller's integral (Idle Mass Flow − feed forward − pGain × (aim − rpm)) against its limits, the
+ * Feed Forward Main cells the steady idle used (and how much of the logged feed forward comes from compensations), and the
+ * logged Idle Aim against Idle Aim Main. Adds to out and returns diagnostics.
+ */
+function idleTuneChecks(rows, c, tune, out, sampleRate) {
+    var diags = [];
+    function stats(v) {
+        v = v.filter(function (n) { return !isNaN(n); });
+        return v.length ? { p10: idlePercentile(v, 0.1), p50: idlePercentile(v, 0.5), p90: idlePercentile(v, 0.9) } : null;
+    }
+    var haveFlow = c.idle_mass_flow !== -1 && c.idle_mass_flow_ff !== -1;
+    if (haveFlow && tune.pGain !== null) {
+        var integral = rows.map(function (x) { return (x[c.idle_mass_flow] - x[c.idle_mass_flow_ff]) - tune.pGain * (x[c.idle_aim] - x[c.rpm]); });
+        out.integral = stats(integral);
+        var near = function (lim) { return lim === null ? 0 : integral.filter(function (v) { return Math.abs(v - lim) <= 0.2; }).length / integral.length; };
+        out.integralAtMin = near(tune.integralMin);
+        out.integralAtMax = near(tune.integralMax);
+    }
+    if (tune.feedForward && haveFlow) {
+        var ff = tune.feedForward, cells = {}, main = [];
+        rows.forEach(function (x) {
+            var at = idleTableAt(ff, 'aim', x[c.idle_aim], ff.coolantAxis && c.coolant_temp !== -1 ? 'coolant' : null, x[c.coolant_temp]);
+            main.push(at.value);
+            at.corners.forEach(function (k) { var key = k.y + ',' + k.x; cells[key] = (cells[key] || 0) + k.w; });
+        });
+        out.ffMain = stats(main);
+        out.ffCompensation = stats(rows.map(function (x, i) { return x[c.idle_mass_flow_ff] - main[i]; }));
+        var change = out.massFlowMinusFF ? out.massFlowMinusFF.p50 : 0;
+        out.ffCells = Object.keys(cells).map(function (k) {
+            var yx = k.split(',').map(Number), value = ff.values[yx[0]][yx[1]];
+            return { aim: ff.aim[yx[1]], coolant: ff.coolantAxis ? ff.coolant[yx[0]] : null, value: value, share: cells[k] / rows.length,
+                     suggested: Math.round((value + change) * 10) / 10 };
+        }).filter(function (k) { return k.share >= 0.1; }).sort(function (a, b) { return b.share - a.share; });
+    }
+    if (tune.aimMain && c.coolant_temp !== -1) {
+        var am = tune.aimMain;
+        out.aimVsTable = stats(rows.map(function (x) { return x[c.idle_aim] - idleTableAt({ coolant: am.coolant, values: [am.values] }, 'coolant', x[c.coolant_temp]).value; }));
+    }
+
+    var a = out.rpmAboveAim, name = tune.tuneName ? ' in ' + tune.tuneName : '';
+    if (out.integral && tune.integralMin !== null && out.integralAtMin >= 0.5 && a.p50 > 0) {
+        var cellText = out.ffCells && out.ffCells.length ? ' The steady idle used these Feed Forward Main cells: ' + out.ffCells.map(function (k) {
+            return Math.round(k.aim) + ' rpm aim' + (k.coolant !== null ? ' / ' + k.coolant + ' °C' : '') + ' = ' + k.value.toFixed(1) + ' % (' +
+                Math.round(k.share * 100) + ' % of the time) → about ' + k.suggested.toFixed(1) + ' %';
+        }).join('; ') + '.' : '';
+        var comp = out.ffCompensation && out.ffCompensation.p50 > 0.5 ? ' Of the ' + (out.ffMain.p50 + out.ffCompensation.p50).toFixed(1) + ' % feed forward in the log, ' +
+            out.ffMain.p50.toFixed(1) + ' % is Feed Forward Main and ' + out.ffCompensation.p50.toFixed(1) + ' % comes from compensations (coolant fan, A/C and ' +
+            'similar Idle Mass Flow Feed Forward tables) — if one of those is what is too high, lower that instead.' : '';
+        diags.push({ severity: 'warning', covers: true, text: 'The idle integral is at its minimum of ' + tune.integralMin + ' %' + name + ' for ' +
+            Math.round(out.integralAtMin * 100) + ' % of the steady idle time: the controller has taken away all the air it is allowed to, and idle still sits ' +
+            a.p50.toFixed(0) + ' rpm above the aim. The feed forward is about ' + Math.abs(out.massFlowMinusFF.p50).toFixed(1) + ' % too high here (at least — ' +
+            'with the integral free it may take more). Lower Feed Forward Main at these conditions, or allow a lower Integral Minimum.' + cellText + comp });
+    } else if (out.integral && tune.integralMax !== null && out.integralAtMax >= 0.5 && a.p50 < 0) {
+        diags.push({ severity: 'warning', covers: true, text: 'The idle integral is at its maximum of ' + tune.integralMax + ' %' + name + ' for ' +
+            Math.round(out.integralAtMax * 100) + ' % of the steady idle time and idle still sits ' + (-a.p50).toFixed(0) + ' rpm below the aim: raise Feed Forward ' +
+            'Main at these conditions, or allow a higher Integral Maximum.' });
+    } else if (out.integral && Math.abs(a.p50) > 30) {
+        diags.push({ severity: 'warning', covers: true, text: 'Idle sits ' + Math.abs(a.p50).toFixed(0) + ' rpm ' + (a.p50 > 0 ? 'above' : 'below') +
+            ' the aim, but the idle integral is not at its limits (median ' + out.integral.p50.toFixed(1) + ' %, 10–90 %: ' + out.integral.p10.toFixed(1) +
+            ' to ' + out.integral.p90.toFixed(1) + ' %; limits ' + tune.integralMin + ' to ' + tune.integralMax + ' %' + name + '), so the controller still ' +
+            'has room. Look at what changes during the idle in the log — the aim, coolant fan or A/C switching (they change the feed forward), ' +
+            'or ignition timing — before changing the feed forward.' + (out.ffCompensation && out.ffCompensation.p90 - out.ffCompensation.p10 > 1
+                ? ' The feed forward compensations moved by ' + (out.ffCompensation.p90 - out.ffCompensation.p10).toFixed(1) + ' % during it.' : '') });
+    } else if (out.integral) {
+        diags.push({ severity: 'info', text: 'With the tune' + name + ': the idle integral sits at ' + out.integral.p50.toFixed(1) + ' % (10–90 %: ' +
+            out.integral.p10.toFixed(1) + ' to ' + out.integral.p90.toFixed(1) + ' %), inside its limits (' + tune.integralMin + ' to ' + tune.integralMax + ' %).' });
+    }
+    if (out.aimVsTable && Math.abs(out.aimVsTable.p50) > 20) {
+        diags.push({ severity: 'info', text: 'The logged Idle Aim is ' + Math.abs(out.aimVsTable.p50).toFixed(0) + ' rpm ' + (out.aimVsTable.p50 > 0 ? 'above' : 'below') +
+            ' this tune\'s Idle Aim Main at the logged coolant temperature' + (out.aimVsTable.p50 > 0 ? ' — compensations (A/C, post start, a driver switch) raise it, or' : ' —') +
+            ' the log was recorded with a different tune.' });
+    }
+    return diags;
+}
+
+function computeSteadyIdle(data, channels, sampleRate, tune) {
     var c = channels, after = Math.round(sampleRate * IDLE_STEADY_AFTER), run = 0, rows = [];
     for (var i = 0; i < data.length; i++) {
         var x = data[i], ok = x[c.rpm] > 400 && x[c.tps] <= IDLE_PEDAL_OFF && x[c.idle_aim] > 0 &&
@@ -806,9 +902,13 @@ function computeSteadyIdle(data, channels, sampleRate) {
     if (c.map !== -1) out.map = stats(function (x) { return x[c.map]; });
     if (c.spark_timing !== -1) out.ignition = stats(function (x) { return x[c.spark_timing]; });
 
+    var tuneDiags = tune ? idleTuneChecks(rows, c, tune, out, sampleRate) : [];
+    var covered = tuneDiags.some(function (d) { return d.covers; });
     var a = out.rpmAboveAim, m = out.massFlowMinusFF, secs = out.seconds.toFixed(0) + ' s of steady idle';
     var where = out.coolant ? ' (coolant ' + out.coolant.p50.toFixed(0) + ' °C)' : '';
-    if (a.p50 > 30 && m && m.p50 < -1) {
+    if (covered) {
+        // the tune-based message says it more precisely
+    } else if (a.p50 > 30 && m && m.p50 < -1) {
         out.diags.push({ severity: 'warning', text: 'Idle sits ' + a.p50.toFixed(0) + ' rpm above the aim (10–90 %: ' + a.p10.toFixed(0) + ' to ' +
             a.p90.toFixed(0) + ' rpm) while the controller takes ' + (-m.p50).toFixed(1) + ' % of air away from the feed forward' + where + ', over ' + secs +
             '. The feed forward gives more air than this idle needs and the controller isn\'t taking enough away; if it keeps taking ' +
@@ -826,6 +926,7 @@ function computeSteadyIdle(data, channels, sampleRate) {
         out.diags.push({ severity: 'info', text: 'Idle is ' + (a.p50 > 0 ? 'above' : 'below') + ' the aim by a median of ' + Math.abs(a.p50).toFixed(0) +
             ' rpm over ' + secs + where + '.' + (m ? ' Idle Mass Flow is ' + (m.p50 >= 0 ? '+' : '') + m.p50.toFixed(1) + ' % from the feed forward.' : '') });
     }
+    out.diags = tuneDiags.map(function (d) { return { severity: d.severity, text: d.text }; }).concat(out.diags);
     if (out.spread > 100) {
         out.diags.push({ severity: 'warning', text: 'Idle rpm moves over ' + out.spread.toFixed(0) + ' rpm (10–90 %) at steady idle — look for hunting ' +
             '(idle gains), misfire or a sticking throttle.' });
@@ -837,7 +938,7 @@ function computeSteadyIdle(data, channels, sampleRate) {
 // Main Analysis Pipeline
 // ---------------------------------------------------------------------------
 
-function runAnalysis(columnNames, data, sampleRate) {
+function runAnalysis(columnNames, data, sampleRate, tune) {
     // Step 1: Resolve channels
     self.postMessage({ type: 'progress', phase: 'Resolving channels...', percent: 10 });
     var resolution = resolveChannels(columnNames);
@@ -878,7 +979,7 @@ function runAnalysis(columnNames, data, sampleRate) {
 
     // Step 5: Steady idle (rpm against aim, airflow against feed forward)
     self.postMessage({ type: 'progress', phase: 'Analyzing steady idle...', percent: 85 });
-    analysis.steadyIdle = computeSteadyIdle(data, channels, sampleRate);
+    analysis.steadyIdle = computeSteadyIdle(data, channels, sampleRate, tune || null);
     analysis.skippedEvents = events.skipped || 0;
 
     // Step 6: Build chart data
@@ -943,7 +1044,7 @@ self.onmessage = function(event) {
                 if (dt > 0) sampleRate = 1.0 / dt;
             }
 
-            runAnalysis(columnNames, data, sampleRate);
+            runAnalysis(columnNames, data, sampleRate, msg.tune);
 
         } else if (msg.type === 'analyze_ld') {
             // Binary .ld input
@@ -955,7 +1056,7 @@ self.onmessage = function(event) {
             });
 
             var sampleRate = result.maxFreq || 1;
-            runAnalysis(result.columnNames, result.data, sampleRate);
+            runAnalysis(result.columnNames, result.data, sampleRate, msg.tune);
         }
     } catch (err) {
         self.postMessage({ type: 'error', message: err.message || 'Unknown error during analysis.' });
