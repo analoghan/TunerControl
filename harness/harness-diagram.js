@@ -107,11 +107,11 @@ function hdFind(model, id) {
         model.splices.filter(function (s) { return s.id === id; })[0] || null;
 }
 
-/** Rows of a block as wire ends: [{ cavity, text, wire, remote, endpoint }]. */
+/** Rows of a block as wire ends: [{ cavity, text, wire, remote, endpoint, pin }]. */
 function hdRows(block) {
     if (block.pins) {
         return block.pins.map(function (p) {
-            return { cavity: p.cavity, text: p.function, wire: p.wire, remote: p.remote, endpoint: block.id + '.' + p.cavity };
+            return { cavity: p.cavity, text: p.function, wire: p.wire, remote: p.remote, endpoint: block.id + '.' + p.cavity, pin: p };
         });
     }
     return block.wires.map(function (w) {
@@ -154,49 +154,72 @@ function harnessBlockDiagram(model, id, opts) {
         links.push({ from: i, group: g, entry: entry, wire: r.wire, title: r.endpoint + ' → ' + harnessText(r.remote) });
     });
 
-    // Lay out column 1 and, for splices reached, column 2 with their other ends.
-    var y1 = 20, y2 = 20, far = [];
+    // Splices reached: their wire ends. A wire from the focus goes to the end that leads back to it; the other ends lead on
+    // to column 2.
+    var far = [];
+    function backTo(res, row) {
+        if (isSplice) return res.kind === 'splice' && res.splice === focus;
+        return res.kind === 'pin' && res.connector === focus && res.pin === row.pin;   // "M142.A.26" matches cavity "26.0"
+    }
     groups.forEach(function (g) {
-        var box;
-        if (g.kind === 'connector') {
-            box = hdBox(x1, y1, w1, g.block.id, g.block.connector || g.block.title, g.entries, '', g.block.id);
-        } else if (g.kind === 'splice') {
-            // Splice rows: its wire ends. Ends that lead back to the focus block are drawn from the focus side.
-            var ends = g.block.wires.map(function (w) {
-                return { cavity: '•', text: w.end + (w.function ? ' — ' + w.function : ''), extra: hdWireStyle(w.wire).label,
-                         endpoint: g.block.id, raw: w };
-            });
-            box = hdBox(x1, y1, w1, g.block.id, 'Splice' + (g.block.type ? ' · ' + g.block.type : ''), ends, 'splice', g.block.id);
-            ends.forEach(function (e, k) {
-                var res = harnessResolve(index, e.raw.end);
-                var back = (res.kind === 'pin' && res.connector === focus) || (res.kind === 'splice' && res.splice === focus);
-                if (!back && res.kind !== 'none') far.push({ fromY: box.y(k), res: res, wire: e.raw.wire, title: g.block.id + ' → ' + e.raw.end });
-            });
-        } else {
-            box = hdBox(x1, y1, w1, g.text, 'Not in this harness', [], 'missing', null);
+        if (g.kind !== 'splice') return;
+        g.ends = g.block.wires.map(function (w) {
+            return { cavity: '•', text: w.end + (w.function ? ' — ' + w.function : ''), extra: hdWireStyle(w.wire).label, endpoint: g.block.id,
+                     res: harnessResolve(index, w.end), raw: w };
+        });
+        g.used = {};
+        g.ends.forEach(function (e, k) {
+            var back = (e.res.kind === 'pin' && e.res.connector === focus) || (e.res.kind === 'splice' && e.res.splice === focus);
+            if (!back && e.res.kind !== 'none') far.push({ group: g, end: k, res: e.res, wire: e.raw.wire, title: g.block.id + ' → ' + e.raw.end });
+        });
+    });
+    links.forEach(function (l) {
+        if (l.group.kind !== 'splice') return;
+        var ends = l.group.ends, k;
+        for (k = 0; k < ends.length; k++) if (!l.group.used[k] && backTo(ends[k].res, rows[l.from])) break;
+        if (k < ends.length) { l.group.used[k] = true; l.entry = k; } else l.entry = null;   // no matching end: the header
+    });
+
+    // Column 2: far ends of the splices, grouped per block. A connector the focus also reaches directly is drawn only here,
+    // with its direct wires running across to it.
+    var farGroups = [], farBy = {};
+    function farKey(res) { return res.kind === 'pin' ? 'c:' + res.connector.id : res.kind === 'splice' ? 's:' + res.splice.id : 'x:' + res.text; }
+    function farEntry(g, res) {
+        var ek = res.kind === 'pin' ? String(res.cavity).toLowerCase() : '';
+        if (g.map[ek] === undefined) {
+            g.map[ek] = g.entries.push(res.kind === 'pin'
+                ? { cavity: res.cavity, text: res.pin ? res.pin.function : '(no such cavity)', endpoint: res.connector.id + '.' + res.cavity }
+                : { cavity: '', text: '' }) - 1;
         }
+        return g.map[ek];
+    }
+    far.forEach(function (f) {
+        var key = farKey(f.res);
+        var g = farBy[key] || (farBy[key] = farGroups[farGroups.push({ res: f.res, entries: [], map: {}, links: [], direct: [] }) - 1]);
+        g.links.push({ from: f, entry: farEntry(g, f.res), wire: f.wire, title: f.title });
+    });
+    links.forEach(function (l) {
+        var g = l.group.kind === 'connector' ? farBy['c:' + l.group.block.id] : null;
+        if (!g) return;
+        l.group.moved = true;
+        var res = harnessResolve(index, rows[l.from].remote);
+        g.direct.push({ from: l.from, entry: farEntry(g, res), wire: l.wire, title: l.title });
+    });
+
+    // Lay out column 1, then column 2.
+    var y1 = 20, y2 = 20;
+    groups.forEach(function (g) {
+        if (g.moved) return;
+        var box;
+        if (g.kind === 'connector') box = hdBox(x1, y1, w1, g.block.id, g.block.connector || g.block.title, g.entries, '', g.block.id);
+        else if (g.kind === 'splice') box = hdBox(x1, y1, w1, g.block.id, 'Splice' + (g.block.type ? ' · ' + g.block.type : ''), g.ends, 'splice', g.block.id);
+        else box = hdBox(x1, y1, w1, g.text, 'Not in this harness', [], 'missing', null);
         box.top = y1;
         g.box = box;
         body += box.svg;
         y1 += box.height + HD_GAP;
     });
-
-    // Column 2: far ends of the splices, grouped per block.
-    var farGroups = [], farBy = {};
-    far.forEach(function (f) {
-        var key, g;
-        if (f.res.kind === 'pin') key = 'c:' + f.res.connector.id;
-        else if (f.res.kind === 'splice') key = 's:' + f.res.splice.id;
-        else key = 'x:' + f.res.text;
-        g = farBy[key] || (farBy[key] = farGroups[farGroups.push({ res: f.res, entries: [], map: {}, links: [] }) - 1]);
-        var ek = f.res.kind === 'pin' ? f.res.cavity : '';
-        if (g.map[ek] === undefined) {
-            g.map[ek] = g.entries.push(f.res.kind === 'pin'
-                ? { cavity: f.res.cavity, text: f.res.pin ? f.res.pin.function : '(no such cavity)', endpoint: f.res.connector.id + '.' + f.res.cavity }
-                : { cavity: '', text: '' }) - 1;
-        }
-        g.links.push({ fromY: f.fromY, entry: g.map[ek], wire: f.wire, title: f.title });
-    });
+    var direct = [];
     farGroups.forEach(function (g) {
         var box, r = g.res;
         if (r.kind === 'pin') box = hdBox(x2, y2, w2, r.connector.id, r.connector.connector || r.connector.title, g.entries, '', r.connector.id);
@@ -205,8 +228,9 @@ function harnessBlockDiagram(model, id, opts) {
         var top = y2;
         g.links.forEach(function (l) {
             var ty = r.kind === 'pin' ? box.y(l.entry) : top + 15;
-            wires += hdWirePath(x1 + w1, l.fromY, x2, ty, hdWireStyle(l.wire), l.title + ' · ' + (l.wire || ''));
+            wires += hdWirePath(x1 + w1, l.from.group.box.y(l.from.end), x2, ty, hdWireStyle(l.wire), l.title + ' · ' + (l.wire || ''));
         });
+        g.direct.forEach(function (d) { direct.push({ from: d.from, y: box.y(d.entry), wire: d.wire, title: d.title }); });
         body += box.svg;
         y2 += box.height + HD_GAP;
     });
@@ -217,8 +241,14 @@ function harnessBlockDiagram(model, id, opts) {
         : [focus.connector, focus.title !== focus.id ? focus.title : ''].filter(Boolean).join(' · '), focusRows,
         'focus' + (isSplice ? ' splice' : ''), null);
     links.forEach(function (l) {
-        var g = l.group, ty = g.kind === 'connector' ? g.box.y(l.entry) : g.box.top + 15;   // splices/missing: header
+        var g = l.group;
+        if (g.moved) return;
+        var ty = g.kind === 'missing' || l.entry === null ? g.box.top + 15 : g.box.y(l.entry);   // nothing to match: the header
         wires += hdWirePath(x0 + w0, fbox.y(l.from), x1, ty, hdWireStyle(l.wire), l.title + ' · ' + (l.wire || ''));
+    });
+    // Straight to column 2, behind the column 1 boxes.
+    direct.forEach(function (d) {
+        wires += hdWirePath(x0 + w0, fbox.y(d.from), x2, d.y, hdWireStyle(d.wire), d.title + ' · ' + (d.wire || ''));
     });
     // Unterminated / Eyelet / Battery / Device: a short wire ending in a symbol (cap, ring terminal, battery cell, box), connected at this end only.
     stubs.forEach(function (s) {

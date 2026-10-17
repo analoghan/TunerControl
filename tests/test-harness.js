@@ -61,6 +61,12 @@ function hxFind(issues, where, text) {
 }
 
 describe('XLSX — readXlsx / writeXlsx', function () {
+  it('reads number cells as Excel shows them', function () {
+    var xml = '<row r="1"><c r="A1"><v>26.0</v></c><c r="B1" t="n"><v>0.30000000000000004</v></c><c r="C1" t="s"><v>0</v></c>' +
+      '<c r="D1"><v>-2.5</v></c><c r="E1"><v>1.0E-3</v></c></row>';
+    assert.deepEqual(xlsxSheetRows(xml, ['26.0']), [['26', '0.3', '26.0', '-2.5', '0.001']], 'text cells are left alone');
+  });
+
   it('round-trips text, empty cells, special characters and multiple sheets', function () {
     var sheets = [
       { name: 'A & <B>', rows: [['x', '', 'y & z'], [], ['', 'ü日本', '"quoted"']], bold: [0], widths: [10, 20] },
@@ -157,6 +163,8 @@ describe('Harness — workbook import and export', function () {
     assert.equal(m.connectors[0].columns[4], 'ECU Function');
     assert.equal(m.connectors[0].pins[0].status, undefined);
     assert.deepEqual(harnessPinColumns(m.connectors[0], harnessPinFields(m.connectors[0])).slice(4), ['ECU Function', 'MoTeC Function', 'Remote Connection']);
+    var odd = { columns: HX_PIN_COLUMNS.slice(0, 6).concat(['PDM Data (if relevant)']) };
+    assert.equal(harnessPinColumns(odd, HARNESS_PIN_FIELDS)[6], 'Remote Connection', 'the remote column keeps its name whatever the sheet calls it');
     // A block with Status then Chassis Function after Remote Connection.
     wb.sheets[1].rows = hxRows([{ title: 'BULK', header: [['CONNECTOR', 'DT']],
       columns: HX_PIN_COLUMNS.concat(['Chassis Function']),
@@ -472,6 +480,23 @@ describe('Harness — wiring diagrams', function () {
     assert.ok(edge, 'M142.C ↔ SPL.5V bundle');
     assert.equal(edge[1], '1');
     assert.ok(d.svg.indexOf('data-node="SPL.5V2"') >= 0);
+  });
+
+  it('ends a wire into a splice at its own row, and draws a connector reached two ways once', function () {
+    // A.1 → splice S (whose second end is A.1, written without the ".0"), A.2 → B.1, and S on to B.2.
+    function pin(cav, remote) { return { cavity: cav, terminal: '', wirePn: '', wire: '22 AWG Red', function: 'f' + cav, note: '', remote: remote }; }
+    var mm = { name: 't', sheets: [], splices: [{ id: 'S', sheet: '', type: '', wires: [{ end: 'B.2', wirePn: '', wire: '22 AWG Red', function: '' },
+        { end: 'A.1', wirePn: '', wire: '22 AWG Red', function: '' }] }],
+      connectors: [{ id: 'A', title: '', sheet: '', pins: [pin('1.0', 'S'), pin('2', 'B.1')] },
+                   { id: 'B', title: '', sheet: '', pins: [pin('1', 'A.2'), pin('2', 'S')] }] };
+    harnessUpgrade(mm);
+    var svg = harnessBlockDiagram(mm, 'A').svg;
+    assert.equal((svg.match(/<g class="block [^"]*" data-node="B"/g) || []).length, 1, 'B drawn once');
+    // S is the first box in column 1 (y 20): its second row is centred at 20 + 34 + 20 + 10.
+    var into = svg.match(/<title>A\.1 → S[^<]*<\/title><path d="[^"]* (\d+),(\d+)"/);
+    assert.ok(into, 'the wire into S');
+    assert.deepEqual([into[1], into[2]], ['560', '84'], 'ends at the S row that leads back to A.1, not its header');
+    assert.ok(/<title>A\.2 → B\.1[^<]*<\/title><path d="[^"]* 1000,/.test(svg), 'A.2 runs straight to B in column 2');
   });
 
   it('explains a missing block', function () {

@@ -132,7 +132,7 @@ function joinImportedToSystem(parts) {
     return Promise.all([hsListSystems(), hsList()]).then(function (r) {
         var systems = r[0], others = r[1].filter(function (h) { return newIds.indexOf(h.id) < 0; });
         return Promise.all(others.map(function (h) {
-            return hsLoad(h.id).then(function (x) { return { id: x.id, name: x.name, model: x.data }; }, function () { return null; });
+            return hsLoad(h.id).then(function (x) { return { id: x.id, name: x.name, model: harnessUpgrade(x.data) }; }, function () { return null; });
         })).then(function (loaded) {
             var partners = [];
             loaded.filter(Boolean).forEach(function (o) {
@@ -988,7 +988,7 @@ function loadSystemContext() {
         state.system = state.id ? list.filter(function (s) { return s.harnesses.indexOf(state.id) >= 0; })[0] || null : null;
         var others = state.system ? state.system.harnesses.filter(function (id) { return id !== state.id; }) : [];
         return Promise.all(others.map(function (id) {
-            return hsLoad(id).then(function (h) { return { id: h.id, name: h.name, model: h.data, revision: h.revision }; },
+            return hsLoad(id).then(function (h) { return { id: h.id, name: h.name, model: harnessUpgrade(h.data), revision: h.revision }; },
                 function () { return null; });
         }));
     }).then(function (members) {

@@ -85,13 +85,23 @@ function harnessUpgrade(model) {
         if (model.chassisFunction) model.connectors.forEach(function (c) { c.chassisFunction = true; });
         delete model.chassisFunction;
     }
+    // Cavities imported before number cells were read as Excel shows them: "26.0" → "26" (connections say M142.A.26).
+    if (model) {
+        model.connectors.forEach(function (c) {
+            c.pins.forEach(function (p) { if (/^\d+\.0+$/.test(p.cavity)) p.cavity = p.cavity.replace(/\.0+$/, ''); });
+        });
+    }
     return model;
 }
 
-/** Headings for a connector's pin fields: its own spreadsheet headings, except ECU Function and Chassis Function. */
+/**
+ * Headings for a connector's pin fields: its own spreadsheet headings, except ECU Function, Remote Connection and Chassis Function
+ * (the remote column is read by position, so a sheet's own heading there — e.g. "PDM Data (if relevant)" — is not what it holds).
+ */
 function harnessPinColumns(block, fields) {
     return fields.map(function (f, k) {
         if (f === 'function') return 'ECU Function';
+        if (f === 'remote') return 'Remote Connection';
         if (f === 'chassis') return HARNESS_CHASSIS_COLUMN;
         return (block && block.columns && block.columns[k]) || HARNESS_PIN_COLUMNS[k] || f;
     });
