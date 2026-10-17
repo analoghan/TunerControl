@@ -222,8 +222,12 @@ describe('Harness — connection checks', function () {
     wire.end = 'CHASSIS';
   });
 
-  it('accepts Eyelet and Battery ends, with a note or polarity', function () {
+  it('accepts Eyelet, Battery and Device ends, with a note or polarity', function () {
     var idx = harnessIndex(m);
+    var dv = harnessResolve(idx, 'Device (fuel pump)');
+    assert.equal(dv.terminal, 'Device'); assert.equal(dv.note, 'fuel pump');
+    assert.equal(harnessResolve(idx, 'Horn (Device)').note, 'Horn');
+    assert.equal(harnessResolve(idx, 'device').label, 'Device');
     var e = harnessResolve(idx, 'Eyelet (engine block ground)');
     assert.equal(e.kind, 'none'); assert.equal(e.terminal, 'Eyelet'); assert.equal(e.note, 'engine block ground');
     e = harnessResolve(idx, 'Chassis Ground (Eyelet)');
@@ -392,10 +396,14 @@ describe('Harness — wiring diagrams', function () {
     assert.equal((d.svg.match(/class="wire"/g) || []).length, 6, 'C14, C15, C16, C9, then the splice on to MAP.1 and SPL.5V2');
   });
 
-  it('draws Unterminated, Eyelet and Battery wires as stubs with their symbol', function () {
+  it('draws Unterminated, Eyelet, Battery and Device wires as stubs with their symbol', function () {
     m.connectors[0].pins[2].remote = 'Unterminated';
     m.connectors[0].pins[1].remote = 'Eyelet (block)';
     m.connectors[0].pins[0].remote = 'Battery -';
+    m.connectors[1].pins[0].remote = 'Device (sensor)';
+    var dd = harnessBlockDiagram(m, 'M142.D');
+    m.connectors[1].pins[0].remote = 'IAT.1';
+    assert.ok(dd.svg.indexOf('class="terminal device"') >= 0 && dd.svg.indexOf('>Device<') >= 0);
     var d = harnessBlockDiagram(m, 'M142.C');
     m.connectors[0].pins[2].remote = 'SPARE.1';
     m.connectors[0].pins[1].remote = 'MAP.2';

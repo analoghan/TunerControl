@@ -38,10 +38,11 @@ var HARNESS_NO_REMOTE = /^(|n\/a|na|none|empty|-|unused|not used|open)$/i;
  *   Unterminated — connected at this end only, on purpose (e.g. a shield drain grounded at one end)
  *   Eyelet       — a ring terminal on a stud or bolt: "Eyelet (chassis ground)", "Chassis Ground (Eyelet)"
  *   Battery      — the battery post; "+" / "-" (or pos/neg) gives the side: "Battery +", "Battery (-)"
+ *   Device       — wired straight into a device with no connector of its own here: "Device (fuel pump)", "Horn (Device)"
  */
-var HARNESS_TERMINALS = { unterminated: 'Unterminated', eyelet: 'Eyelet', battery: 'Battery' };
-var HARNESS_TERMINAL = /^(unterminated|eyelet|battery)\s*(\+|-|pos(?:itive)?|neg(?:ative)?)?\s*(?:\((.*)\))?$/i;
-var HARNESS_TERMINAL_AFTER = /^(.+?)\s*\((unterminated|eyelet|battery)\s*(\+|-|pos(?:itive)?|neg(?:ative)?)?\)$/i;
+var HARNESS_TERMINALS = { unterminated: 'Unterminated', eyelet: 'Eyelet', battery: 'Battery', device: 'Device' };
+var HARNESS_TERMINAL = /^(unterminated|eyelet|battery|device)\s*(\+|-|pos(?:itive)?|neg(?:ative)?)?\s*(?:\((.*)\))?$/i;
+var HARNESS_TERMINAL_AFTER = /^(.+?)\s*\((unterminated|eyelet|battery|device)\s*(\+|-|pos(?:itive)?|neg(?:ative)?)?\)$/i;
 
 /** { terminal, polarity, note, label } for a HARNESS_TERMINAL value, else null. */
 function harnessTerminal(t) {
@@ -361,7 +362,7 @@ function harnessCheck(model) {
             if (r.kind === 'none') {
                 if (harnessHasWire(p)) {
                     add('warning', here, 'Has a wire (' + (p.wire || p.wirePn) + ') but no remote connection. If it is connected at this end ' +
-                        'only on purpose, write Unterminated (Eyelet or Battery for a ring terminal or the battery).');
+                        'only on purpose, write Unterminated (or Eyelet, Battery, Device for a ring terminal, the battery, a device).');
                 }
                 return;
             }

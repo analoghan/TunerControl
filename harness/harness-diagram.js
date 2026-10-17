@@ -133,7 +133,7 @@ function harnessBlockDiagram(model, id, opts) {
         if (!byKey[key]) { byKey[key] = make(); byKey[key].order = groups.length; groups.push(byKey[key]); }
         return byKey[key];
     }
-    var links = [], stubs = [];   // links: { from: row index, group, entry }; stubs: Unterminated / Eyelet / Battery rows
+    var links = [], stubs = [];   // links: { from: row index, group, entry }; stubs: Unterminated / Eyelet / Battery / Device rows
     rows.forEach(function (r, i) {
         var res = harnessResolve(index, r.remote);
         if (res.terminal) stubs.push({ from: i, wire: r.wire, end: res, title: r.endpoint + ' → ' + harnessText(r.remote) });
@@ -220,7 +220,7 @@ function harnessBlockDiagram(model, id, opts) {
         var g = l.group, ty = g.kind === 'connector' ? g.box.y(l.entry) : g.box.top + 15;   // splices/missing: header
         wires += hdWirePath(x0 + w0, fbox.y(l.from), x1, ty, hdWireStyle(l.wire), l.title + ' · ' + (l.wire || ''));
     });
-    // Unterminated / Eyelet / Battery: a short wire ending in a symbol (cap, ring terminal, battery cell), connected at this end only.
+    // Unterminated / Eyelet / Battery / Device: a short wire ending in a symbol (cap, ring terminal, battery cell, box), connected at this end only.
     stubs.forEach(function (s) {
         var y = fbox.y(s.from), xs = x0 + w0, xe = xs + 46, sym, xl;
         if (s.end.terminal === 'Eyelet') {
@@ -230,6 +230,9 @@ function harnessBlockDiagram(model, id, opts) {
             sym = '<line x1="' + xe + '" y1="' + (y - 8) + '" x2="' + xe + '" y2="' + (y + 8) + '" stroke="#555" stroke-width="1.5"/>' +
                 '<line x1="' + (xe + 5) + '" y1="' + (y - 4) + '" x2="' + (xe + 5) + '" y2="' + (y + 4) + '" stroke="#555" stroke-width="3"/>';
             xl = xe + 9;
+        } else if (s.end.terminal === 'Device') {
+            sym = '<rect x="' + xe + '" y="' + (y - 6) + '" width="12" height="12" rx="1.5" fill="#fff" stroke="#555" stroke-width="2"/>';
+            xl = xe + 15;
         } else {
             sym = '<line x1="' + xe + '" y1="' + (y - 7) + '" x2="' + xe + '" y2="' + (y + 7) + '" stroke="#555" stroke-width="2.5"/>';
             xl = xe + 3;
