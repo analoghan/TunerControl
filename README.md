@@ -123,6 +123,10 @@ Design and check wiring harnesses built around the M1 ECU.
 - **Cut list & BOM:** one row per wire (both ends, terminals, wire part number and description, function, ends that disagree), and a
   bill of materials — connectors, boots, splices, terminals, cavity plugs, eyelets and wire per part number; optional wire lengths with
   totals per wire type; CSV downloads and PDF sections
+- **Pinout sheets:** a printed page per connector (pictures, parts, and per cavity the function, wire with a colour swatch, part number,
+  terminal and where it goes, both ways and through splices) plus a splice page; from the connector editor or Export PDF
+- **Revision compare:** any two revisions, or a revision against what's open: connectors and splices added, removed or renamed,
+  cavities added, removed, changed or rewired, header and picture changes and wire lengths; links into the editor and a PDF section
 - Every save is a revision (server or browser storage), and single revisions can be deleted; export back to `.xlsx` in the same layout, styled (title bar, shaded headings, alternating rows), pictures included and scaled to at most 320 × 240 px
 
 ### Backup & Restore

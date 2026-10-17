@@ -52,6 +52,8 @@
       <li><a href="#systems">Systems: harnesses that plug together</a></li>
       <li><a href="#can">CAN networks</a></li>
       <li><a href="#build">Cut list &amp; BOM</a></li>
+      <li><a href="#pinouts">Pinout sheets</a></li>
+      <li><a href="#revisions">Comparing revisions</a></li>
       <li><a href="#tune">Tune comparison</a></li>
       <li><a href="#workflow">Suggested workflow</a></li>
       <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -137,7 +139,8 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
         printer. Pick what goes in: the overview and system diagrams, the checks, each connector's and splice's table (with any problems
         beside the row), a wiring diagram per connector or splice, their pictures, and the tune comparison (all pins; choose a tune on that
         tab first). Diagrams stay sharp (vector) and are scaled to fit a page; <em>Landscape</em> prints wide ones larger. Unsaved changes
-        are included and noted on the first page.</li>
+        are included and noted on the first page. It can also hold <a href="#pinouts">pinout sheets</a> and the
+        <a href="#revisions">changes between two revisions</a>.</li>
     </ul>
 
     <h2 id="editing">Editing connectors and splices</h2>
@@ -277,6 +280,37 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
       changes how they are shown. Lengths are saved with the harness revision, follow a connector rename, and are not written to the .xlsx.</p>
     <p><strong>Download cut list</strong> and <strong>Download BOM</strong> save CSV files (they open in Excel), and Export PDF can include
       both.</p>
+
+    <h2 id="pinouts">Pinout sheets</h2>
+    <p>A pinout sheet is one printed page per connector, for the bench while building and for fault-finding in the car later. Print one
+      connector with <strong>Pinout sheet</strong> in the connector editor, or all of them with <strong>Export PDF</strong> →
+      <em>Pinout sheets</em>, which adds a page listing every splice and the ends it joins.</p>
+    <ul>
+      <li>The top of each sheet names the harness and revision it was printed from, then the connector, boot and mate parts and notes, and
+        the connector's pictures.</li>
+      <li>Each cavity, in the order the connector lists them, shows its function, the note column (e.g. MoTeC Function), the wire with a
+        colour swatch, its part number, the terminal and where it goes.</li>
+      <li><em>Goes to</em> follows the wire both ways, so a cavity with a blank Remote Connection still shows the cavity that points at it.
+        A splice end also lists the other ends the splice joins.</li>
+      <li>Empty cavities are listed greyed out, so you can see which cavities get a plug. A wired cavity with nowhere to go says
+        <em>no other end</em>.</li>
+    </ul>
+
+    <h2 id="revisions">Comparing revisions</h2>
+    <p>The <strong>Revisions</strong> tab compares two saved revisions, or a revision with what's open now, including unsaved changes. By
+      default it compares what's open with the revision before it. When you have unsaved changes, the default is what's open against the
+      revision you opened.</p>
+    <ul>
+      <li>Connectors and splices that were added or removed are listed with their size. One that disappeared under one name and appeared under
+        another, with most of the same cavities, is shown as <em>renamed</em>. Connections that only changed to follow the rename are
+        counted, not listed.</li>
+      <li>For each connector or splice that changed, header changes (part, boot, mate, notes), pictures added or removed, and a row per
+        cavity or splice wire that was added, removed or changed. <em>Rewired</em> marks a changed Remote Connection or splice end.</li>
+      <li>Cavities are matched by name and splice wires by their end, so reordering rows is not a change. Wire lengths that changed are
+        listed too.</li>
+      <li>When the comparison is with what's open, the names link to the row in the editor. <strong>Export PDF</strong> →
+        <em>Revision changes</em> prints the comparison.</li>
+    </ul>
 
     <h2 id="tune">Tune comparison</h2>
     <p>Pick a tune imported in the <a href="../m1-config/index.html">M1 Config Viewer</a>. Every I/O assignment in the tune is turned into its ECU

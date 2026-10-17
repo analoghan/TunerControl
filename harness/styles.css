@@ -181,3 +181,28 @@ tr.issue-row li.issue-warning .issue-text { color: #ffb74d; }
 .build-table td { white-space: nowrap; }
 .build-table tr.build-problem td { background: rgba(255,152,0,0.06); }
 #build h3 { font-size: 0.95rem; color: #fff; margin: 16px 0 6px; }
+
+/* Revisions tab */
+#revisions .compare-row { margin-bottom: 10px; }
+#revisions select { max-width: 420px; }
+.rev-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 0.82rem; }
+.rev-table th, .rev-table td { text-align: left; vertical-align: top; padding: 3px 8px; border-bottom: 1px solid #2a2a2a; }
+.rev-table th { color: #aaa; font-weight: 600; }
+.rev-table td:first-child { white-space: nowrap; font-weight: 600; }
+
+/* Pinout sheets (printed only) */
+@media print {
+  #print-report .pinout-table { font-size: 9pt; }
+  #print-report .pinout-part { white-space: nowrap; }
+  #print-report .pinout-table td:first-child { white-space: nowrap !important; width: 1%; }
+  #print-report .pinout-source { margin-bottom: 2px; }
+  #print-report .pinout-title { font-weight: 600; margin-bottom: 2px; }
+  #print-report .pinout-pics { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; break-inside: avoid; }
+  #print-report .pinout-pics figure { margin: 0; text-align: center; }
+  #print-report .pinout-pics img { max-height: 62mm; max-width: 85mm; }
+  #print-report .pinout-pics figcaption { font-size: 7.5pt; color: #555 !important; }
+  #print-report .pinout-swatch { vertical-align: -1px; }
+}
+#revisions .status-warning { color: #ff9800; }
+@media print { #print-report .pinout-splices tbody { break-inside: avoid; } #print-report .pinout-splices td:nth-child(3) { white-space: nowrap !important; } }
+@media print { #print-report .pinout-splices th:nth-child(1) { width: 20%; } #print-report .pinout-splices th:nth-child(4) { width: 30%; } }

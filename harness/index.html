@@ -69,6 +69,7 @@
         <button class="tab" role="tab" aria-selected="false" data-tab="can">CAN networks <span class="count" id="count-can"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="checks">Checks <span class="count" id="count-checks"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="build">Cut list &amp; BOM</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="revisions">Revisions</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="tune">Tune comparison</button>
       </div>
 
@@ -131,6 +132,13 @@
           Wire lengths are optional: leave them blank, or fill in the ones you know; totals use only the lengths that are entered. Lengths are saved
           with the harness (not in the .xlsx).</p>
         <div id="build"></div>
+      </div>
+
+      <div id="panel-revisions" class="panel" role="tabpanel" hidden>
+        <h2>Revisions</h2>
+        <p class="panel-desc">Every save is a revision. Compare two of them, or a revision with what's open now, to see connectors and splices
+          added, removed or renamed, cavities rewired, and wire, terminal and part changes. Cavities are matched by name, splice wires by their end.</p>
+        <div id="revisions"></div>
       </div>
 
       <div id="panel-tune" class="panel" role="tabpanel" hidden>
@@ -213,6 +221,8 @@
   <script src="harness-system.js"></script>
   <script src="harness-can.js"></script>
   <script src="harness-build.js"></script>
+  <script src="harness-pinout.js"></script>
+  <script src="harness-diff.js"></script>
   <script src="harness-store.js"></script>
   <script src="../lib/print-report.js"></script>
   <script src="app.js"></script>

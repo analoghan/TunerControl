@@ -19,7 +19,9 @@ var state = {
     system: null,         // the system this harness belongs to (or null)
     sysMembers: [],       // other harnesses of that system: [{ id, name, model, revision }]
     tuneScope: 'system',
-    canPinsOpen: {}       // CAN device/feed id → true while its pin links are shown
+    canPinsOpen: {},      // CAN device/feed id → true while its pin links are shown
+    compare: null,        // Revisions tab: { from: revision, to: revision | 'open', diff, fromLabel, toLabel }
+    revCache: {}          // 'harnessId|revision' → stored model, for comparing revisions
 };
 
 function $(id) { return document.getElementById(id); }
@@ -265,6 +267,7 @@ function showEditor() {
     $('revision-hint').textContent = older ? 'Viewing revision ' + state.revision + ' of ' + state.latest +
         '. Saving makes it the newest revision; Export saves a copy without changing anything.' : '';
     $('delete-btn').textContent = state.id ? 'Delete' : 'Close';
+    state.compare = null;
     runChecks();
     renderAll();
 }
@@ -281,12 +284,13 @@ function selectTab(tab) {
         t.classList.toggle('active', on);
         t.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    ['connectors', 'splices', 'diagram', 'system', 'can', 'checks', 'build', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
+    ['connectors', 'splices', 'diagram', 'system', 'can', 'checks', 'build', 'revisions', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
     if (tab === 'system') renderSystem();
     if (tab === 'connectors' && state.model) renderConnectorEditor();   // CAN pin tags may have changed
     if (tab === 'can') renderCan();
     if (tab === 'checks') renderChecks();
     if (tab === 'build') renderBuild();
+    if (tab === 'revisions') renderRevisions();
     if (tab === 'diagram') renderDiagram();
     if (tab === 'tune') loadTunes();
 }
@@ -592,6 +596,7 @@ function renderConnectorEditor() {
 function editorHeadHtml(block, what) {
     return '<div class="editor-head"><h2>' + esc(block.id) + '</h2>' +
         '<button class="btn btn-small btn-secondary" id="show-diagram">Wiring diagram</button>' +
+        (what === 'connector' ? '<button class="btn btn-small btn-secondary" id="print-pinout" title="A printable pinout sheet of this connector (save it as PDF)">Pinout sheet</button>' : '') +
         '<button class="btn btn-small btn-danger" id="remove-block">Delete ' + what + '</button></div>';
 }
 
@@ -757,6 +762,7 @@ function wireEditor(containerId, isConnector) {
             return;
         }
         if (t.id === 'show-diagram') { showDiagram(block.id); return; }
+        if (t.id === 'print-pinout') { printPinouts([block]).catch(function (err) { showError('Could not build the pinout sheet: ' + err.message); }); return; }
         if (t.hasAttribute('data-trace-row')) {
             var tr = recs[parseInt(t.getAttribute('data-trace-row'), 10)];
             showDiagram('trace:' + currentKey() + '|' + (isConnector ? block.id + '.' + tr.cavity : block.id));
@@ -1289,7 +1295,8 @@ var PDF_OPTIONS_KEY = 'harnessPdfOptions';
 var PDF_PARTS = [['overview', 'Overview diagram'], ['system', 'System overview diagram'], ['checks', 'Checks'],
     ['connectors', 'Connector pin tables'], ['connectorDiagrams', 'A wiring diagram for each connector'],
     ['splices', 'Splice tables'], ['spliceDiagrams', 'A wiring diagram for each splice'], ['pictures', 'Pictures'],
-    ['can', 'CAN networks (tables and diagrams)'], ['cutlist', 'Cut list'], ['bom', 'Bill of materials'], ['tune', 'Tune comparison (all pins)']];
+    ['can', 'CAN networks (tables and diagrams)'], ['cutlist', 'Cut list'], ['bom', 'Bill of materials'], ['tune', 'Tune comparison (all pins)'],
+    ['pinouts', 'Pinout sheets (a page per connector, then the splices)'], ['changes', 'Revision changes (as compared on the Revisions tab)']];
 
 function pdfSavedOptions() {
     try { return JSON.parse(localStorage.getItem(PDF_OPTIONS_KEY) || 'null'); } catch (e) { return null; }
@@ -1303,6 +1310,8 @@ function pdfPartUnavailable(id) {
     if (id === 'pictures' && !state.model.connectors.concat(state.model.splices).some(function (b) { return (b.images || []).length; })) return 'no pictures';
     if (id === 'tune' && !state.tunePkg) return 'choose a tune on the Tune comparison tab first';
     if (id === 'can' && !canNetworks().length) return state.system ? 'no CAN networks in the system' : 'this harness is not in a system';
+    if (id === 'pinouts' && !state.model.connectors.length) return 'no connectors';
+    if (id === 'changes' && !(state.compare && state.compare.diff)) return 'compare two revisions on the Revisions tab first';
     return '';
 }
 
@@ -1424,7 +1433,7 @@ function exportPdf() {
     try { localStorage.setItem(PDF_OPTIONS_KEY, JSON.stringify({ parts: opts.parts, landscape: opts.landscape })); } catch (e) { /* this visit only */ }
     var name = $('name-input').value.trim() || state.name || 'Harness';
     var blocks = state.model.connectors.concat(state.model.splices);
-    var wantImages = opts.pictures && (opts.connectors || opts.connectorDiagrams || opts.splices || opts.spliceDiagrams);
+    var wantImages = (opts.pictures && (opts.connectors || opts.connectorDiagrams || opts.splices || opts.spliceDiagrams)) || opts.pinouts;
     return Promise.all(blocks.map(function (b) { return wantImages ? pdfImageUrls(b) : Promise.resolve({}); })).then(function (urlList) {
         var urls = {};
         blocks.forEach(function (b, i) { urls[b.id] = urlList[i]; });
@@ -1458,6 +1467,13 @@ function exportPdf() {
             var wires = buildWires();
             if (opts.cutlist) sections.push({ title: 'Cut list', html: buildCutListHtml(wires, true), newPage: sections.length > 0 });
             if (opts.bom) sections.push({ title: 'Bill of materials', html: buildBomHtml(harnessBom(state.model, wires)), newPage: sections.length > 0 });
+        }
+        if (opts.pinouts) {
+            pinoutSections(state.model.connectors, urls, true).forEach(function (sec) { sec.newPage = sections.length > 0; sections.push(sec); });
+        }
+        if (opts.changes) {
+            sections.push({ title: 'Changes — ' + state.compare.fromLabel + ' → ' + state.compare.toLabel, html: revisionsDiffHtml(true),
+                            newPage: sections.length > 0 });
         }
         if (opts.tune) {
             sections.push({ title: 'Tune comparison — ' + (state.tunePkg.tuneName || state.tunePkg.fileName || ''), html: tuneCompareHtml('all'),
@@ -1571,6 +1587,241 @@ $('build').addEventListener('click', function (e) {
 $('pdf-dialog').addEventListener('close', function () {
     if ($('pdf-dialog').returnValue !== 'print') return;
     exportPdf().catch(function (err) { showError('Could not build the PDF: ' + err.message); });
+});
+
+// =========================================================================
+// Pinout sheets (harness-pinout.js): one page per connector for the bench and for fault-finding
+// =========================================================================
+
+/** "Engine · revision 7" (+ unsaved), printed on every sheet so a sheet on the bench says which harness it belongs to. */
+function pinoutSource() {
+    var name = $('name-input').value.trim() || state.name || 'Harness';
+    return name + (state.revision ? ' · revision ' + state.revision : ' · not saved') + (state.dirty ? ' (with unsaved changes)' : '');
+}
+
+/** A wire colour swatch (SVG, so it prints: the report theme clears backgrounds). */
+function pinoutSwatch(look) {
+    if (!look || !look.label) return '';
+    return '<svg class="pinout-swatch" width="26" height="10" viewBox="0 0 26 10" aria-hidden="true"><rect x="0.5" y="0.5" width="25" height="9" rx="2" fill="' +
+        esc(look.color) + '" stroke="#333"/>' + (look.stripe ? '<rect x="0.5" y="3.5" width="25" height="3" fill="' + esc(look.stripe) + '"/>' : '') + '</svg> ';
+}
+
+function pinoutToHtml(row) {
+    if (row.empty) return '';
+    if (!row.to.length) return '<span class="status-warning">no other end</span>';
+    return row.to.map(function (e) {
+        var text = esc(e.label) + (e.kind === 'outside' ? ' <span class="muted">(outside this harness)</span>' :
+            e.kind === 'missing' ? ' <span class="status-warning">(not in this harness)</span>' : '');
+        if (e.kind === 'splice' && e.others.length) text += '<br><span class="muted">joins ' + esc(e.others.join(', ')) + '</span>';
+        return text;
+    }).join('<br>');
+}
+
+/** One connector's sheet: header fields, pictures, then a row per cavity. */
+function pinoutSheetHtml(block, rows, urls) {
+    var fields = CONNECTOR_FIELDS.filter(function (f) { return f[0] !== 'id' && f[0] !== 'title' && f[0] !== 'sheet' && harnessText(block[f[0]]); });
+    var noteHead = harnessPinColumns(block, HARNESS_PIN_FIELDS)[5];
+    var withNote = rows.some(function (r) { return r.note; }), withChassis = rows.some(function (r) { return r.chassis; });
+    var wired = rows.filter(function (r) { return !r.empty; }).length;
+    var html = '<p class="pr-note pinout-source">' + esc(pinoutSource()) + '</p>' +
+        (block.title && block.title !== block.id ? '<p class="pinout-title">' + esc(block.title) + '</p>' : '') +
+        (fields.length ? '<p class="pr-note">' + fields.map(function (f) { return '<strong>' + esc(f[1]) + ':</strong> ' + esc(block[f[0]]); }).join(' · ') + '</p>' : '');
+    var pics = (block.images || []).filter(function (im) { return urls && urls[im.id]; });
+    if (pics.length) {
+        html += '<div class="pinout-pics">' + pics.map(function (im) {
+            return '<figure><img src="' + esc(urls[im.id]) + '" alt="">' + (im.caption ? '<figcaption>' + esc(im.caption) + '</figcaption>' : '') + '</figure>';
+        }).join('') + '</div>';
+    }
+    var headers = ['Cavity', 'Function'].concat(withNote ? [esc(noteHead)] : [], ['Wire', 'Wire part number', 'Terminal', 'Goes to'], withChassis ? [esc(HARNESS_CHASSIS_COLUMN)] : []);
+    html += prTable(headers, rows.map(function (r) {
+        var cells = ['<strong>' + esc(r.cavity) + '</strong>', r.empty ? '<span class="muted">' + esc(r.function || 'Empty') + '</span>' : esc(r.function)];
+        if (withNote) cells.push(esc(r.note));
+        cells.push(r.empty ? '<span class="muted">' + esc(r.wire || r.wirePn || 'no wire') + '</span>' : pinoutSwatch(r.look) + esc(r.wire),
+                   r.empty ? '' : '<span class="pinout-part">' + esc(r.wirePn) + '</span>', '<span class="pinout-part">' + esc(r.terminal) + '</span>', pinoutToHtml(r));
+        if (withChassis) cells.push(esc(r.chassis));
+        return cells;
+    }), 'pinout-table');
+    return html + '<p class="pr-note">' + rows.length + ' cavit' + (rows.length === 1 ? 'y' : 'ies') + ', ' + wired + ' wired.</p>';
+}
+
+/** The splices on one sheet: each splice and the ends it joins, a row per end (the splice's cells span its rows). */
+function pinoutSplicesHtml(splices) {
+    return '<p class="pr-note pinout-source">' + esc(pinoutSource()) + '</p><table class="pr-table pinout-table pinout-splices"><thead><tr><th>Splice</th>' +
+        '<th>Type</th><th>Joins</th><th>Wire</th><th>Function</th></tr></thead>' + splices.map(function (s) {
+        var ends = s.ends.length ? s.ends : [{ label: '', wire: '', function: '' }];
+        return '<tbody>' + ends.map(function (e, i) {
+            var head = i ? '' : '<td rowspan="' + ends.length + '"><strong>' + esc(s.id) + '</strong>' + (s.notes ? '<br><span class="muted">' + esc(s.notes) + '</span>' : '') +
+                '</td><td rowspan="' + ends.length + '">' + esc(s.type) + (s.boot ? '<br><span class="muted">Boot ' + esc(s.boot) + '</span>' : '') + '</td>';
+            return '<tr>' + head + '<td>' + (esc(e.label) || '<span class="status-warning">no ends</span>') + '</td><td>' + esc(e.wire) + '</td><td>' +
+                esc(e.function) + '</td></tr>';
+        }).join('') + '</tbody>';
+    }).join('') + '</table>';
+}
+
+/** Report sections: a sheet per connector (each on its own page) and, when withSplices, a splice sheet. urls: { blockId: { imageId: url } }. */
+function pinoutSections(connectors, urls, withSplices) {
+    var wires = harnessCutList(state.model), pins = harnessPinouts(state.model, wires);
+    var out = connectors.map(function (c) {
+        return { title: 'Pinout — ' + c.id, html: pinoutSheetHtml(c, pins[c.id] || [], urls[c.id]), newPage: true };
+    });
+    if (withSplices && state.model.splices.length) out.push({ title: 'Splices', html: pinoutSplicesHtml(harnessSpliceSheet(state.model, wires)), newPage: true });
+    return out;
+}
+
+/** Print pinout sheets of some connectors on their own (the connector editor's Pinout sheet button). */
+function printPinouts(connectors) {
+    return Promise.all(connectors.map(pdfImageUrls)).then(function (list) {
+        var urls = {};
+        connectors.forEach(function (c, i) { urls[c.id] = list[i]; });
+        var sections = pinoutSections(connectors, urls, false);
+        sections[0].newPage = false;
+        if (connectors.length === 1) sections[0].title = '';   // the report title already names it
+        var name = $('name-input').value.trim() || state.name || 'Harness';
+        return prPrint({ title: connectors.length === 1 ? 'Pinout — ' + connectors[0].id : 'Pinout sheets — ' + name,
+                         meta: [['Harness', name], ['Revision', state.revision ? state.revision + (state.dirty ? ' + unsaved changes' : '') : 'not saved']],
+                         sections: sections, fileName: name + ' ' + (connectors.length === 1 ? connectors[0].id : '') + ' pinout' });
+    });
+}
+
+// =========================================================================
+// Revisions: compare two saved revisions, or one with what is open now (harness-diff.js)
+// =========================================================================
+
+function revisionLabel(rev) {
+    if (rev === 'open') return state.revision ? 'what’s open now (revision ' + state.revision + (state.dirty ? ' + unsaved changes' : '') + ')' : 'what’s open now';
+    var r = state.revisions.filter(function (x) { return x.revision === rev; })[0];
+    return 'revision ' + rev + (r ? ' (' + new Date(r.saved).toLocaleString() + (r.note ? ' — ' + r.note : '') + ')' : '');
+}
+
+function revisionModel(rev) {
+    if (rev === 'open') return Promise.resolve(state.model);
+    var key = state.id + '|' + rev;
+    if (state.revCache[key]) return Promise.resolve(state.revCache[key]);
+    return hsLoad(state.id, rev).then(function (h) { return (state.revCache[key] = harnessUpgrade(h.data)); });
+}
+
+/** The default pair: unsaved changes against their revision, else the viewed revision against the one before it. */
+function revisionDefaults() {
+    var older = state.revisions.map(function (r) { return r.revision; }).filter(function (n) { return n < state.revision; });
+    if (state.dirty || !older.length) return { from: state.revision, to: 'open' };
+    return { from: Math.max.apply(null, older), to: 'open' };
+}
+
+function renderRevisions() {
+    var el = $('revisions');
+    if (!state.model) { el.innerHTML = ''; return; }
+    if (!state.id || !state.revisions.length) {
+        el.innerHTML = '<p class="muted">This harness isn’t saved yet. Every save is a revision; once there is one, you can compare it with later ones or with your unsaved changes.</p>';
+        return;
+    }
+    var cur = state.compare || revisionDefaults();
+    var opts = function (list, sel) {
+        return list.map(function (v) { return '<option value="' + v + '"' + (String(v) === String(sel) ? ' selected' : '') + '>' + esc(revisionLabel(v)) + '</option>'; }).join('');
+    };
+    var revs = state.revisions.map(function (r) { return r.revision; });
+    el.innerHTML = '<div class="compare-row"><label for="rev-from">Compare</label><select id="rev-from" aria-label="Compare from">' + opts(revs, cur.from) +
+        '</select><label for="rev-to">with</label><select id="rev-to" aria-label="Compare with">' + opts(['open'].concat(revs), cur.to) + '</select></div>' +
+        '<div id="rev-result"><p class="muted">Comparing…</p></div>';
+    compareRevisions(cur.from, cur.to);
+}
+
+function compareRevisions(from, to) {
+    state.compare = { from: from, to: to, diff: null, fromLabel: revisionLabel(from), toLabel: revisionLabel(to) };
+    var want = state.compare;
+    Promise.all([revisionModel(from), revisionModel(to)]).then(function (models) {
+        if (state.compare !== want) return;
+        want.diff = harnessDiff(models[0], models[1]);
+        if ($('rev-result')) $('rev-result').innerHTML = revisionsDiffHtml(false);
+    }).catch(function (err) {
+        if ($('rev-result')) $('rev-result').innerHTML = '<p class="status-error">Could not load the revision: ' + esc(err.message) + '</p>';
+    });
+}
+
+function revValue(v) { return v === '' ? '<span class="muted">(blank)</span>' : esc(v); }
+
+function revChangesHtml(changes) {
+    return changes.map(function (c) {
+        return '<strong>' + esc(c.label) + ':</strong> <span class="change-from">' + revValue(c.before) + '</span> → <span class="change-to">' + revValue(c.after) + '</span>';
+    }).join('<br>');
+}
+
+/** A cavity or splice wire as one line: function · wire → where it goes. */
+function revRecordText(rec, isConnector) {
+    var parts = [harnessText(rec.function), harnessText(rec.wire)].filter(Boolean).join(' · ');
+    var dest = harnessText(isConnector ? rec.remote : '');
+    return esc(parts || '(no wire)') + (dest && !HARNESS_NO_REMOTE.test(dest) ? ' → ' + esc(dest) : '');
+}
+
+function revBlockHtml(e, isConnector, forPdf) {
+    var kind = isConnector ? 'connectors' : 'splices', recs = isConnector ? e.after.pins : e.after.wires;
+    var live = !forPdf && state.compare.to === 'open';
+    var name = live ? '<button class="link-btn" data-rev-goto="' + kind + '|' + esc(e.id) + '|">' + esc(e.id) + '</button>' : esc(e.id);
+    var html = '<div class="change-item"><h3>' + name + (e.renamedFrom ? ' <span class="param-kind">renamed from ' + esc(e.renamedFrom) + '</span>' : '') + '</h3>';
+    if (e.fields.length) html += '<p class="change-note">' + revChangesHtml(e.fields) + '</p>';
+    var pics = [e.images.added && e.images.added + ' picture' + (e.images.added === 1 ? '' : 's') + ' added',
+                e.images.removed && e.images.removed + ' picture' + (e.images.removed === 1 ? '' : 's') + ' removed'].filter(Boolean);
+    if (pics.length) html += '<p class="change-note">' + esc(pics.join(', ')) + '</p>';
+    if (e.rows.length) {
+        var order = { removed: 0, changed: 1, added: 2 };
+        var rows = e.rows.slice().sort(function (a, b) {
+            return a.key.localeCompare(b.key, undefined, { numeric: true }) || order[a.kind] - order[b.kind];
+        });
+        html += prTable([isConnector ? 'Cavity' : 'End', 'Change', 'Details'], rows.map(function (r) {
+            var key = esc(r.key), idx = r.after ? recs.indexOf(r.after) : -1;
+            if (live && idx >= 0) key = '<button class="link-btn" data-rev-goto="' + kind + '|' + esc(e.id) + '|' + idx + '">' + key + '</button>';
+            var what = r.kind === 'added' ? '<span class="change-to">Added</span>' : r.kind === 'removed' ? '<span class="change-from">Removed</span>'
+                : r.rewired ? '<span class="status-warning">Rewired</span>' : 'Changed';
+            var details = r.kind === 'changed' ? revChangesHtml(r.fields) : revRecordText(r.after || r.before, isConnector);
+            return [key, what, details];
+        }), 'rev-table');
+    }
+    return html + '</div>';
+}
+
+function revAddedRemovedHtml(list, isConnector, added) {
+    return list.map(function (b) {
+        var n = isConnector ? b.pins.filter(harnessHasWire).length : b.wires.length;
+        var detail = [isConnector ? harnessText(b.title) !== b.id ? harnessText(b.title) : '' : harnessText(b.type),
+            isConnector ? harnessText(b.connector) : '', n + (isConnector ? ' wired cavit' + (n === 1 ? 'y' : 'ies') : ' wire' + (n === 1 ? '' : 's'))].filter(Boolean);
+        return '<div class="change-item ' + (added ? 'change-added' : 'change-removed') + '"><h3>' + esc(b.id) + ' <span class="param-kind">' +
+            (added ? 'added' : 'removed') + '</span></h3><p class="change-note">' + esc(detail.join(' · ')) + '</p></div>';
+    }).join('');
+}
+
+function revisionsDiffHtml(forPdf) {
+    var d = state.compare.diff;
+    var html = '<p class="change-summary">' + (forPdf ? '' : '<strong>' + esc(state.compare.fromLabel) + '</strong> → <strong>' + esc(state.compare.toLabel) + '</strong>: ') +
+        esc(harnessDiffSummary(d)) + '</p>';
+    if (d.same) return html;
+    var follow = d.counts.followRename;
+    if (follow) html += '<p class="hint">' + follow + ' connection' + (follow === 1 ? '' : 's') + ' only changed to follow a rename; they aren’t listed.</p>';
+    [[true, 'Connectors', d.connectors], [false, 'Splices', d.splices]].forEach(function (g) {
+        var x = g[2];
+        if (!x.added.length && !x.removed.length && !x.changed.length) return;
+        html += '<h3>' + g[1] + '</h3>' + revAddedRemovedHtml(x.removed, g[0], false) + revAddedRemovedHtml(x.added, g[0], true) +
+            x.changed.map(function (e) { return revBlockHtml(e, g[0], forPdf); }).join('');
+    });
+    if (d.lengths.length) {
+        var unit = state.model.lengthUnit || 'mm';
+        var shown = function (mm) { return mm === null ? '<span class="muted">none</span>' : esc(Math.round(mm / HB_UNIT_MM[unit] * 1000) / 1000 + ' ' + unit); };
+        html += '<h3>Wire lengths</h3>' + prTable(['Wire', 'Before', 'After'], d.lengths.map(function (l) {
+            return [esc(l.key.split('||').filter(function (p) { return p.charAt(0) !== '~'; }).map(function (p) { return p.replace(/#\d+$/, ''); }).join(' — ')), shown(l.before), shown(l.after)];
+        }), 'rev-table');
+    }
+    return html;
+}
+
+$('revisions').addEventListener('change', function (e) {
+    if (e.target.id !== 'rev-from' && e.target.id !== 'rev-to') return;
+    var from = parseInt($('rev-from').value, 10), to = $('rev-to').value === 'open' ? 'open' : parseInt($('rev-to').value, 10);
+    $('rev-result').innerHTML = '<p class="muted">Comparing…</p>';
+    compareRevisions(from, to);
+});
+$('revisions').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-rev-goto]');
+    if (!b) return;
+    var p = b.getAttribute('data-rev-goto').split('|');
+    gotoRow(p[0], p[1], p[2] === '' ? null : parseInt(p[2], 10));
 });
 
 // =========================================================================
