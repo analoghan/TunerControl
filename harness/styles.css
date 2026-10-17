@@ -41,7 +41,9 @@
   padding: 3px 5px; font-family: inherit; font-size: 0.8rem; }
 .cell-input:hover { border-color: #333; }
 .cell-cavity { min-width: 44px; width: 52px; }
-.cell-terminal, .cell-status { min-width: 70px; }
+.cell-terminal { min-width: 70px; }
+.cell-chassis { min-width: 180px; }
+.check-label { display: inline-flex; align-items: center; gap: 6px; color: #ccc; font-size: 0.85rem; white-space: nowrap; }
 .cell-remote, .cell-end { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; min-width: 130px; }
 .cell-function { min-width: 180px; }
 .remote-cell { display: flex; align-items: center; gap: 2px; }

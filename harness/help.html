@@ -77,7 +77,7 @@ BOOT        N/A
 MATE CONN   33482-6201
 MATE PIN    33000-1002
 NOTES       MX150
-Location | Pin        | Conductor Part Number | Conductor Description | Engine Function     | Notes      | Remote Connection | Status
+Location | Pin        | Conductor Part Number | Conductor Description | ECU Function        | Notes      | Remote Connection
 1        | 33012-3002 | M22759/32-18-9PK      | 18 AWG White/Pink     | Direct Injector 1 + | M142 DI 1A+ | M142.A.7          |
 …</pre></div>
     <ul>
@@ -85,8 +85,14 @@ Location | Pin        | Conductor Part Number | Conductor Description | Engine F
         <code>MoTeC M142 A - 34 Way</code> → <code>M142.A</code>, <code>MoTeC E888 B - 26 Way</code> → <code>E888.B</code>.</li>
       <li>A splice block has a <code>SPLICE</code> row (the splice type) instead of <code>CONNECTOR</code>, and its table is
         <em>Location | Conductor Part Number | Conductor Description | Function</em> — one row per wire end joined in the splice.</li>
-      <li>Column headings can be named however you like (e.g. <em>MoTeC Function</em> instead of <em>Notes</em>); they are kept and written
-        back on export.</li>
+      <li>The first seven columns are read by position, so their headings can be named however you like (e.g. <em>MoTeC Function</em>
+        instead of <em>Notes</em>); they are kept and written back on export. The fifth is always shown as <em>ECU Function</em> (older
+        sheets call it <em>Engine Function</em>).</li>
+      <li><strong>Chassis Function</strong> (optional): free text for what a wire connects to outside this harness — e.g. <em>Brake pedal
+        switch, chassis loom</em>. A column headed <code>Chassis Function</code> anywhere after Remote Connection is read and switches the
+        column on. Turn it on or off for the harness with the <strong>Chassis Function column</strong> box in the harness bar; switching it off
+        only hides it — text already entered is kept and still exported.</li>
+      <li>Any other columns (such as an old <em>Status</em> column) are not read.</li>
       <li>Pictures placed beside a block (to its right, at or below its title row) are imported as that block's
         <a href="#images">images</a>.</li>
     </ul>

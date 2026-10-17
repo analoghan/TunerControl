@@ -259,6 +259,7 @@ function showEditor() {
     $('revision-hint').textContent = older ? 'Viewing revision ' + state.revision + ' of ' + state.latest +
         '. Saving makes it the newest revision; Export saves a copy without changing anything.' : '';
     $('delete-btn').textContent = state.id ? 'Delete' : 'Close';
+    $('chassis-toggle').checked = !!state.model.chassisFunction;
     runChecks();
     renderAll();
 }
@@ -558,7 +559,7 @@ function renderConnectorEditor() {
         return;
     }
     el.innerHTML = editorHeadHtml(c, 'connector') +
-        fieldsHtml(c, CONNECTOR_FIELDS) + imagesHtml(c) + rowsHtml('pin', c, c.pins, HARNESS_PIN_FIELDS, c.columns || []) +
+        fieldsHtml(c, CONNECTOR_FIELDS) + imagesHtml(c) + rowsHtml('pin', c, c.pins, harnessPinFields(state.model), harnessPinColumns(c, harnessPinFields(state.model))) +
         '<button class="btn btn-secondary btn-small" id="add-row">Add cavity</button>';
     loadThumbnails(el);
 }
@@ -753,7 +754,7 @@ function wireEditor(containerId, isConnector) {
             setDirty(true); runChecks(); renderAll();
         } else if (t.id === 'add-row') {
             var blank = {};
-            (isConnector ? HARNESS_PIN_FIELDS : HARNESS_WIRE_FIELDS).forEach(function (f) { blank[f] = ''; });
+            (isConnector ? HARNESS_PIN_FIELDS.concat('chassis') : HARNESS_WIRE_FIELDS).forEach(function (f) { blank[f] = ''; });
             if (isConnector) {
                 var nums = recs.map(function (p) { return parseInt(p.cavity, 10); }).filter(function (n) { return !isNaN(n); });
                 if (nums.length === recs.length && nums.length) blank.cavity = String(Math.max.apply(null, nums) + 1);
@@ -790,7 +791,7 @@ function addBlock(isConnector) {
     if (!state.model.sheets.some(function (s) { return s.name === sheet; })) state.model.sheets.push({ name: sheet, kind: kind });
     if (isConnector) {
         state.model.connectors.push({ id: id, title: id, sheet: sheet, connector: '', boot: '', mateConn: '', matePin: '', notes: '',
-            columns: ['Location', 'Pin', 'Conductor Part Number', 'Conductor Description', 'Engine Function', 'Notes', 'Remote Connection', 'Status'],
+            columns: HARNESS_PIN_COLUMNS.slice(),
             pins: [] });
         state.selConnector = id;
     } else {
@@ -1290,9 +1291,10 @@ function pdfBlockHtml(block, isConnector, opts, urls) {
         html += '<p class="pr-note">' + fields.map(function (f) { return '<strong>' + esc(f[1]) + ':</strong> ' + esc(block[f[0]]); }).join(' · ') + '</p>';
     }
     var kind = isConnector ? 'pin' : 'wire', recs = isConnector ? block.pins : block.wires;
-    var keys = isConnector ? HARNESS_PIN_FIELDS : HARNESS_WIRE_FIELDS, cols = isConnector ? HARNESS_PIN_COLUMNS : HARNESS_WIRE_COLUMNS;
+    var keys = isConnector ? harnessPinFields(state.model) : HARNESS_WIRE_FIELDS;
     var problems = recs.some(function (r, i) { return rowIssues(kind, block.id, i).length; });
-    var headers = keys.map(function (k, i) { return esc((block.columns || [])[i] || cols[i] || k); });
+    var headers = (isConnector ? harnessPinColumns(block, keys) : keys.map(function (k, i) { return (block.columns || [])[i] || HARNESS_WIRE_COLUMNS[i] || k; }))
+        .map(esc);
     if (problems) headers.push('Problem');
     html += prTable(headers, recs.map(function (r, i) {
         var row = keys.map(function (k) { return esc(r[k]); });
@@ -1385,7 +1387,7 @@ var addState = null;   // { file, incoming }
 function sameBlock(a, b) {
     function key(x) {
         return JSON.stringify([x.title, x.connector, x.mateConn, x.matePin, x.type, x.boot, x.notes,
-            (x.pins || x.wires || []).map(function (r) { return (x.pins ? HARNESS_PIN_FIELDS : HARNESS_WIRE_FIELDS).map(function (f) { return harnessText(r[f]); }); })]);
+            (x.pins || x.wires || []).map(function (r) { return (x.pins ? HARNESS_PIN_FIELDS.concat('chassis') : HARNESS_WIRE_FIELDS).map(function (f) { return harnessText(r[f]); }); })]);
     }
     return !!a.pins === !!b.pins && key(a) === key(b);
 }
@@ -1535,6 +1537,11 @@ $('export-btn').addEventListener('click', exportXlsx);
 $('delete-btn').addEventListener('click', deleteHarness);
 $('delete-revision-btn').addEventListener('click', deleteRevision);
 $('name-input').addEventListener('input', function () { setDirty(true); });
+$('chassis-toggle').addEventListener('change', function () {
+    state.model.chassisFunction = this.checked;
+    setDirty(true);
+    renderConnectorEditor();
+});
 $('revision-select').addEventListener('change', function () {
     var rev = parseInt(this.value, 10);
     if (!state.id || !rev) return;

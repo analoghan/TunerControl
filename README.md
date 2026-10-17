@@ -99,6 +99,8 @@ Design and check wiring harnesses built around the M1 ECU.
 - One-ended connections are valid ends: **Unterminated** (e.g. a shield grounded at one end), **Eyelet** (ring terminal on a stud),
   **Battery** (`+` / `-`) and **Device** (wired straight into a device), each with an optional note in brackets
   (`Eyelet (engine block)`, `Chassis Ground (Eyelet)`), drawn with their own symbol in the diagrams
+- Pin columns: Location, Pin, conductor part number and description, ECU Function, notes and Remote Connection, plus an optional
+  **Chassis Function** column (switched on per harness) for what each wire connects to outside the harness
 - Checks every connection at both ends: references to nothing (with "did you mean" fixes), ends that disagree, splices that don't list their wires, chained splices, wire part numbers that differ between ends, wired cavities with no connection
 - Compares the ECU (M142) and E888 pins against the I/O assignments in a tune from the M1 Config Viewer (with your labels from there), and harness pin labels against the M142 datasheet pinout
 - Connector and splice images: pictures placed beside each block in the spreadsheet are imported, can be added/removed/captioned, viewed full size, and are written back on export

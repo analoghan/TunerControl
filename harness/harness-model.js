@@ -3,9 +3,9 @@
  * and consistency checks.
  *
  * Model (plain JSON, stored as-is):
- *   { name, sheets: [{ name, kind: 'connectors' | 'splices' }],
+ *   { name, sheets: [{ name, kind: 'connectors' | 'splices' }], chassisFunction (show the Chassis Function column),
  *     connectors: [{ id, title, sheet, connector, boot, mateConn, matePin, notes, columns,
- *                    pins: [{ cavity, terminal, wirePn, wire, function, note, remote, status }] }],
+ *                    pins: [{ cavity, terminal, wirePn, wire, function, note, remote, chassis }] }],
  *     splices:    [{ id, sheet, type, boot, notes, columns,
  *                    wires: [{ end, wirePn, wire, function }] }] }
  * Connectors and splices may have images: [{ id, mime, w, h, caption }] (w/h in pixels). Image bytes are
@@ -16,16 +16,20 @@
  *   <title>
  *   CONNECTOR | <part>          (or SPLICE | <type>)
  *   BOOT | …, MATE CONN | …, MATE PIN | …, NOTES | …
- *   Location | Pin | Conductor Part Number | Conductor Description | Engine Function | <note column> |
- *     Remote Connection | Status                       (splices: Location | Part Number | Description | Function)
+ *   Location | Pin | Conductor Part Number | Conductor Description | ECU Function | <note column> |
+ *     Remote Connection [| Chassis Function]           (splices: Location | Part Number | Description | Function)
+ *   The first seven pin columns are read by position (headings may differ); Chassis Function by its heading, anywhere
+ *   after them. Other columns (e.g. an old Status column) are not read.
  *   one row per cavity (splices: one row per wire end)
  *
  * Remote connections are "CONNECTOR.CAVITY" (e.g. M142.C.14, CHAS.A.f) or a splice name.
  */
 
-var HARNESS_PIN_FIELDS = ['cavity', 'terminal', 'wirePn', 'wire', 'function', 'note', 'remote', 'status'];
-var HARNESS_PIN_COLUMNS = ['Location', 'Pin', 'Conductor Part Number', 'Conductor Description', 'Engine Function',
-    'Notes', 'Remote Connection', 'Status'];
+var HARNESS_PIN_FIELDS = ['cavity', 'terminal', 'wirePn', 'wire', 'function', 'note', 'remote'];
+var HARNESS_PIN_COLUMNS = ['Location', 'Pin', 'Conductor Part Number', 'Conductor Description', 'ECU Function',
+    'Notes', 'Remote Connection'];
+/** Free text: what the wire connects to outside this harness. An optional column, switched on per harness. */
+var HARNESS_CHASSIS_COLUMN = 'Chassis Function';
 var HARNESS_WIRE_FIELDS = ['end', 'wirePn', 'wire', 'function'];
 var HARNESS_WIRE_COLUMNS = ['Location', 'Conductor Part Number', 'Conductor Description', 'Function'];
 var HARNESS_HEADER_FIELDS = { CONNECTOR: 'connector', SPLICE: 'type', BOOT: 'boot', 'MATE CONN': 'mateConn',
@@ -64,6 +68,20 @@ function harnessText(v) {
     return v === null || v === undefined ? '' : String(v).replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/\u00A0/g, ' ').trim();
 }
 
+/** Pin fields shown and exported: the seven fixed ones, plus Chassis Function when the harness has it switched on. */
+function harnessPinFields(model) {
+    return model && model.chassisFunction ? HARNESS_PIN_FIELDS.concat('chassis') : HARNESS_PIN_FIELDS;
+}
+
+/** Headings for a connector's pin fields: its own spreadsheet headings, except ECU Function and Chassis Function. */
+function harnessPinColumns(block, fields) {
+    return fields.map(function (f, k) {
+        if (f === 'function') return 'ECU Function';
+        if (f === 'chassis') return HARNESS_CHASSIS_COLUMN;
+        return (block && block.columns && block.columns[k]) || HARNESS_PIN_COLUMNS[k] || f;
+    });
+}
+
 /**
  * Connector id used in remote references: "MoTeC M142 A - 34 Way" → "M142.A", "MoTeC E888 B - 26 Way" →
  * "E888.B"; otherwise the title.
@@ -82,7 +100,7 @@ function harnessFromWorkbook(workbook, name) {
     var model = { name: name || 'Harness', sheets: [], connectors: [], splices: [] };
     workbook.sheets.forEach(function (sheet) {
         var rows = sheet.rows.map(function (r) { return (r || []).map(harnessText); });
-        var kind = null, block = null, inTable = false, starts = [];
+        var kind = null, block = null, inTable = false, starts = [], chassisCol = -1;
         for (var i = 0; i < rows.length; i++) {
             var r = rows[i], first = r[0] || '';
             if (!r.some(function (v) { return v !== ''; })) { inTable = false; continue; }
@@ -107,14 +125,22 @@ function harnessFromWorkbook(workbook, name) {
             if (!inTable && HARNESS_HEADER_FIELDS[first]) { block[HARNESS_HEADER_FIELDS[first]] = r[1] || ''; continue; }
             if (first === 'Location') {
                 inTable = true;
-                block.columns = r.slice(0, block.pins ? 8 : 4).map(function (h, k) {
+                block.columns = r.slice(0, block.pins ? HARNESS_PIN_FIELDS.length : 4).map(function (h, k) {
                     return h || (block.pins ? HARNESS_PIN_COLUMNS : HARNESS_WIRE_COLUMNS)[k];
                 });
+                chassisCol = -1;
+                if (block.pins) {
+                    block.columns[4] = 'ECU Function';   // "Engine Function", "Function" … in older sheets
+                    for (var h = HARNESS_PIN_FIELDS.length; h < r.length; h++) {
+                        if (r[h].toLowerCase() === HARNESS_CHASSIS_COLUMN.toLowerCase()) { chassisCol = h; model.chassisFunction = true; break; }
+                    }
+                }
                 continue;
             }
             if (!inTable) continue;
             var fields = block.pins ? HARNESS_PIN_FIELDS : HARNESS_WIRE_FIELDS, rec = {};
             fields.forEach(function (f, k) { rec[f] = r[k] || ''; });
+            if (block.pins) rec.chassis = chassisCol >= 0 ? r[chassisCol] || '' : '';
             (block.pins || block.wires).push(rec);
         }
         if (kind) model.sheets.push({ name: sheet.name, kind: kind });
@@ -155,6 +181,9 @@ function harnessSheetGroups(model) {
  * bytes (Uint8Array); images without bytes there are left out. Pictures go in column I next to their block.
  */
 function harnessToWorkbook(model, imageData) {
+    // Chassis Function is written when it is switched on, or when any cavity has some (switched off only hides it).
+    var pinFields = model.chassisFunction || model.connectors.some(function (c) { return c.pins.some(function (p) { return harnessText(p.chassis); }); })
+        ? HARNESS_PIN_FIELDS.concat('chassis') : HARNESS_PIN_FIELDS;
     return harnessSheetGroups(model).map(function (sheet) {
         var rows = [], bold = [], images = [];
         function block(title, header, columns, records, fields, blockImages) {
@@ -175,7 +204,7 @@ function harnessToWorkbook(model, imageData) {
         }
         sheet.connectors.forEach(function (c) {
             block(c.title || c.id, [['CONNECTOR', c.connector], ['BOOT', c.boot], ['MATE CONN', c.mateConn],
-                ['MATE PIN', c.matePin], ['NOTES', c.notes]], c.columns || HARNESS_PIN_COLUMNS, c.pins, HARNESS_PIN_FIELDS, c.images);
+                ['MATE PIN', c.matePin], ['NOTES', c.notes]], harnessPinColumns(c, pinFields), c.pins, pinFields, c.images);
         });
         sheet.splices.forEach(function (s) {
             block(s.id, [['SPLICE', s.type], ['BOOT', s.boot], ['NOTES', s.notes]],
@@ -473,6 +502,7 @@ function harnessMergeBlocks(model, incoming, picks) {
     var byId = {}, out = { added: [], replaced: [], renamed: [] };
     incoming.connectors.concat(incoming.splices).forEach(function (b) { byId[b.id] = b; });
     var index = harnessIndex(incoming), renames = {};
+    if (incoming.chassisFunction && picks.length) model.chassisFunction = true;
     picks.forEach(function (p) { if (p.action === 'rename' && byId[p.id]) renames[p.id] = harnessText(p.newId); });
     function copy(b) {
         var c = JSON.parse(JSON.stringify(b, function (k, v) { return k === 'data' ? undefined : v; }));
@@ -527,6 +557,7 @@ if (typeof module !== 'undefined' && module.exports) {
         harnessHasWire: harnessHasWire, harnessEndpointName: harnessEndpointName, harnessText: harnessText,
         harnessSplitCandidates: harnessSplitCandidates, harnessSheetGroups: harnessSheetGroups, harnessSplitSheet: harnessSplitSheet,
         harnessMergeBlocks: harnessMergeBlocks, harnessFreeId: harnessFreeId, harnessFindBlock: harnessFindBlock,
+        harnessPinFields: harnessPinFields, harnessPinColumns: harnessPinColumns,
         HARNESS_PIN_FIELDS: HARNESS_PIN_FIELDS, HARNESS_WIRE_FIELDS: HARNESS_WIRE_FIELDS
     };
 }
