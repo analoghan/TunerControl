@@ -9,7 +9,7 @@
  *   var xdfDef = parseXdf(xdfText);
  *   var config = readBinConfig(binBuffer, xdfDef);
  *   // config.tables = { title: { values, rows, cols, equation, address, ... } }
- *   // config.shiftParams = extracted shift-quality parameters
+ *   // config.settings = gear ratios, start gear, blip, adaptation and correction tables (extractShiftSettings)
  */
 
 // ---------------------------------------------------------------------------
@@ -202,7 +202,7 @@ function decodeXmlEntities(str) {
  * @returns {Object} Config data
  *   - tables: Map of title -> { values (2D array), raw, rows, cols, address, equation, ... }
  *   - constants: Map of title -> { value, raw, address }
- *   - shiftParams: Extracted shift-quality-relevant parameters (structured)
+ *   - settings: what the shift analysis uses (extractShiftSettings)
  *   - metadata: { binSize, xdfTitle, xdfAuthor }
  */
 function readBinConfig(buffer, xdfDef) {
@@ -228,13 +228,12 @@ function readBinConfig(buffer, xdfDef) {
         }
     }
 
-    // Extract shift-quality parameters
-    var shiftParams = extractShiftParams(tables);
+    var settings = extractShiftSettings(tables);
 
     return {
         tables: tables,
         constants: constants,
-        shiftParams: shiftParams,
+        settings: settings,
         metadata: {
             binSize: buffer.byteLength,
             xdfTitle: xdfDef.header.title,
@@ -320,146 +319,71 @@ function readElement(view, offset, sizeBits, lsbFirst) {
 }
 
 // ---------------------------------------------------------------------------
-// Shift Parameter Extraction — structured view of shift-quality parameters
+// Shift settings — found by pattern, because XDF versions rename tables
+// (V10.75 "3-2 Downshift Correction Start", V10.78 "3-2 DOWN Correction Start"; "Brake ADAP" → "Brake Clutch DOWN Adaptation")
 // ---------------------------------------------------------------------------
 
-/**
- * Extracts and organizes shift-quality-relevant parameters from the parsed tables.
- * Groups them into logical categories for the shift analyzer to correlate with log data.
- *
- * @param {Object} tables - Map of table title -> parsed table data
- * @returns {Object} Structured shift parameters
- */
-function extractShiftParams(tables) {
-    var params = {
-        gearRatios: getTableValues(tables, 'Gear Ratio'),
-        pressures: {
-            startPress: getTableValues(tables, 'Stard Press.'),
-            minClutchPress: getScalar(tables, 'Minimum Clutch Press.'),
-            minClutchPressDrive: getScalar(tables, 'Minimum Clutch Press. Drive'),
-            minClutchPressNeutral: getScalar(tables, 'Minimum Clutch Press. Neutral'),
-            addPressFootbrakeOff: getScalar(tables, 'Add Press. Footbrake OFF'),
-            addPressAfterLaunch: getScalar(tables, 'Add Press. after launch '),
-        },
-        timing: {
-            pulseTime: getScalar(tables, 'Pulse Time'),
-            clutchClosingTime: getScalar(tables, 'Clutch Closing time '),
-            closeTime: getScalar(tables, 'Close Time'),
-        },
-        blip: {
-            blipOut: getScalar(tables, 'Blip Out'),
-            blipTqTarget: getTableValues(tables, 'Blip TQ Target'),
-            minRpmForBlip: getTableValues(tables, 'Min RPM for blip'),
-            maxTpsForBlip: getScalar(tables, 'Max TPS for blip'),
-            maxTqForBlip: getScalar(tables, 'Max TQ for Blip'),
-            clutchSlipBlipDeactivation: getTableValues(tables, 'Clutch slip blip deactivation'),
-        },
-        adaptation: {
-            downshiftAdap: getTableValues(tables, 'Downshift ADAP'),
-            brakeAdap: getTableValues(tables, 'Brake ADAP'),
-            endAdap: getTableValues(tables, 'End ADAP'),
-            downshiftAdapMaxValue: getTableValues(tables, 'Downshift ADAPT. Max Value'),
-            torqueReductionAdap: getTableValues(tables, 'Torque Reduction  ADAP'),
-        },
-        torqueReduction: {
-            outputThreshold: getScalar(tables, 'Torque Reduction  Output Threshold'),
-            rampOn: getScalar(tables, 'Torque Reduction Ramp ON'),
-            rampOff: getScalar(tables, 'Torque Reduction Ramp OFF'),
-            advanceTime: getTableValues(tables, 'Torque Reduction Advance Time'),
-            type: getScalar(tables, 'Torque reduction type (Only for OEM Can)'),
-        },
-        corrections: {
-            gearShiftPressCorrection: getTableValues(tables, 'Gear Shift pressure Correction %'),
-            gearPulseCorrectUp: getTableValues(tables, 'Gear Pulse Correction % UPSHIFT'),
-            gearPulseCorrectDown: getTableValues(tables, 'Gear Pulse Correction % DOWN'),
-            corrPressTps: getTableValues(tables, 'Corr. Press. TPS'),
-            corrPressTpsTorque: getTableValues(tables, 'Corr. Press. TPS/Torque Correction'),
-            additionalPressDownshift: getTableValues(tables, 'Additional Press Corr Downshift'),
-            pulseCorrectUp: getTableValues(tables, 'Pulse Correction UP'),
-            pulseCorrectDown: getTableValues(tables, 'Pulse Correction DOWN'),
-            timeCorrectUp: getTableValues(tables, 'Time Correction UP'),
-            timeCorrectDown: getTableValues(tables, 'Time Correction DOWN'),
-            corrTempUp: getTableValues(tables, 'Corr. Temp. Gear UP'),
-            corrTempDown: getTableValues(tables, 'Corr. Temp. Gear Down'),
-            corrTempPulseUp: getTableValues(tables, 'Corr. Temp. Pulse Time UP'),
-            corrTempPulseDown: getTableValues(tables, 'Corr. Temp. Pulse Time Down'),
-            corrDeltaEnd: getTableValues(tables, 'Correction Delta End'),
-            slipCorrectUp: getTableValues(tables, 'Clutch Slipt% Corection UP'),
-            slipCorrectDown: getTableValues(tables, 'Clutch Slipt% Corection DOWN'),
-            slipCorrectStartGear: getTableValues(tables, 'Clutch Slipt% Corection Start Gear'),
-        },
-        perGearCorrections: extractPerGearCorrections(tables),
-        lockup: {
-            lockupI: getTableValues(tables, 'Lockup I.'),
-            lockupP: getTableValues(tables, 'Lockup P.'),
-            lockupOnRpmTps: getTableValues(tables, 'Lockup ON  RPM/TPS'),
-            lockupSlipRpm: getTableValues(tables, 'Lockup Slipt RPM'),
-            lockupHysteresis: getScalar(tables, 'Lockup Hysteresis'),
-            lockupWarmupMultiplier: getScalar(tables, 'Lockup Slipt Warmup multiplier'),
-            lockupGearOffAfterLaunch: getScalar(tables, 'Lockup Gear OFF after T-brake/ Launch '),
-        },
-        slip: {
-            slipDiffMultiplier: getTableValues(tables, 'Slip difference Multiplier'),
-            slipDiffMaxPressure: getTableValues(tables, 'Slip difference Max Pressure'),
-            slipTorquePresCorrection: getTableValues(tables, 'Slip Torque Pres Correction'),
-        },
-        rpmLimits: {
-            maxRpmDownshiftTqPos: getTableValues(tables, 'Max. RPM Downshift Allowance, torque higher than 0 (TQ>0)'),
-            maxRpmDownshiftTqNeg: getTableValues(tables, 'Max. RPM Downshift Allowance, torque lower than 0 (TQ<0)'),
-            maxRpmSemiAutoUpshift: getTableValues(tables, 'Max. RPM Limit, Semi-Auto Upshift'),
-            minRpmSemiAutoDown82: getTableValues(tables, 'Min. RPM Limit 8-2, Semi Auto Downshift'),
-            minRpmSemiAutoDown21: getTableValues(tables, 'Min. RPM Limit 2-1, Semi Auto Downshift'),
-        },
-        gearStart: {
-            gearStartPressCorrect: getTableValues(tables, 'Gear Start Press Correct'),
-            gearStartTime: getTableValues(tables, 'Gear Start Time'),
-        },
-    };
+function brNorm(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 
-    return params;
-}
-
-/**
- * Extracts per-gear shift correction tables (Start/End for each transition).
- */
-function extractPerGearCorrections(tables) {
-    var transitions = [
-        '1-2', '2-3', '3-4', '4-5', '5-6', '6-7', '7-8',
-        '2-1', '3-2', '4-3', '5-4', '6-5', '7-6', '8-7'
-    ];
-
-    var result = {};
-    for (var i = 0; i < transitions.length; i++) {
-        var t = transitions[i];
-        var isUp = parseInt(t[0]) < parseInt(t[2]);
-        var dir = isUp ? 'Upshift' : 'Downshift';
-        var startTitle = t + ' ' + dir + ' Correction Start';
-        var endTitle = t + ' ' + dir + ' Correction End';
-
-        result[t] = {
-            start: getTableValues(tables, startTitle),
-            end: getTableValues(tables, endTitle)
-        };
+/** The first table whose title matches one of the patterns (regular expressions, tested on the trimmed lower-case title). */
+function brFind(tables, patterns) {
+    var titles = Object.keys(tables);
+    for (var p = 0; p < patterns.length; p++) {
+        for (var i = 0; i < titles.length; i++) if (patterns[p].test(brNorm(titles[i]))) return { title: titles[i], table: tables[titles[i]] };
     }
-    return result;
+    return null;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+function brScalar(found) { return found ? found.table.values[0][0] : null; }
 
-function getTableValues(tables, title) {
-    var tbl = tables[title];
-    if (!tbl) return null;
-    // Flatten 1-row tables to a simple array
-    if (tbl.rows === 1) return tbl.values[0];
-    return tbl.values;
+/** A table for display: { title, rows: [label], cols: [label], values }. */
+function brView(found) {
+    if (!found) return null;
+    var t = found.table;
+    return { title: found.title.trim(), rowLabels: (t.yLabels || []).slice(0, t.rows), colLabels: (t.xLabels || []).slice(0, t.cols), values: t.values };
 }
 
-function getScalar(tables, title) {
-    var tbl = tables[title];
-    if (!tbl) return null;
-    return tbl.values[0][0];
+/**
+ * Settings the shift analysis uses:
+ *   gearRatios {gear: ratio}, startGear [per program] (Program Selector "ST. GEAR" row), programs, adaptOil { min, max, source },
+ *   blip { minRpm [N, S1, S2], maxTps, maxTq, slipDeactivation [..], out }, adaptationTables [view], corrections { "3-2": { start, end } },
+ *   shiftTables [view] (Pulse / Time Correction, Slow Ram, temperature corrections), torqueReduction { tables… }
+ */
+function extractShiftSettings(tables) {
+    var out = {};
+    var ratio = brFind(tables, [/^gear ratio$/]);
+    if (ratio) {
+        out.gearRatios = {};
+        var labels = ratio.table.xLabels || [];
+        ratio.table.values[0].forEach(function (v, i) { var g = parseInt(labels[i], 10); if (g >= 1 && g <= 8) out.gearRatios[g] = v; });
+    }
+    var prog = brFind(tables, [/^program selector$/]);
+    if (prog) {
+        var row = (prog.table.yLabels || []).map(brNorm).map(function (l) { return l.replace(/^\.\s*/, ''); }).indexOf('st. gear');
+        if (row >= 0) out.startGear = prog.table.values[row].slice();
+        out.programs = (prog.table.xLabels || []).slice(0, prog.table.cols);
+    }
+    var oMin = brFind(tables, [/^oil temp min$/]), oMax = brFind(tables, [/^oil temp max$/]);
+    out.adaptOil = oMin && oMax ? { min: brScalar(oMin), max: brScalar(oMax), source: 'bin' } : null;
+    function col(found) { return found ? found.table.values.map(function (r) { return r[0]; }) : null; }
+    var deact = brFind(tables, [/^clutch slip blip deactivation$/]);
+    out.blip = { minRpm: col(brFind(tables, [/^min rpm for blip$/])), maxTps: brScalar(brFind(tables, [/^max tps for blip$/])),
+                 maxTq: brScalar(brFind(tables, [/^max tq for blip$/])), slipDeactivation: col(deact), out: brScalar(brFind(tables, [/^blip out$/])),
+                 rowLabels: deact ? (deact.table.yLabels || []).slice(0, deact.table.rows) : ['N', 'S1', 'S2'] };
+    out.adaptationTables = Object.keys(tables).filter(function (k) { return /adapt|adap\b/i.test(k) && !/enable|activation|send|change/i.test(k); })
+        .sort().map(function (k) { return brView({ title: k, table: tables[k] }); });
+    out.corrections = {};
+    Object.keys(tables).forEach(function (k) {
+        var m = brNorm(k).match(/^(\d)-(\d) (?:up|down|upshift|downshift) cor\w* (start|end)$/);
+        if (!m) return;
+        var key = m[1] + '-' + m[2];
+        (out.corrections[key] = out.corrections[key] || {})[m[3]] = brView({ title: k, table: tables[k] });
+    });
+    out.shiftTables = [/^pulse correction up$/, /^pulse correction down$/, /^time correction up$/, /^time correction down$/, /^slow ram up$/, /^slow ram down$/,
+        /^gear pulse correction% (ushift|upshift)$/, /^gear pulse correction % upshift$/, /^gear pulse correction% down$/, /^gear pulse correction % down$/,
+        /^corr\. temp\. gear up$/, /^corr\. temp\. gear down$/, /^corr\. temp\. pulse time up$/, /^corr\. temp\. pulse time down$/]
+        .map(function (re) { return brView(brFind(tables, [re])); }).filter(Boolean);
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -498,5 +422,5 @@ if (typeof compileEquation === 'undefined') {
 // ---------------------------------------------------------------------------
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parseXdf: parseXdf, readBinConfig: readBinConfig };
+    module.exports = { parseXdf: parseXdf, readBinConfig: readBinConfig, extractShiftSettings: extractShiftSettings };
 }

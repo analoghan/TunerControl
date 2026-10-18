@@ -89,3 +89,27 @@ h2 { margin: 0 0 8px; font-size: 1.2rem; color: #036ffc; }
 .adapt-summary ul { margin: 8px 0 12px 20px; font-size: 0.85rem; color: #b0b0b0; }
 .adapt-summary li { margin-bottom: 4px; }
 .adapt-summary p { font-size: 0.85rem; color: #b0b0b0; }
+
+/* Shift analysis (2026-10 rework) */
+.table-wrap { overflow-x: auto; max-height: 520px; overflow-y: auto; }
+.shift-table td.left, .shift-table th.left { text-align: left; }
+.shift-table tbody tr.clickable { cursor: pointer; }
+.shift-table tbody tr.clickable:hover td { background: #262626; }
+.shift-table tbody tr.selected td { background: rgba(3,111,252,0.18); }
+.muted { color: #777; }
+.flag { color: #ff9800; font-weight: 600; }
+.filter-row { display: flex; gap: 6px; margin-bottom: 8px; }
+.filter-btn { background: #222; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 0.8rem; }
+.filter-btn.active { border-color: #036ffc; color: #fff; background: rgba(3,111,252,0.2); }
+.shift-chart { background: #0d0d0d; border: 1px solid #333; border-radius: 6px; padding: 8px; margin-bottom: 10px; }
+.shift-chart svg { width: 100%; height: auto; display: block; }
+.shift-chart .chart-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 0.85rem; color: #ccc; margin-bottom: 4px; }
+.finding-title { font-weight: 600; margin: 0 0 4px; }
+.finding-text { margin: 0 0 4px; color: #ddd; }
+.finding-action { margin: 0; font-size: 0.85rem; color: #bbb; }
+details.bin-table { margin: 6px 0; }
+details.bin-table summary { cursor: pointer; color: #ccc; font-size: 0.85rem; }
+.correction-table th { padding: 3px 8px; border: 1px solid #333; color: #888; font-weight: 500; font-size: 0.7rem; }
+.method-list { margin: 0; padding-left: 18px; color: #bbb; font-size: 0.85rem; }
+.method-list li { margin-bottom: 4px; }
+.shift-table td { white-space: nowrap; }

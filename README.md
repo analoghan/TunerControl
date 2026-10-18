@@ -137,6 +137,19 @@ Design and check wiring harnesses built around the M1 ECU.
 - Restores into a server or a browser (empty or not): adds what is missing and keeps anything already there with the same id, so it
   is safe to run twice; older M1 Config Viewer backups restore too
 
+### TurboLamik Shift Analyzer (ZF 8HP)
+
+For a TurboLamik 8HP TCU (here with a Haltech Nexus R5): reads a TunerPro RT log (`.xdl` with its `.adx`, or `.csv`) and optionally the
+TCU bin (`.bin` with its `.xdf`; V10.75 and V10.78 table names both work).
+- Each shift runs from the request (Gear Target changes) to the Gear change, split into the delay before the ratio moves and the ratio
+  change, from timestamps; checked against the TCU's own Time 1 Shift Time
+- Flare (input above the gear it should be held to), sag and bump (vehicle acceleration from Output RPM), blip and torque cut per shift,
+  with medians per transition and per oncoming shift element (A–E), and a chart of any shift
+- Oil temperature at every shift, against the bin's adaptation window; Adaptation Activation Parameter codes (TurboLamik manual) and the
+  shifts the TCU learns on (3→4 D, 4→5 C, 5→6 E, 6→7 A, 6→5 B)
+- From the bin: gear ratios, start gear per program, blip limits, adaptation tables, Correction Start / End for the logged shifts and the
+  shift-feel tables; findings only from repeated shifts, pointing at the tables TurboLamik's shift-quality guide names
+
 ### Calculators
 Quick bidirectional unit conversions for tuning:
 - kPa ↔ PSI ↔ Bar (gauge and absolute with 102 kPa atmospheric reference)
@@ -245,6 +258,7 @@ node tests/run-server-tests.js
 node tests/test-knock-analysis.js
 node tests/test-fp-analysis.js
 node tests/test-worker-pipeline.js
+node tests/test-transmission.js
 ```
 
 ---

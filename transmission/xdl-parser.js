@@ -335,15 +335,9 @@ function parseXdl(buffer, adxDef, progressCallback) {
     var data = new Array(totalRecords);
     var currentValues = new Float64Array(numCols);
 
-    // Initialize current values by applying each channel's transform to raw=0
-    // This matches TunerPro's behavior where channels show their transformed
-    // zero-state before the first command record arrives.
-    for (var col = 1; col < numCols; col++) {
-        var def = columnDefs[col];
-        if (def) {
-            currentValues[col] = def.transform(0);
-        }
-    }
+    // A channel is NaN until its command's first record arrives. (TunerPro shows the transformed zero there, e.g. -40 °C oil
+    // from "X-40", which reads as a real value.)
+    for (var col = 1; col < numCols; col++) currentValues[col] = NaN;
 
     // Build lookup: for each command index, which columns does it update?
     var cmdColMap = []; // cmdColMap[cmdIdx] = [{colIdx, payloadOffset, sizeBits, signed, transform}]

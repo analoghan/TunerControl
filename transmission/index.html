@@ -14,7 +14,7 @@
     </nav>
 
     <h1>Transmission Shift Analyzer</h1>
-    <p class="subtitle">TurboLamik 8HP shift quality analysis — load a TunerPro RT log (.csv or .xdl binary) to analyze shift events, clutch slip, and downshift harshness.</p>
+    <p class="subtitle">TurboLamik 8HP shift analysis — load a TunerPro RT log (.xdl with its .adx, or .csv) to time every shift, find flares and bumps, and check adaptation. Add the TCU bin (.bin with its .xdf) to read the gear ratios, start gear, blip and correction tables.</p>
 
     <section class="file-section">
       <div class="file-row">
@@ -53,47 +53,60 @@
 
     <section id="results-section" class="results-section" hidden>
       <div class="report-block">
-        <h2>Shift Summary</h2>
+        <h2>Findings</h2>
+        <div id="findings-content"></div>
+      </div>
+
+      <div class="report-block">
+        <h2>Summary</h2>
         <div id="summary-content"></div>
       </div>
 
       <div class="report-block">
-        <h2>Downshift Harshness Analysis</h2>
-        <p class="section-desc">Downshifts sorted by harshness score. High scores indicate aggressive clutch engagement causing engine braking shudder.</p>
-        <div id="downshift-content"></div>
+        <h2>Shifts by Transition</h2>
+        <p class="section-desc">Medians per gear change. A shift runs from the request (Gear Target changes) to the Gear change: the delay before the
+          ratio starts moving (the oncoming element filling and taking torque), then the ratio change. Flare is input speed above the gear it should be
+          held to; sag and bump are the drop and rise of vehicle acceleration against the half second before the shift.</p>
+        <div id="transition-content"></div>
       </div>
 
       <div class="report-block">
-        <h2>Upshift Clutch Slip Analysis</h2>
-        <p class="section-desc">Upshifts under power sorted by slip duration. Long slip = excessive clutch wear and heat generation.</p>
-        <div id="upshift-content"></div>
+        <h2>All Shifts</h2>
+        <p class="section-desc">Click a shift to chart it.</p>
+        <div class="filter-row" role="group" aria-label="Show">
+          <button class="filter-btn active" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="up">Upshifts</button>
+          <button class="filter-btn" data-filter="down">Downshifts</button>
+        </div>
+        <div id="shift-chart" class="shift-chart" hidden></div>
+        <div id="shift-content" class="table-wrap"></div>
       </div>
 
       <div class="report-block">
-        <h2>Per-Clutch Health</h2>
-        <p class="section-desc">Aggregated statistics per clutch element (A through E). The 8HP uses specific clutches for specific gear transitions.</p>
+        <h2>Shift Elements</h2>
+        <p class="section-desc">ZF 8HP: three of the five elements (A–E) are applied in each gear, and each shift hands over from one to another. Grouped
+          by the oncoming (applying) element.</p>
         <div id="clutch-content"></div>
       </div>
 
-      <div class="report-block" id="bin-correlation-section">
-        <h2>Shift-to-Bin Correlator</h2>
-        <p class="section-desc">Maps each flagged shift transition to the bin correction tables and blip settings that control it. Load a .bin + .xdf to enable.</p>
-        <div id="bin-correlation-content"></div>
-      </div>
-
-      <div class="report-block" id="adaptation-section">
-        <h2>Adaptation Monitor</h2>
-        <p class="section-desc">Current TCU adaptation state from the bin file. Shows learned pressure and timing corrections per clutch and gear.</p>
+      <div class="report-block">
+        <h2>Adaptation</h2>
         <div id="adaptation-content"></div>
       </div>
 
+      <div class="report-block" id="bin-section" hidden>
+        <h2>Bin Settings</h2>
+        <div id="bin-content"></div>
+      </div>
+
       <div class="report-block">
-        <h2>Diagnostics &amp; Recommendations</h2>
-        <div id="diagnostics-content"></div>
+        <h2>How This Is Measured</h2>
+        <div id="method-content"></div>
       </div>
     </section>
   </div>
 
+  <script src="shift-analysis.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
