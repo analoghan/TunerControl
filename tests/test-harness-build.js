@@ -112,7 +112,7 @@ describe('Harness — BOM and optional lengths', function () {
     m.connectors[1].pins[0].remote = 'M142.A.1';
     assert.equal(hbByFrom(harnessCutList(m), 'M142.A.1')[0].length, 300);
     var csv = harnessCutListCsv(m);
-    assert.equal(csv.split('\r\n')[0], '#,From,From terminal,To,To terminal,Wire part number,Wire,Function,Length (mm),Note');
+    assert.equal(csv.split('\r\n')[0], '#,From,From terminal,To,To terminal,Wire part number,Wire,Cable,Function,Length (mm),Note');
     assert.ok(csv.indexOf('"22 AWG White (Shielded 2)"') < 0 && csv.indexOf('Eyelet (engine block)') >= 0);
     assert.equal(hbCsv(['a'], [['x, "y"']]), 'a\r\n"x, ""y"""\r\n');
   });

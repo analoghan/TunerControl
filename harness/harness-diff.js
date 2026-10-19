@@ -19,7 +19,7 @@
 var HDIFF_CONNECTOR_FIELDS = [['title', 'Title'], ['sheet', 'Sheet'], ['connector', 'Connector'], ['boot', 'Boot'],
     ['mateConn', 'Mate connector'], ['matePin', 'Mate pin'], ['notes', 'Notes'], ['chassisFunction', 'Chassis Function column']];
 var HDIFF_SPLICE_FIELDS = [['sheet', 'Sheet'], ['type', 'Splice type'], ['boot', 'Boot'], ['notes', 'Notes']];
-var HDIFF_PIN_FIELDS = HARNESS_PIN_FIELDS.concat('chassis');
+var HDIFF_PIN_FIELDS = HARNESS_PIN_FIELDS.concat('chassis', 'cable');
 
 function hdiffValue(v) {
     if (v === true) return 'on';

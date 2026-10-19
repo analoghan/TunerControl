@@ -89,6 +89,18 @@ function hsysSameFunction(a, b) {
 }
 
 /**
+ * True when both cavities are wires of the same cable part number (harness-cable.js) but different conductors: another colour, or
+ * a shield on one side and a conductor on the other. A colour change of an ordinary wire across a join is allowed.
+ */
+function hsysCableSwap(modelA, a, modelB, b) {
+    if (typeof harnessCableType !== 'function') return false;
+    var ta = harnessCableType(modelA, a.wirePn, a.wire), tb = harnessCableType(modelB, b.wirePn, b.wire);
+    if (!ta || !tb || harnessText(a.wirePn).toLowerCase() !== harnessText(b.wirePn).toLowerCase()) return false;
+    var ca = harnessCableColor(a.wire), cb = harnessCableColor(b.wire);
+    return !!ca && !!cb && ca !== cb;
+}
+
+/**
  * Checks across mated connectors. Returns [{ severity, harness, where, message, other }] where `where` is the
  * endpoint in `harness` and `other` = { harness, where } is the matching end on the other side.
  */
@@ -120,6 +132,10 @@ function harnessSystemChecks(members, mates) {
             if (wx !== wy) {
                 issues.push(Object.assign(here, { severity: 'warning', message: 'Cavity ' + cav + ' has a wire on the ' +
                     (wx ? nameA : nameB) + ' side but none on the ' + (wx ? nameB : nameA) + ' side.' }));
+            } else if (wx && wy && hsysCableSwap(ma.model, x, mb.model, y)) {
+                // A cable's conductors must meet the same conductor across the join (harness-cable.js): colour for colour, shield to shield.
+                issues.push(Object.assign(here, { severity: 'error', message: 'Cavity ' + cav + ' joins ' + x.wire + ' (' + x.function + ') in ' + ma.name +
+                    ' to ' + y.wire + ' (' + y.function + ') in ' + mb.name + ': the cable\'s conductors are swapped across the ' + ca.id + ' join.' }));
             } else if (wx && wy && !hsysSameFunction(x.function, y.function)) {
                 issues.push(Object.assign(here, { severity: 'warning', message: 'Cavity ' + cav + ' is "' + x.function + '" in ' + ma.name +
                     ' but "' + y.function + '" in ' + mb.name + '.' }));

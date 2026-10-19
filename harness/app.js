@@ -284,11 +284,12 @@ function selectTab(tab) {
         t.classList.toggle('active', on);
         t.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    ['connectors', 'splices', 'diagram', 'system', 'can', 'checks', 'build', 'revisions', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
+    ['connectors', 'splices', 'cables', 'diagram', 'system', 'can', 'checks', 'build', 'revisions', 'tune'].forEach(function (p) { $('panel-' + p).hidden = p !== tab; });
     if (tab === 'system') renderSystem();
     if (tab === 'connectors' && state.model) renderConnectorEditor();   // CAN pin tags may have changed
     if (tab === 'can') renderCan();
     if (tab === 'checks') renderChecks();
+    if (tab === 'cables') renderCables();
     if (tab === 'build') renderBuild();
     if (tab === 'revisions') renderRevisions();
     if (tab === 'diagram') renderDiagram();
@@ -303,6 +304,7 @@ function renderAll() {
     renderConnectorEditor();
     renderSpliceEditor();
     if (state.tab === 'checks') renderChecks();
+    if (state.tab === 'cables') renderCables();
     if (state.tab === 'tune') renderTune();
     if (state.tab === 'diagram') renderDiagram();
     if (state.tab === 'system') renderSystem();
@@ -317,7 +319,7 @@ function renderAll() {
 var checkTimer = null;
 
 function runChecks() {
-    state.checks = harnessCheck(state.model);
+    state.checks = harnessCheck(state.model).concat(cableIssues());
     state.issuesByRow = {}; state.issuesByBlock = {};
     state.checks.forEach(function (i) {
         if (i.ref) {
@@ -329,6 +331,7 @@ function runChecks() {
         b[i.severity]++;
     });
     var errors = state.checks.filter(function (i) { return i.severity === 'error'; }).length;
+    $('count-cables').textContent = state.cables.cables.length || '';
     $('count-checks').textContent = errors ? errors + ' errors' : state.checks.length ? state.checks.length + ' warnings' : '✓';
 }
 
@@ -412,6 +415,128 @@ function renderChecks() {
     });
     $('checks').innerHTML = html + '</tbody></table></div>';
 }
+
+// =========================================================================
+// Cables (harness-cable.js): twisted pairs and other multi-conductor cables
+// =========================================================================
+
+/** Cable problems as check issues, on the row of the cable's first wire; the notes (info) stay on the Cables tab. Sets state.cables. */
+function cableIssues() {
+    state.cables = harnessCables(state.model);
+    var out = [];
+    state.cables.cables.forEach(function (c) {
+        var w = c.wires[0], end = w.from.kind === 'pin' ? w.from : w.to.kind === 'pin' ? w.to : null, ref = null;
+        var conn = end ? findConnector(end.block) : null;
+        if (conn) {
+            var cavity = end.label.slice(end.block.length + 1);
+            for (var i = 0; i < conn.pins.length; i++) if (conn.pins[i].cavity === cavity) { ref = { kind: 'pin', block: conn.id, index: i }; break; }
+        }
+        c.problems.forEach(function (p) {
+            if (p.severity === 'info') return;
+            out.push({ severity: p.severity, where: end ? end.label : c.name, message: 'Cable ' + c.name + ': ' + p.message, target: null, ref: ref, fix: null });
+        });
+    });
+    return out;
+}
+
+/** The editor's pin fields for a connector: with the Cable column when one of its wires is in a cable. */
+function connectorFields(c) {
+    var withCable = !!state.cables && c.pins.some(function (p) { return state.cables.byEndpoint[harnessEndpointName(c.id, p.cavity)]; });
+    return harnessPinFields(c, withCable);
+}
+
+function cableEndHtml(e) {
+    if (e.kind === 'pin' || e.kind === 'splice') return '<button class="link-btn" data-cable-goto="' + esc(e.label) + '">' + esc(e.label) + '</button>';
+    return esc(e.label || '—');
+}
+
+function renderCables() {
+    var el = $('cables'), r = state.cables;
+    if (!state.model || !r) { el.innerHTML = ''; return; }
+    var named = r.cables.filter(function (c) { return c.explicit; }).length, detected = r.cables.length - named;
+    var html = '<div class="build-bar"><span class="hint">' + r.cables.length + ' cable' + (r.cables.length === 1 ? '' : 's') +
+        (r.cables.length ? ' — ' + named + ' named in the Cable column, ' + detected + ' detected' : '') + '</span><span class="spacer"></span>' +
+        (detected ? '<button class="btn btn-small btn-secondary" id="cables-name" title="Write the detected names into the Cable column of their wires, so ' +
+            'they stay as they are">Name the detected cables</button>' : '') + '</div>';
+    if (r.untyped.length) {
+        html += '<p class="hint">' + r.untyped.map(function (u) { return '<strong>' + esc(u.pn) + '</strong> (' + u.count + ' wire' + (u.count === 1 ? '' : 's') + ')'; })
+            .join(', ') + ' look' + (r.untyped.length === 1 ? 's' : '') + ' like a cable but ' + (r.untyped.length === 1 ? 'is' : 'are') +
+            ' not a known cable type — add ' + (r.untyped.length === 1 ? 'it' : 'them') + ' to the list below.</p>';
+    }
+    if (r.cables.length) {
+        html += '<div class="table-scroll"><table class="event-table data-table"><thead><tr><th>Cable</th><th>Type</th><th>Part number</th>' +
+            '<th>Conductors</th><th>Shield / drain</th><th>Notes</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>' +
+            r.cables.map(function (c, n) {
+                var name = c.explicit ? '<input type="text" class="text-input cable-name" data-cable="' + n + '" value="' + esc(c.name) +
+                    '" aria-label="Name of cable ' + esc(c.name) + '" title="Renames the cable in every cavity that names it; empty leaves it to detection">'
+                    : esc(c.name) + ' <span class="hint">detected</span>';
+                var wires = function (list) {
+                    return list.map(function (w) { return cableEndHtml(w.from) + ' → ' + cableEndHtml(w.to) + ' <span class="hint">' + esc(w.wire) + '</span>'; }).join('<br>');
+                };
+                return '<tr><td>' + name + '</td><td>' + esc(c.type ? c.type.label : 'Cable') + '</td><td class="param-name">' + esc(c.pn) + '</td><td>' +
+                    wires(c.conductors) + '</td><td>' + (c.shields.length ? wires(c.shields) : '<span class="hint">' + (c.type && c.type.shielded ? 'none here' : '—') + '</span>') +
+                    '</td><td>' + c.problems.map(function (p) {
+                        return (p.severity === 'info' ? '' : markerHtml([p]) + ' ') + '<span' + (p.severity === 'info' ? ' class="hint"' : '') + '>' + esc(p.message) + '</span>';
+                    }).join('<br>') + '</td><td class="actions">' + (c.anchor.block ? '<button class="btn btn-small btn-secondary" data-cable-diagram="' +
+                        esc(c.anchor.block) + '">Diagram</button>' : '') + '</td></tr>';
+            }).join('') + '</tbody></table></div>';
+    } else {
+        html += '<p class="muted">No cables found: no conductor part number or description says a wire is part of a multi-conductor cable.</p>';
+    }
+    var types = state.model.cableTypes || [];
+    html += '<h3>Cable part numbers</h3><p class="hint">M27500 part numbers need no entry: M27500-22TG2T14 is 22 AWG, 2 conductors, shield T ' +
+        '(U = no shield). List other cable part numbers here (e.g. an Ethernet cable as unshielded pairs). A description such as "(3 Wire Shielded)" ' +
+        'also works, and every row with the same part number counts as that cable.</p>' +
+        '<table class="event-table data-table cable-types"><thead><tr><th>Part number</th><th>Conductors</th><th>Shielded</th><th></th></tr></thead><tbody>' +
+        types.map(function (t, i) {
+            return '<tr><td><input type="text" class="text-input" data-ctype="' + i + '" data-field="pn" value="' + esc(t.pn) + '" aria-label="Part number"></td>' +
+                '<td><input type="number" class="text-input" min="2" max="12" data-ctype="' + i + '" data-field="conductors" value="' + esc(t.conductors) +
+                '" aria-label="Conductors" style="width:70px"></td><td><input type="checkbox" data-ctype="' + i + '" data-field="shielded"' +
+                (t.shielded ? ' checked' : '') + ' aria-label="Shielded"></td><td class="actions"><button class="btn btn-small btn-danger" data-ctype-remove="' + i +
+                '" aria-label="Remove ' + esc(t.pn) + '">&times;</button></td></tr>';
+        }).join('') + '</tbody></table><button class="btn btn-small btn-secondary" id="ctype-add">Add a cable part number</button>';
+    el.innerHTML = html;
+}
+
+function cablesChanged() {
+    setDirty(true);
+    runChecks();
+    renderAll();
+}
+
+$('cables').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    if (b.id === 'cables-name') {
+        harnessNameCables(state.model, state.cables.cables);
+        cablesChanged();
+    } else if (b.id === 'ctype-add') {
+        var untyped = state.cables.untyped[0];
+        (state.model.cableTypes = state.model.cableTypes || []).push({ pn: untyped ? untyped.pn : '', conductors: 2, shielded: false });
+        cablesChanged();
+    } else if (b.hasAttribute('data-ctype-remove')) {
+        state.model.cableTypes.splice(+b.getAttribute('data-ctype-remove'), 1);
+        cablesChanged();
+    } else if (b.hasAttribute('data-cable-goto')) {
+        gotoEndpoint(b.getAttribute('data-cable-goto'));
+    } else if (b.hasAttribute('data-cable-diagram')) {
+        state.diagram = b.getAttribute('data-cable-diagram');
+        selectTab('diagram');
+    }
+});
+$('cables').addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.classList.contains('cable-name')) {
+        var cable = state.cables.cables[+t.getAttribute('data-cable')];
+        if (cable) harnessRenameCable(state.model, cable.name, t.value);
+        cablesChanged();
+    } else if (t.hasAttribute('data-ctype')) {
+        var type = state.model.cableTypes[+t.getAttribute('data-ctype')], f = t.getAttribute('data-field');
+        if (!type) return;
+        type[f] = f === 'shielded' ? t.checked : f === 'conductors' ? Math.max(2, parseInt(t.value, 10) || 2) : t.value.trim();
+        cablesChanged();
+    }
+});
 
 function applyFix(issue) {
     var rec = rowRecord(issue.ref);
@@ -554,8 +679,10 @@ function rowsHtml(kind, block, records, fields, columns) {
         html += '<tr data-row="' + i + '"><td class="mark-col" data-marker="' + kind + '|' + esc(block.id) + '|' + i + '">' +
             markerHtml(rowIssues(kind, block.id, i), i, open) + '</td>';
         fields.forEach(function (f) {
+            var detected = f === 'cable' && !harnessText(rec.cable) && state.cables ? state.cables.byEndpoint[harnessEndpointName(block.id, rec.cavity)] : null;
             var input = '<input type="text" class="cell-input cell-' + f + '" data-row="' + i + '" data-field="' + f + '" value="' +
-                esc(rec[f]) + '" aria-label="' + esc(f + ' row ' + (i + 1)) + '">';
+                esc(rec[f]) + '" aria-label="' + esc(f + ' row ' + (i + 1)) + '"' +
+                (detected ? ' placeholder="' + esc(detected.name) + '" title="Detected cable: ' + esc(detected.name) + ' — type a name to fix it, or - to leave it out"' : '') + '>';
             if (f === remoteField) {
                 input = '<div class="remote-cell">' + input + '<button class="link-btn" data-goto="' + i + '" title="Go to the other end" ' +
                     'aria-label="Go to the other end of row ' + (i + 1) + '">&rarr;</button></div>';
@@ -588,7 +715,7 @@ function renderConnectorEditor() {
         fieldsHtml(c, CONNECTOR_FIELDS) +
         '<label class="check-label chassis-toggle" title="A free-text column for what each wire connects to outside this harness">' +
         '<input type="checkbox" id="chassis-toggle"' + (c.chassisFunction ? ' checked' : '') + '> Chassis Function column</label>' +
-        imagesHtml(c) + rowsHtml('pin', c, c.pins, harnessPinFields(c), harnessPinColumns(c, harnessPinFields(c))) +
+        imagesHtml(c) + rowsHtml('pin', c, c.pins, connectorFields(c), harnessPinColumns(c, connectorFields(c))) +
         '<button class="btn btn-secondary btn-small" id="add-row">Add cavity</button>';
     loadThumbnails(el);
 }
@@ -793,7 +920,7 @@ function wireEditor(containerId, isConnector) {
             setDirty(true); runChecks(); renderAll();
         } else if (t.id === 'add-row') {
             var blank = {};
-            (isConnector ? HARNESS_PIN_FIELDS.concat('chassis') : HARNESS_WIRE_FIELDS).forEach(function (f) { blank[f] = ''; });
+            (isConnector ? HARNESS_PIN_FIELDS.concat('chassis', 'cable') : HARNESS_WIRE_FIELDS).forEach(function (f) { blank[f] = ''; });
             if (isConnector) {
                 var nums = recs.map(function (p) { return parseInt(p.cavity, 10); }).filter(function (n) { return !isNaN(n); });
                 if (nums.length === recs.length && nums.length) blank.cavity = String(Math.max.apply(null, nums) + 1);
@@ -897,7 +1024,7 @@ function renderDiagram() {
         var urls = {};
         pairs.forEach(function (p) { if (p) urls[p[0]] = p[1]; });
         var hardware = state.tunePkg && state.tunePkg.meta ? state.tunePkg.meta['Summary.Hardware'] : '';
-        var d = focus ? harnessBlockDiagram(state.model, focus.id, { imageUrls: urls })
+        var d = focus ? harnessBlockDiagram(state.model, focus.id, { imageUrls: urls, cables: state.cables ? state.cables.byEndpoint : null })
                       : harnessOverviewDiagram(state.model, { hardware: hardware || undefined });
         $('diagram').innerHTML = d.svg;
     });
@@ -1392,7 +1519,7 @@ function pdfBlockHtml(block, isConnector, opts, urls) {
         html += '<p class="pr-note">' + fields.map(function (f) { return '<strong>' + esc(f[1]) + ':</strong> ' + esc(block[f[0]]); }).join(' · ') + '</p>';
     }
     var kind = isConnector ? 'pin' : 'wire', recs = isConnector ? block.pins : block.wires;
-    var keys = isConnector ? harnessPinFields(block) : HARNESS_WIRE_FIELDS;
+    var keys = isConnector ? connectorFields(block) : HARNESS_WIRE_FIELDS;
     var problems = recs.some(function (r, i) { return rowIssues(kind, block.id, i).length; });
     var headers = (isConnector ? harnessPinColumns(block, keys) : keys.map(function (k, i) { return (block.columns || [])[i] || HARNESS_WIRE_COLUMNS[i] || k; }))
         .map(esc);
@@ -1497,9 +1624,11 @@ $('pdf-btn').addEventListener('click', function () { if (state.model) openPdfDia
 
 /** The cut list in "from" order (natural sort, so M142.A.2 comes before M142.A.10). */
 function buildWires() {
-    return harnessCutList(state.model).sort(function (a, b) {
+    var wires = harnessCutList(state.model).sort(function (a, b) {
         return a.from.label.localeCompare(b.from.label, undefined, { numeric: true, sensitivity: 'base' });
     });
+    harnessCables(state.model, wires);   // sets wire.cableName
+    return wires;
 }
 
 function buildEndHtml(end, forPdf) {
@@ -1512,13 +1641,13 @@ function buildEndHtml(end, forPdf) {
 function buildCutListHtml(wires, forPdf) {
     var unit = state.model.lengthUnit || 'mm';
     return '<div class="table-scroll"><table class="event-table data-table build-table"><thead><tr><th>#</th><th>From</th><th>Terminal</th><th>To</th>' +
-        '<th>Terminal</th><th>Wire part number</th><th>Wire</th><th>Length (' + esc(unit) + ')</th><th>Function</th><th>Note</th></tr></thead><tbody>' +
+        '<th>Terminal</th><th>Wire part number</th><th>Wire</th><th>Cable</th><th>Length (' + esc(unit) + ')</th><th>Function</th><th>Note</th></tr></thead><tbody>' +
         wires.map(function (w, i) {
             var len = forPdf ? (w.length === null ? '' : esc(w.length)) : '<input type="number" class="text-input build-length" min="0" step="any" data-key="' +
                 esc(w.key) + '" value="' + (w.length === null ? '' : esc(w.length)) + '" aria-label="Length of wire ' + (i + 1) + '" placeholder="—">';
             return '<tr' + (w.problem ? ' class="build-problem"' : '') + '><td>' + (i + 1) + '</td><td>' + buildEndHtml(w.from, forPdf) + '</td><td>' + esc(w.from.terminal) +
                 '</td><td>' + buildEndHtml(w.to, forPdf) + '</td><td>' + esc(w.to.kind === 'terminal' ? '' : w.to.terminal) + '</td><td class="param-name">' +
-                esc(w.wirePn) + '</td><td>' + esc(w.wire) + '</td><td class="num">' + len + '</td><td>' + esc(w.function) + '</td><td>' +
+                esc(w.wirePn) + '</td><td>' + esc(w.wire) + '</td><td>' + esc(w.cableName || '') + '</td><td class="num">' + len + '</td><td>' + esc(w.function) + '</td><td>' +
                 (w.problem ? markerHtml([{ severity: 'warning', message: w.problem }]) + ' ' + esc(w.problem) : '') + '</td></tr>';
         }).join('') + '</tbody></table></div>';
 }
@@ -1622,6 +1751,8 @@ function pinoutSheetHtml(block, rows, urls) {
     var fields = CONNECTOR_FIELDS.filter(function (f) { return f[0] !== 'id' && f[0] !== 'title' && f[0] !== 'sheet' && harnessText(block[f[0]]); });
     var noteHead = harnessPinColumns(block, HARNESS_PIN_FIELDS)[5];
     var withNote = rows.some(function (r) { return r.note; }), withChassis = rows.some(function (r) { return r.chassis; });
+    function cableOf(r) { var c = state.cables && state.cables.byEndpoint[harnessEndpointName(block.id, r.cavity)]; return c ? c.name : ''; }
+    var withCable = rows.some(cableOf);
     var wired = rows.filter(function (r) { return !r.empty; }).length;
     var html = '<p class="pr-note pinout-source">' + esc(pinoutSource()) + '</p>' +
         (block.title && block.title !== block.id ? '<p class="pinout-title">' + esc(block.title) + '</p>' : '') +
@@ -1632,13 +1763,15 @@ function pinoutSheetHtml(block, rows, urls) {
             return '<figure><img src="' + esc(urls[im.id]) + '" alt="">' + (im.caption ? '<figcaption>' + esc(im.caption) + '</figcaption>' : '') + '</figure>';
         }).join('') + '</div>';
     }
-    var headers = ['Cavity', 'Function'].concat(withNote ? [esc(noteHead)] : [], ['Wire', 'Wire part number', 'Terminal', 'Goes to'], withChassis ? [esc(HARNESS_CHASSIS_COLUMN)] : []);
+    var headers = ['Cavity', 'Function'].concat(withNote ? [esc(noteHead)] : [], ['Wire', 'Wire part number', 'Terminal', 'Goes to'], withChassis ? [esc(HARNESS_CHASSIS_COLUMN)] : [],
+        withCable ? [esc(HARNESS_CABLE_COLUMN)] : []);
     html += prTable(headers, rows.map(function (r) {
         var cells = ['<strong>' + esc(r.cavity) + '</strong>', r.empty ? '<span class="muted">' + esc(r.function || 'Empty') + '</span>' : esc(r.function)];
         if (withNote) cells.push(esc(r.note));
         cells.push(r.empty ? '<span class="muted">' + esc(r.wire || r.wirePn || 'no wire') + '</span>' : pinoutSwatch(r.look) + esc(r.wire),
                    r.empty ? '' : '<span class="pinout-part">' + esc(r.wirePn) + '</span>', '<span class="pinout-part">' + esc(r.terminal) + '</span>', pinoutToHtml(r));
         if (withChassis) cells.push(esc(r.chassis));
+        if (withCable) cells.push(esc(cableOf(r)));
         return cells;
     }), 'pinout-table');
     return html + '<p class="pr-note">' + rows.length + ' cavit' + (rows.length === 1 ? 'y' : 'ies') + ', ' + wired + ' wired.</p>';
@@ -2189,7 +2322,7 @@ var addState = null;   // { file, incoming }
 function sameBlock(a, b) {
     function key(x) {
         return JSON.stringify([x.title, x.connector, x.mateConn, x.matePin, x.type, x.boot, x.notes,
-            (x.pins || x.wires || []).map(function (r) { return (x.pins ? HARNESS_PIN_FIELDS.concat('chassis') : HARNESS_WIRE_FIELDS).map(function (f) { return harnessText(r[f]); }); })]);
+            (x.pins || x.wires || []).map(function (r) { return (x.pins ? HARNESS_PIN_FIELDS.concat('chassis', 'cable') : HARNESS_WIRE_FIELDS).map(function (f) { return harnessText(r[f]); }); })]);
     }
     return !!a.pins === !!b.pins && key(a) === key(b);
 }

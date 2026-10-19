@@ -8,6 +8,8 @@
  * Both return { svg, width, height }. Elements carry data-endpoint="CONN.CAVITY" (a row) or
  * data-node="ID" (a block) for click handling. opts.imageUrls maps image id → URL for the pictures drawn
  * under the focused block in the block diagram; opts.hardware is the ECU prefix for the overview (default M1xx).
+ * opts.cables (harnessCables(model).byEndpoint) marks the cables leaving the focused connector: the twist, a dashed shield
+ * oval, a tick to the shield/drain row and a tag (STP, UTP, 3C S…).
  */
 
 var HD_COLORS = {
@@ -273,6 +275,7 @@ function harnessBlockDiagram(model, id, opts) {
             '" width="' + (s.end.label.length * 6 + 12) + '" height="16" rx="3" fill="#fff" stroke="#bbb"/>' + sym +
             '<text class="dim" x="' + (xl + 5) + '" y="' + (y + 4) + '">' + hdEsc(s.end.label) + '</text></g>';
     });
+    if (opts.cables && !isSplice) body += hdCableMarks(rows, fbox, x0 + w0, opts.cables);
     var yImg = 20 + fbox.height + 16, pics = '';
     (focus.images || []).forEach(function (im) {
         var url = opts.imageUrls && opts.imageUrls[im.id];
@@ -287,6 +290,59 @@ function harnessBlockDiagram(model, id, opts) {
     var height = Math.max(yImg, y1, y2, 20 + fbox.height + 20);
     if (!groups.length && !stubs.length) body += '<text class="sub" x="' + x1 + '" y="40">No connections from ' + hdEsc(focus.id) + '.</text>';
     return { svg: hdSvg(width, height, wires + fbox.svg + body + pics), width: width, height: height };
+}
+
+/** Twist, shield oval and tag for each cable whose wires leave the focus rows (one mark per run of neighbouring rows). */
+function hdCableMarks(rows, fbox, xs, byEndpoint) {
+    var out = '', byCable = [], seen = [];
+    rows.forEach(function (r, i) {
+        var c = byEndpoint[r.endpoint];
+        if (!c) return;
+        var k = seen.indexOf(c);
+        if (k < 0) { k = seen.push(c) - 1; byCable.push([]); }
+        byCable[k].push(i);
+    });
+    seen.forEach(function (c, k) {
+        var shieldRows = {}, runs = [], run = null;
+        c.shields.forEach(function (w) { [w.from, w.to].forEach(function (e) { shieldRows[e.label] = true; }); });
+        byCable[k].forEach(function (i) {
+            if (run && i === run[run.length - 1] + 1) run.push(i); else runs.push(run = [i]);
+        });
+        var type = c.type, tag = type ? type.short : 'Cable';
+        var title = c.name + ' · ' + (type ? type.label : 'cable') + (c.pn ? ' · ' + c.pn : '') +
+            (c.problems.length ? ' — ' + c.problems.map(function (p) { return p.message; }).join(' ') : '');
+        runs.forEach(function (run) {
+            var cond = run.filter(function (i) { return !shieldRows[rows[i].endpoint]; }), shield = run.filter(function (i) { return shieldRows[rows[i].endpoint]; });
+            var span = cond.length ? cond : run, top = fbox.y(span[0]), bottom = fbox.y(span[span.length - 1]), cx = xs + 30, cy = (top + bottom) / 2;
+            out += '<g class="cable"><title>' + hdEsc(title) + '</title>';
+            // The twist: neighbouring conductors cross over and back, each in its own colour over a dark edge, ending on its own row.
+            for (var j = 0; j + 1 < cond.length; j++) {
+                var y1 = fbox.y(cond[j]), y2 = fbox.y(cond[j + 1]), a = hdWireStyle(rows[cond[j]].wire), b = hdWireStyle(rows[cond[j + 1]].wire);
+                out += '<rect x="' + (xs + 17) + '" y="' + (y1 - 4) + '" width="26" height="' + (y2 - y1 + 8) + '" fill="#fff"/>';
+                [[y2, y1, b], [y1, y2, a]].forEach(function (l) {
+                    var d = 'M' + (xs + 16) + ',' + l[0] + ' C' + (xs + 23) + ',' + l[0] + ' ' + (xs + 23) + ',' + l[1] + ' ' + (xs + 30) + ',' + l[1] +
+                        ' C' + (xs + 37) + ',' + l[1] + ' ' + (xs + 37) + ',' + l[0] + ' ' + (xs + 44) + ',' + l[0];
+                    out += '<path d="' + d + '" stroke="#3a3a3a" stroke-width="' + (l[2].width + 2) + '" fill="none"/>' +
+                        '<path d="' + d + '" stroke="' + l[2].color + '" stroke-width="' + l[2].width + '" fill="none"/>' +
+                        (l[2].stripe ? '<path d="' + d + '" stroke="' + l[2].stripe + '" stroke-width="' + Math.max(1, l[2].width / 2.5) +
+                            '" stroke-dasharray="4 4" fill="none"/>' : '');
+                });
+            }
+            if (type && type.shielded) {
+                out += '<ellipse cx="' + cx + '" cy="' + cy + '" rx="17" ry="' + ((bottom - top) / 2 + 9) + '" fill="none" stroke="#666" stroke-width="1.4" stroke-dasharray="4 3"/>';
+                // The shield / drain wire's row: a tick from the oval to it.
+                shield.forEach(function (i) {
+                    var ys = fbox.y(i), edge = ys > cy ? bottom + 9 : top - 9;
+                    out += '<line x1="' + cx + '" y1="' + edge + '" x2="' + cx + '" y2="' + ys + '" stroke="#666" stroke-width="1.4"/>' +
+                        '<circle cx="' + cx + '" cy="' + ys + '" r="2.2" fill="#666"/>';
+                });
+            }
+            var tx = xs + 50, ty = top - 4;
+            out += '<rect x="' + (tx - 2) + '" y="' + (ty - 9) + '" width="' + (tag.length * 6 + 4) + '" height="11" rx="2" fill="#fff" stroke="#bbb"/>' +
+                '<text class="dim" x="' + tx + '" y="' + ty + '" style="font-size:9px">' + hdEsc(tag) + '</text></g>';
+        });
+    });
+    return out;
 }
 
 function harnessOverviewDiagram(model, opts) {

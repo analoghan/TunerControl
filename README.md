@@ -125,6 +125,10 @@ Design and check wiring harnesses built around the M1 ECU.
   devices and linked pins that are missing or don't match, and draws each network with twisted-pair (CAN-H/CAN-L) wiring
 - **Export PDF:** overview and system diagrams, checks, connector and splice tables with their problems, per-block diagrams, pictures and
   the tune comparison, in portrait or landscape
+- **Cables:** twisted pairs and other multi-conductor cables found from the conductor part numbers (M27500 decodes itself; others in a
+  list) and descriptions such as "(3 Wire Shielded)", grouped by the connectors they run between, with their shield or drain rows; names
+  kept in an optional Cable column; checks for extra or same-colour conductors and for a pair swapped across a mated connector; diagrams draw
+  the twist and shield
 - **Cut list & BOM:** one row per wire (both ends, terminals, wire part number and description, function, ends that disagree), and a
   bill of materials — connectors, boots, splices, terminals, cavity plugs, eyelets and wire per part number; optional wire lengths with
   totals per wire type; CSV downloads and PDF sections
@@ -223,7 +227,7 @@ m1-config/                  — M1 Config Viewer (.m1pkg import, tune history, c
                               tune-db.js / tune-api.js (browser / server storage), tune-source.js + tune-picker.js
                               (the stored-tune picker the analysis tools use), worker.js
 
-harness/                    — Harness Builder: harness-model.js, harness-build.js (cut list, BOM), harness-pinout.js,
+harness/                    — Harness Builder: harness-model.js, harness-build.js (cut list, BOM), harness-cable.js (cables), harness-pinout.js,
                               harness-diff.js (revision compare), harness-diagram.js, harness-system.js, harness-can.js,
                               harness-tune.js, harness-store.js
 

@@ -48,6 +48,7 @@
       <li><a href="#editing">Editing connectors and splices</a></li>
       <li><a href="#images">Connector images</a></li>
       <li><a href="#checks">Checks</a></li>
+      <li><a href="#cables">Cables: twisted pairs and shields</a></li>
       <li><a href="#diagrams">Diagrams and tracing</a></li>
       <li><a href="#systems">Systems: harnesses that plug together</a></li>
       <li><a href="#can">CAN networks</a></li>
@@ -96,6 +97,9 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
         switch, chassis loom</em>. A column headed <code>Chassis Function</code> anywhere after Remote Connection is read and switches the
         column on for that connector. Turn it on or off per connector with the <strong>Chassis Function column</strong> box under the connector's
         fields; switching it off only hides it — text already entered is kept and still exported.</li>
+      <li><strong>Cable</strong> (optional): the multi-conductor cable the wire belongs to — see <a href="#cables">Cables</a>. A column headed
+        <code>Cable</code> after Remote Connection is read; the editor shows it on connectors that have cable wires, and it is exported when a
+        cavity names a cable.</li>
       <li>Any other columns (such as an old <em>Status</em> column) are not read.</li>
       <li>Pictures placed beside a block (to its right, at or below its title row) are imported as that block's
         <a href="#images">images</a>.</li>
@@ -181,6 +185,42 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
     </table>
     <p>Two splices may be chained: a splice can list another splice as one of its ends, as long as both list each other.</p>
 
+    <h2 id="cables">Cables: twisted pairs and shields</h2>
+    <p>The <strong>Cables</strong> tab finds the wires that are conductors of one cable — a shielded twisted pair for CAN or a knock sensor, a
+      shielded triple for a crank sensor — and ties them together.</p>
+    <h3>Which wires are cable wires</h3>
+    <ul>
+      <li><strong>M27500 part numbers</strong> decode themselves: <code>M27500/22TG2T14</code> is 22 AWG, wire type TG, <strong>2</strong>
+        conductors, shield <strong>T</strong> (tinned copper braid), jacket 14. Shield code <code>U</code> means no shield, so
+        <code>M27500-22TG2U00</code> is an unshielded twisted pair.</li>
+      <li><strong>The descriptions</strong> <em>(Shielded 3)</em>, <em>(3 Wire Shielded)</em> or <em>(Twisted Pair)</em> make a part number a
+        cable — that is how <code>TSB-3C</code> is read — and every other row with that part number (e.g. its <em>Shield</em> row) counts too.</li>
+      <li><strong>Cable part numbers</strong> at the bottom of the tab: add anything else (an Ethernet cable as unshielded pairs, a vendor's
+        triple) with its conductors and whether it is shielded. Part numbers that look like a cable but aren't known are listed above the table.</li>
+    </ul>
+    <h3>How wires are grouped</h3>
+    <p>Wires with the same cable part number that run between the same two connectors are taken in cavity order, one conductor of each
+      colour, so two CAN pairs from the ECU to a bulkhead split as 28/29 and 30/31. What is left joins through the connector it shares — a
+      sensor's return that runs to a ground splice joins the signal wire from the same sensor connector, and a row described as
+      <em>Shield</em>, <em>Shield Braid</em> or <em>Drain</em> becomes the cable's shield. Sensor and device connectors are joined first.</p>
+    <h3>Fixing a cable</h3>
+    <p>Each detected cable gets a name from its connector and cavities (<code>KNOCK1 1, 2, SHIELD</code>), shown greyed in the Cable column.
+      <strong>Name the detected cables</strong> writes the names into the Cable column, so they no longer depend on detection; rename a named
+      cable in the tab (all its cavities follow). In the Cable column, a name puts the wire in that cable and <code>-</code> keeps it out of every
+      cable; clear the column to go back to detection.</p>
+    <h3>What is checked</h3>
+    <ul>
+      <li>More conductors than the cable has, two conductors of the same colour, more than one shield, or the two ends of a wire naming different
+        cables — in the Checks tab.</li>
+      <li>Notes in the Cables tab: fewer conductors than the cable has (the rest may be in another harness), and a shielded cable with no shield
+        or drain row (the shield isn't grounded in this harness).</li>
+      <li>Across a mated connector (System tab): a cable conductor that meets a different conductor — another colour, or the shield — on the
+        other side, i.e. the pair is swapped across the join.</li>
+    </ul>
+    <p>Block diagrams draw each cable where it leaves the connector: the conductors twisted, a dashed oval for the shield, a tick to the shield
+      or drain row and a tag — <em>STP</em> / <em>UTP</em> for a shielded / unshielded pair, <em>3C S</em> for a shielded triple. The cut list,
+      its CSV and the pinout sheets have a Cable column.</p>
+
     <h2 id="diagrams">Diagrams and tracing</h2>
     <p>The <strong>Diagram</strong> tab draws diagrams from the harness itself — they update as you edit. Choose what to show:</p>
     <ul>
@@ -224,7 +264,7 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
         <strong>Unlink</strong> removes a join; <em>Same name, not joined</em> lists pairs you unlinked or whose parts don't mate, with
         <strong>Link</strong>. <strong>Link manually</strong> joins any two connectors, e.g. ones with different names.</li>
       <li><strong>Checks across joins</strong> — a cavity wired on one side but not the other, a cavity defined on only one side, functions that
-        disagree across the join, and linked connectors whose part numbers don't mate.</li>
+        disagree across the join, cable conductors swapped across the join, and linked connectors whose part numbers don't mate.</li>
     </ul>
     <p>The system tab and diagrams use each other harness's <strong>latest saved revision</strong>, and the open harness as you're editing it.</p>
 

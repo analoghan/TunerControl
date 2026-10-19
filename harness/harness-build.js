@@ -4,6 +4,8 @@
  * harnessCutList(model) → [wire]: one entry per physical wire, joining the two rows that describe it (a cavity and the cavity or
  *   splice end it goes to). wire = { key, from: end, to: end, wirePn, wire, function, length, problem }
  *   end = { label, kind: 'pin' | 'splice' | 'terminal' | 'outside' | 'missing' | 'none', block, terminal }
+ *   wire.cable is the Cable column of either end ('' when neither names one; harness-cable.js groups the wires into cables and
+ *   sets wire.cableName, which the CSV writes) and wire.cableConflict the two names when the ends disagree.
  *   key identifies the wire for its optional length (model.wireLengths[key]); it is the two ends' names, sorted.
  *   problem: '' or why the row needs a look (the two ends list different wires, the other end is missing…).
  * harnessBom(model, wires) → { connectors, boots, splices, terminals, plugs, ends, wire } — each a list of
@@ -89,8 +91,10 @@ function harnessCutList(model) {
             problem = 'The two ends describe the wire differently (' + da + ' / ' + db + ').';
         } else if (to.kind === 'missing') problem = to.label ? 'The other end (' + to.label + ') is not in this harness.' : 'The other end does not exist.';
         else if (to.kind === 'none') problem = 'No other end is given.';
+        var ca = harnessText(a.cable), cb = b ? harnessText(b.cable) : '';
         wires.push({ key: key, from: from, to: to, wirePn: pa || pb, wire: da || db, function: harnessText(a.function) || (b ? harnessText(b.function) : ''),
-                     length: hbLength(model, key), problem: problem });
+                     length: hbLength(model, key), problem: problem, cable: ca || cb,
+                     cableConflict: ca && cb && ca.toLowerCase() !== cb.toLowerCase() ? [ca, cb] : null });
     }
 
     model.connectors.forEach(function (c) {
@@ -190,10 +194,10 @@ function hbCsv(header, rows) {
 
 function harnessCutListCsv(model, wires) {
     var unit = model.lengthUnit || 'mm';
-    return hbCsv(['#', 'From', 'From terminal', 'To', 'To terminal', 'Wire part number', 'Wire', 'Function', 'Length (' + unit + ')', 'Note'],
+    return hbCsv(['#', 'From', 'From terminal', 'To', 'To terminal', 'Wire part number', 'Wire', 'Cable', 'Function', 'Length (' + unit + ')', 'Note'],
         (wires || harnessCutList(model)).map(function (w, i) {
-            return [i + 1, w.from.label, w.from.terminal, w.to.label, w.to.kind === 'terminal' ? '' : w.to.terminal, w.wirePn, w.wire, w.function,
-                    w.length === null ? '' : w.length, w.problem];
+            return [i + 1, w.from.label, w.from.terminal, w.to.label, w.to.kind === 'terminal' ? '' : w.to.terminal, w.wirePn, w.wire, w.cableName || '',
+                    w.function, w.length === null ? '' : w.length, w.problem];
         }));
 }
 

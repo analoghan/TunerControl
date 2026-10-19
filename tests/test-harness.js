@@ -167,7 +167,7 @@ describe('Harness — workbook import and export', function () {
     assert.equal(c.boot, 'SSB');
     assert.equal(c.columns[5], 'MoTeC Function');
     assert.deepEqual(c.pins[1], { cavity: '15', terminal: 'SSC', wirePn: 'M22759/32-22-9', wire: '22 AWG White',
-      function: 'MAP Pressure Signal', note: 'AV2', remote: 'MAP.2', chassis: '' });
+      function: 'MAP Pressure Signal', note: 'AV2', remote: 'MAP.2', chassis: '', cable: '' });
     assert.equal(m.connectors[2].columns[5], 'Notes');
     assert.equal(m.splices[0].type, 'Open Barrel');
     assert.equal(m.splices[0].wires.length, 3);

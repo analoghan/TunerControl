@@ -64,6 +64,7 @@
       <div class="tabs" role="tablist" aria-label="Harness views">
         <button class="tab active" role="tab" aria-selected="true" data-tab="connectors">Connectors <span class="count" id="count-connectors"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="splices">Splices <span class="count" id="count-splices"></span></button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="cables">Cables <span class="count" id="count-cables"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="diagram">Diagram</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="system">System <span class="count" id="count-system"></span></button>
         <button class="tab" role="tab" aria-selected="false" data-tab="can">CAN networks <span class="count" id="count-can"></span></button>
@@ -93,6 +94,16 @@
           </aside>
           <div id="splice-editor" class="block-editor"></div>
         </div>
+      </div>
+
+      <div id="panel-cables" class="panel" role="tabpanel" hidden>
+        <h2>Cables</h2>
+        <p class="panel-desc">Twisted pairs and other multi-conductor cables, found from the conductor part numbers (M27500 part numbers
+          decode themselves; others go in the list below) and descriptions such as "(3 Wire Shielded)". Wires with the same cable part number
+          are grouped by the connectors they run between, in cavity order with one conductor of each colour, and a shield or drain row joins
+          its cable. Name a cable in the Cable column of a cavity to fix it ("-" keeps a wire out of every cable); the diagrams draw each cable
+          with its twist and shield.</p>
+        <div id="cables"></div>
       </div>
 
       <div id="panel-diagram" class="panel" role="tabpanel" hidden>
@@ -221,6 +232,7 @@
   <script src="harness-system.js"></script>
   <script src="harness-can.js"></script>
   <script src="harness-build.js"></script>
+  <script src="harness-cable.js"></script>
   <script src="harness-pinout.js"></script>
   <script src="harness-diff.js"></script>
   <script src="harness-store.js"></script>
