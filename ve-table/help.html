@@ -127,8 +127,8 @@
     <h2 id="quick-start">Quick Start</h2>
     <ol>
       <li>Export a log from MoTeC i2 as CSV, or use the raw <code>.ld</code> file directly.</li>
-      <li>Use the tune package (<code>.m1pkg</code>) the log was recorded with, or export your current VE table from MoTeC M1 Tune as a CSV (M1 v2 format).</li>
-      <li>Load both files into the tool and click <strong>Process</strong>.</li>
+      <li>Choose the tune the log was recorded with: a stored tune (suggested from the log) or its <code>.m1pkg</code> file.</li>
+      <li>Click <strong>Process</strong>.</li>
       <li>Review the correction table — positive values mean "add fuel," negative means "remove fuel."</li>
       <li>Download the <code>VE_New_Values.csv</code> and import it back into M1 Tune.</li>
     </ol>
@@ -151,25 +151,17 @@
       <li><strong>Throttle Position</strong> — for the TPS rate-of-change filter</li>
     </ul>
 
-    <h3>VE Table from a tune package (.m1pkg)</h3>
-    <p>Select the M1 Tune package (<code>.m1pkg</code>) directly and the tool reads <strong>Engine Efficiency Main</strong> from it — no CSV export needed. The file name line shows which tune and table size were read. Use the package that was in the ECU when the log was recorded, so the corrections apply to the values that were actually running.</p>
-    <p>The tool works on a single RPM × manifold-pressure table. If Engine Efficiency Main has more than one Ambient Pressure slice, export the slice you want as a CSV instead. <code>VE_New_Values.csv</code> is the same M1 v2 CSV either way, ready to import into M1 Tune.</p>
+    <h3>Tune (.m1pkg)</h3>
+    <p>The VE table is <strong>Engine Efficiency Main</strong>, read from the tune — a stored tune or an M1 Tune package (<code>.m1pkg</code>).
+      The line under the tune controls shows which tune and table size were read. Use the tune that was in the ECU when the log was recorded,
+      so the corrections apply to the values that were actually running.</p>
+    <p>The tool works on a single RPM × manifold-pressure table; a tune whose Engine Efficiency Main has more than one Ambient Pressure slice
+      is refused. <code>VE_New_Values.csv</code> is an M1 v2 CSV, ready to import into M1 Tune.</p>
 
     <h3>Stored tunes</h3>
     <p>Tunes imported in the <a href="../m1-config/index.html">M1 Config Viewer</a> appear in <strong>Or a stored tune</strong>. When you choose a
       log, the tool suggests the tune that was most likely in the ECU when it was recorded — the latest tune from the same ECU saved before the
-      log started — and says why (or why none fits). Picking a file or another tune yourself always takes precedence.</p>
-
-    <h3>VE Table CSV (M1 v2 format)</h3>
-    <p>This is the CSV exported from MoTeC M1 Tune. The tool expects the standard M1 v2 header format:</p>
-    <div class="example-box">
-      <p><code>M1,v2</code></p>
-      <p><code>Body,%</code></p>
-      <p><code>Cols,rpm,Eng Speed</code></p>
-      <p><code>Rows,kPa,Inlet Man Pres</code></p>
-      <p><code>,1000,1500,2000,...</code> (RPM breakpoints)</p>
-      <p><code>30,45.2,46.1,...</code> (MAP breakpoint + VE values)</p>
-    </div>
+      log started — and says why (or why none fits). Picking a <code>.m1pkg</code> or another tune yourself always takes precedence.</p>
 
     <!-- Filter Settings -->
     <h2 id="filters">Filter Settings</h2>

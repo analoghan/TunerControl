@@ -26,16 +26,16 @@
       </div>
 
       <div class="file-row">
-        <label for="ff-table-input">Fuel Film Primary (.m1pkg or .csv, optional):</label>
-        <input type="file" id="ff-table-input" accept=".m1pkg,.csv" />
-        <span id="ff-filename" class="filename-display">No file selected</span>
+        <label for="pkg-input">Tune (.m1pkg, optional):</label>
+        <input type="file" id="pkg-input" accept=".m1pkg" />
       </div>
 
-      <div class="file-row" id="ff-tune-row" hidden>
-        <label for="ff-tune">Or a stored tune:</label>
-        <select id="ff-tune" class="tune-select"><option value="">— choose a tune from the M1 Config Viewer —</option></select>
-        <span id="ff-tune-hint" class="tune-hint"></span>
+      <div class="file-row" id="tune-row" hidden>
+        <label for="tune-select">Or a stored tune:</label>
+        <select id="tune-select" class="tune-select"><option value="">— choose a tune from the M1 Config Viewer —</option></select>
+        <span id="tune-hint" class="tune-hint"></span>
       </div>
+      <p id="tune-status" class="tune-status"></p>
 
       <div class="file-row">
         <label for="ff-scale">Fuel Film Scale (%):</label>
@@ -173,6 +173,7 @@
   <script src="../m1-config/tune-db.js"></script>
   <script src="../m1-config/tune-api.js"></script>
   <script src="../m1-config/tune-source.js"></script>
+  <script src="../m1-config/tune-picker.js"></script>
   <script src="m1pkg-film.js"></script>
   <script src="worker.js"></script>
   <script src="film-correct.js"></script>

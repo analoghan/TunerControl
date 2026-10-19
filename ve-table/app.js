@@ -8,9 +8,7 @@
 // ---------------------------------------------------------------------------
 
 const logInput        = document.getElementById('log-input');
-const veInput         = document.getElementById('ve-input');
 const logFilename     = document.getElementById('log-filename');
-const veFilename      = document.getElementById('ve-filename');
 const processBtn      = document.getElementById('process-btn');
 
 const progressContainer = document.getElementById('progress-container');
@@ -36,15 +34,11 @@ const smoothingAmountInput = document.getElementById('smoothing-amount');
 // ---------------------------------------------------------------------------
 
 let logFile = null;   // currently selected log File object (null if invalid/cleared)
-let veFile  = null;   // currently selected VE table File object (null if invalid/cleared)
-let veM1pkgCsv = null; // VE table CSV built from a selected .m1pkg or stored tune (null for CSV inputs)
-let veFromStore = false; // the VE table came from a tune stored by the M1 Config Viewer
-let vePicked = false;    // the user chose the VE source themselves (don't replace it with a suggestion)
-let storedTunes = [];    // tunes stored by the M1 Config Viewer, newest first
+let veTable = null;   // m1pkgVeTableCsv() of the chosen tune (Engine Efficiency Main as VE table CSV), or null
 let lastResult = null; // stores the last processing result for table toggling
 let worker  = null;   // current Web Worker instance
 let lastRun = null;   // { file, settings, tune } of the last processed log, for the log panel and the tuning history
-let veTuneInfo = null; // { id, name } of the tune the VE table came from (id only for a stored tune), or { name: csv file name }
+let veTuneInfo = null; // { id, name } of the tune the VE table came from (id only for a stored tune)
 let logPanel = null, logPanelReady = null;   // log panel (../log-viewer/log-panel.js) and its load promise for lastRun
 
 // ---------------------------------------------------------------------------
@@ -63,28 +57,10 @@ function isValidLogFile(file) {
 }
 
 /**
- * Validates that a file has a .csv extension (case-insensitive).
- * @param {File} file
- * @returns {boolean}
- */
-function isValidCsv(file) {
-    return file && file.name.toLowerCase().endsWith('.csv');
-}
-
-/**
- * Validates that a file has a .m1pkg extension (case-insensitive).
- * @param {File} file
- * @returns {boolean}
- */
-function isM1Pkg(file) {
-    return file && file.name.toLowerCase().endsWith('.m1pkg');
-}
-
-/**
  * Updates the Process button enabled/disabled state based on current file selections.
  */
 function updateProcessButtonState() {
-    processBtn.disabled = !(logFile && (veFile || veM1pkgCsv));
+    processBtn.disabled = !(logFile && veTable);
 }
 
 logInput.addEventListener('change', () => {
@@ -98,7 +74,7 @@ logInput.addEventListener('change', () => {
         logFile = file;
         logFilename.textContent = file.name;
         clearError();
-        suggestStoredTune(file);
+        tunePicker.suggest(file);
     } else {
         logFile = null;
         logFilename.textContent = 'No file selected';
@@ -106,46 +82,6 @@ logInput.addEventListener('change', () => {
     updateProcessButtonState();
 });
 
-veInput.addEventListener('change', async () => {
-    const file = veInput.files[0] || null;
-    veM1pkgCsv = null;
-    if (file) { vePicked = true; clearStoredTune(); }
-    if (file && !isValidCsv(file) && !isM1Pkg(file)) {
-        showError(`Invalid file: "${file.name}" is not a .csv or .m1pkg file.`);
-        veFile = null;
-        veFilename.textContent = 'No file selected';
-        veInput.value = '';
-    } else if (isM1Pkg(file)) {
-        // Extract Engine.Efficiency.Main from the tune package up front so problems show immediately.
-        veFile = null;
-        veFilename.textContent = 'Reading ' + file.name + '…';
-        updateProcessButtonState();
-        try {
-            const table = m1pkgVeTableCsv(parseM1Pkg(await readFileAsArrayBuffer(file)));
-            if (veInput.files[0] !== file) return; // a different file was picked meanwhile
-            veFile = file;
-            veM1pkgCsv = table.csv;
-            veTuneInfo = { id: null, name: table.tuneName || file.name };
-            veFilename.textContent = `${file.name} — ${table.tuneName || 'tune'}, ` +
-                `${M1VE_TABLE_NAME} (${table.rpmSites} × ${table.mapSites})`;
-            clearError();
-        } catch (err) {
-            if (veInput.files[0] !== file) return;
-            showError(`Could not read the VE table from "${file.name}": ${err.message}`);
-            veFilename.textContent = 'No file selected';
-            veInput.value = '';
-        }
-    } else if (file) {
-        veFile = file;
-        veFilename.textContent = file.name;
-        veTuneInfo = { id: null, name: file.name };
-        clearError();
-    } else {
-        veFile = null;
-        veFilename.textContent = 'No file selected';
-    }
-    updateProcessButtonState();
-});
 
 // ---------------------------------------------------------------------------
 // Error / Warning display helpers
@@ -225,65 +161,20 @@ function hideProgress() {
 // Stored tunes (from the M1 Config Viewer)
 // ---------------------------------------------------------------------------
 
-const veTuneSelect = document.getElementById('ve-tune');
-const veTuneHint = document.getElementById('ve-tune-hint');
-
-function clearStoredTune() {
-    if (veFromStore) { veM1pkgCsv = null; veFromStore = false; }
-    veTuneSelect.value = '';
-    veTuneHint.textContent = '';
-    veTuneHint.classList.remove('suggested');
-}
-
-/** Use Engine Efficiency Main from a stored tune as the VE table. */
-async function useStoredTune(id, hint, suggested) {
-    if (!id) { clearStoredTune(); updateProcessButtonState(); return; }
-    veTuneSelect.value = id;
-    veTuneHint.textContent = 'Loading…';
-    try {
-        const table = m1pkgVeTableCsv(await tsLoad(id));
-        if (veTuneSelect.value !== id) return;   // changed meanwhile
-        veM1pkgCsv = table.csv;
-        veFromStore = true;
-        veFile = null;
-        veInput.value = '';
-        veFilename.textContent = `Stored tune: ${table.tuneName || 'tune'}, ${M1VE_TABLE_NAME} (${table.rpmSites} × ${table.mapSites})`;
-        veTuneInfo = { id, name: table.tuneName || null };
-        veTuneHint.textContent = hint || '';
-        veTuneHint.classList.toggle('suggested', !!suggested);
-        clearError();
-    } catch (err) {
-        clearStoredTune();
-        showError(`Could not read the VE table from the stored tune: ${err.message}`);
+/** The VE table is Engine Efficiency Main from a tune: a .m1pkg or a stored tune, suggested from the log's ECU serial and time. */
+const tunePicker = tsPicker({
+    pkgInput: document.getElementById('pkg-input'), select: document.getElementById('tune-select'), row: document.getElementById('tune-row'),
+    hint: document.getElementById('tune-hint'), status: document.getElementById('tune-status'), extract: m1pkgVeTableCsv,
+    none: `Choose a tune: the VE table is its ${M1VE_TABLE_NAME}.`, what: 'the VE table',
+    describe: (t) => `${M1VE_TABLE_NAME} (${t.rpmSites} × ${t.mapSites}).`,
+    onError: showError,
+    onChange: (t, id) => {
+        veTable = t;
+        veTuneInfo = t ? { id, name: t.tuneName || null } : null;
+        if (t) clearError();
+        updateProcessButtonState();
     }
-    updateProcessButtonState();
-}
-
-/** After a log is chosen: suggest the stored tune that was most likely in the ECU, unless a VE source was picked. */
-async function suggestStoredTune(file) {
-    if (!storedTunes.length || vePicked) return;
-    const s = tsSuggest(storedTunes, await tsLogInfo(file));
-    if (s.tune) await useStoredTune(s.tune.id, s.reason, true);
-    else { veTuneHint.textContent = s.reason; veTuneHint.classList.remove('suggested'); }
-}
-
-veTuneSelect.addEventListener('change', () => {
-    vePicked = !!veTuneSelect.value;
-    useStoredTune(veTuneSelect.value, veTuneSelect.value ? '' : '', false);
 });
-
-tsInit().then(tsList).then((list) => {
-    storedTunes = list;
-    if (!list.length) return;
-    veTuneSelect.insertAdjacentHTML('beforeend', list.map((t) => {
-        const o = document.createElement('option');
-        o.value = t.id;
-        o.textContent = tsLabel(t);
-        return o.outerHTML;
-    }).join(''));
-    document.getElementById('ve-tune-row').hidden = false;
-    if (logFile) suggestStoredTune(logFile);
-}).catch(() => { /* no stored tunes available: the file inputs still work */ });
 
 // ---------------------------------------------------------------------------
 // Worker lifecycle and message dispatch (Task 9.2)
@@ -361,10 +252,9 @@ processBtn.addEventListener('click', async () => {
     try {
         const results = await Promise.all([
             isLd ? readFileAsArrayBuffer(logFile) : readFileAsText(logFile),
-            veM1pkgCsv !== null ? veM1pkgCsv : readFileAsText(veFile),
         ]);
         logData = results[0];
-        veText = results[1];
+        veText = veTable.csv;
     } catch (err) {
         hideProgress();
         showError(err.message);

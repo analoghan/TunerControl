@@ -57,3 +57,4 @@ h2 { margin: 0 0 8px; font-size: 1.1rem; color: #E31837; }
 .file-row select.tune-select { background: #222; color: #fff; border: 1px solid #333; border-radius: 4px; padding: 6px 8px; font-family: inherit; max-width: 420px; }
 .tune-hint { font-size: 0.8rem; color: #888; }
 .tune-hint.suggested { color: #4caf50; }
+.tune-status { font-size: 0.85rem; color: #b0b0b0; margin: 0 0 12px; }

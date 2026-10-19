@@ -1,8 +1,8 @@
 /**
  * m1pkg-film.js — Reads the primary fuel film calibration from a MoTeC M1 package (.m1pkg).
  *
- * Takes a parsed package (lib/m1pkg-parser.js) and returns Fuel Film Primary Main in the same
- * { breakpoints, values } shape as parseFuelFilmTable (kPa, ul), plus the scale, offset, fast part and
+ * Takes a parsed package (lib/m1pkg-parser.js) and returns Fuel Film Primary Main as
+ * { breakpoints, values } (kPa, ul), plus the scale, offset, fast part and
  * time constants the analyzer otherwise asks the user to type in.
  */
 

@@ -1,50 +1,7 @@
 /**
- * transient-fuel/film-correct.js — Fuel Film Primary table: CSV parsing and corrections from tip-in lean spikes.
+ * transient-fuel/film-correct.js — Fuel Film Primary table corrections from tip-in lean spikes (the table comes from the tune).
  * Shared by the page (app.js) and the tests.
  */
-
-function parseFuelFilmTable(csvText) {
-    var lines = csvText.split(/\r?\n/);
-    // M1 v2 format: header rows then breakpoints row then data row
-    // Line 0: M1,v2
-    // Line 1: Body,ul
-    // Line 2: Cols,kPa,Inlet Man Pres
-    // Line 3: ,bp1,bp2,bp3,...  (MAP breakpoints)
-    // Line 4: "0",val1,val2,val3,...  (values)
-
-    var breakpoints = [];
-    var values = [];
-
-    for (var i = 0; i < lines.length; i++) {
-        var line = lines[i].trim();
-        if (line === '') continue;
-        var fields = line.split(',').map(function(f) { return f.trim().replace(/^"|"$/g, ''); });
-
-        // Breakpoints row: first field is empty, rest are numbers
-        if (fields[0] === '' && fields.length > 2 && !isNaN(parseFloat(fields[1]))) {
-            for (var f = 1; f < fields.length; f++) {
-                var v = parseFloat(fields[f]);
-                if (!isNaN(v)) breakpoints.push(v);
-            }
-        }
-        // Data row: first field is "0" or a number, rest are values
-        else if (breakpoints.length > 0 && fields.length > 2 && !isNaN(parseFloat(fields[1]))) {
-            var isDataRow = !isNaN(parseFloat(fields[0])) || fields[0] === '0';
-            if (isDataRow) {
-                for (var f = 1; f < fields.length; f++) {
-                    var v = parseFloat(fields[f]);
-                    if (!isNaN(v)) values.push(v);
-                }
-            }
-        }
-    }
-
-    if (breakpoints.length === 0 || values.length === 0) {
-        throw new Error('Could not parse Fuel Film Primary table. Expected M1 v2 CSV format.');
-    }
-
-    return { breakpoints: breakpoints, values: values };
-}
 
 function computeFuelFilmCorrections(result, settings) {
     var ffTable = result.ffTable;

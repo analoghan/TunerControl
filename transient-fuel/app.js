@@ -3,7 +3,6 @@
  */
 
 var logInput = document.getElementById('log-input');
-var ffTableInput = document.getElementById('ff-table-input');
 var analyzeBtn = document.getElementById('analyze-btn');
 var errorContainer = document.getElementById('error-container');
 var progressSection = document.getElementById('progress-section');
@@ -13,121 +12,29 @@ logInput.addEventListener('change', function() {
     var file = logInput.files[0];
     document.getElementById('log-filename').textContent = file ? file.name : 'No file selected';
     analyzeBtn.disabled = !file;
-    if (file) suggestStoredTune(file);
+    if (file) tunePicker.suggest(file);
 });
 
-var ffFromPkg = null;   // fuel film table read from a selected .m1pkg (null for CSV or no file)
+var ffFromPkg = null;    // Fuel Film Primary Main from the chosen tune (m1pkg-film.js), or null without a tune
 var ffTuneChecks = null; // tune settings checked by the recommendations (m1pkg-film.js tuneChecks), from the chosen tune
-var ffTuneInfo = null;  // { id, name } of the tune the fuel film table came from (id only for a stored tune)
+var ffTuneInfo = null;   // { id, name } of the tune the fuel film table came from (id only for a stored tune)
 
-ffTableInput.addEventListener('change', function() {
-    var file = ffTableInput.files[0];
-    var label = document.getElementById('ff-filename');
-    ffFromPkg = null;
-    if (file) { ffPicked = true; clearStoredTune(); }
-    errorContainer.hidden = true;
-    if (!file || !file.name.toLowerCase().endsWith('.m1pkg')) {
-        label.textContent = file ? file.name : 'No file selected';
-        return;
+/** The optional tune: its fuel film table, scale, offset and time constants (filled into the inputs below). */
+var tunePicker = tsPicker({
+    pkgInput: document.getElementById('pkg-input'), select: document.getElementById('tune-select'), row: document.getElementById('tune-row'),
+    hint: document.getElementById('tune-hint'), status: document.getElementById('tune-status'), extract: m1pkgFuelFilm, what: 'the fuel film table',
+    none: 'No tune chosen: enter the scale, offset and time constants below. With a tune they are filled in and its Fuel Film Primary Main gets suggested corrections.',
+    describe: function (film) {
+        return 'Fuel Film Primary Main (' + film.table.breakpoints.length + ' sites); scale, offset and time constants filled from the tune' +
+            (film.notes.length ? '. ' + film.notes.join(' ') : '.');
+    },
+    onError: function (msg) { errorContainer.textContent = msg; errorContainer.hidden = false; },
+    onChange: function (film, id) {
+        ffFromPkg = film ? film.table : null;
+        ffTuneInfo = film ? { id: id, name: film.tuneName || null } : null;
+        if (film) { applyTuneSettings(film); errorContainer.hidden = true; } else ffTuneChecks = null;
     }
-    // Read the table and the scale/offset/time-constant settings from the tune package.
-    label.textContent = 'Reading ' + file.name + '…';
-    var reader = new FileReader();
-    reader.onload = function() {
-        if (ffTableInput.files[0] !== file) return; // a different file was picked meanwhile
-        try {
-            var film = m1pkgFuelFilm(parseM1Pkg(reader.result));
-            ffFromPkg = film.table;
-            ffTuneInfo = { id: null, name: film.tuneName || file.name };
-            applyTuneSettings(film);
-            label.textContent = file.name + ' — ' + (film.tuneName || 'tune') + ', Fuel Film Primary Main (' +
-                film.table.breakpoints.length + ' sites); scale, offset and time constants filled from the tune' +
-                (film.notes.length ? '. ' + film.notes.join(' ') : '');
-        } catch (err) {
-            label.textContent = 'No file selected';
-            ffTableInput.value = '';
-            errorContainer.textContent = 'Could not read the fuel film table from "' + file.name + '": ' + err.message;
-            errorContainer.hidden = false;
-        }
-    };
-    reader.onerror = function() {
-        label.textContent = 'No file selected';
-        errorContainer.textContent = 'Could not read: ' + file.name;
-        errorContainer.hidden = false;
-    };
-    reader.readAsArrayBuffer(file);
 });
-
-// Stored tunes (from the M1 Config Viewer) ------------------------------------
-
-var ffTuneSelect = document.getElementById('ff-tune');
-var ffTuneHint = document.getElementById('ff-tune-hint');
-var ffFromStore = false;   // ffFromPkg came from a stored tune
-var ffPicked = false;      // the user chose the fuel film source themselves
-var storedTunes = [];
-
-function clearStoredTune() {
-    if (ffFromStore) { ffFromPkg = null; ffFromStore = false; }
-    ffTuneSelect.value = '';
-    ffTuneHint.textContent = '';
-    ffTuneHint.classList.remove('suggested');
-}
-
-/** Use the fuel film table and settings of a stored tune. */
-function useStoredTune(id, hint, suggested) {
-    if (!id) { clearStoredTune(); return Promise.resolve(); }
-    var label = document.getElementById('ff-filename');
-    ffTuneSelect.value = id;
-    ffTuneHint.textContent = 'Loading…';
-    return tsLoad(id).then(function (pkg) {
-        if (ffTuneSelect.value !== id) return;
-        var film = m1pkgFuelFilm(pkg);
-        ffFromPkg = film.table;
-        ffTuneInfo = { id: id, name: film.tuneName || null };
-        ffFromStore = true;
-        ffTableInput.value = '';
-        applyTuneSettings(film);
-        label.textContent = 'Stored tune: ' + (film.tuneName || 'tune') + ', Fuel Film Primary Main (' + film.table.breakpoints.length +
-            ' sites); scale, offset and time constants filled from the tune' + (film.notes.length ? '. ' + film.notes.join(' ') : '');
-        ffTuneHint.textContent = hint || '';
-        ffTuneHint.classList.toggle('suggested', !!suggested);
-        errorContainer.hidden = true;
-    }).catch(function (err) {
-        clearStoredTune();
-        errorContainer.textContent = 'Could not read the fuel film table from the stored tune: ' + err.message;
-        errorContainer.hidden = false;
-    });
-}
-
-/** After a log is chosen: suggest the stored tune that was most likely in the ECU, unless a source was picked. */
-function suggestStoredTune(file) {
-    if (!storedTunes.length || ffPicked) return;
-    tsLogInfo(file).then(function (info) {
-        var s = tsSuggest(storedTunes, info);
-        if (s.tune) return useStoredTune(s.tune.id, s.reason, true);
-        ffTuneHint.textContent = s.reason;
-        ffTuneHint.classList.remove('suggested');
-    });
-}
-
-ffTuneSelect.addEventListener('change', function () {
-    ffPicked = !!ffTuneSelect.value;
-    if (ffTuneSelect.value) useStoredTune(ffTuneSelect.value, '', false);
-    else { clearStoredTune(); document.getElementById('ff-filename').textContent = 'No file selected'; }
-});
-
-tsInit().then(tsList).then(function (list) {
-    storedTunes = list;
-    if (!list.length) return;
-    list.forEach(function (t) {
-        var o = document.createElement('option');
-        o.value = t.id;
-        o.textContent = tsLabel(t);
-        ffTuneSelect.appendChild(o);
-    });
-    document.getElementById('ff-tune-row').hidden = false;
-    if (logInput.files[0]) suggestStoredTune(logInput.files[0]);
-}).catch(function () { /* no stored tunes available: the file inputs still work */ });
 
 /** Fills the scale, offset and time-constant inputs with the values read from a tune package. */
 function applyTuneSettings(film) {
@@ -153,7 +60,6 @@ analyzeBtn.addEventListener('click', function() {
     resultsSection.hidden = true;
     progressSection.hidden = false;
 
-    var ffFile = ffTableInput.files[0] || null;
     var settings = {
         mapRateThreshold: parseInt(document.getElementById('map-rate-threshold').value, 10) || 200,
         minMapChange: parseInt(document.getElementById('min-map-change').value, 10) || 20,
@@ -172,14 +78,13 @@ analyzeBtn.addEventListener('click', function() {
         },
     };
 
-    // Read log file (and optionally FF table)
+    // Read the log file
     var filesToRead = [];
     if (file.name.toLowerCase().endsWith('.ld')) {
         filesToRead.push({ key: 'log', file: file, mode: 'binary' });
     } else {
         filesToRead.push({ key: 'log', file: file, mode: 'text' });
     }
-    if (ffFile && !ffFromPkg) filesToRead.push({ key: 'ff', file: ffFile, mode: 'text' });
 
     var fileResults = {};
     var remaining = filesToRead.length;
@@ -216,8 +121,8 @@ function runAnalysis(logFile, files, settings) {
         }
 
         // If fuel film table was provided, compute corrections
-        if (ffFromPkg || files.ff) {
-            result.ffTable = ffFromPkg || parseFuelFilmTable(files.ff);
+        if (ffFromPkg) {
+            result.ffTable = ffFromPkg;
             result.ffCorrected = computeFuelFilmCorrections(result, settings);
         }
 

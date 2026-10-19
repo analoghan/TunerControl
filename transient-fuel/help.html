@@ -85,13 +85,14 @@
       <li><strong>Coolant Temperature</strong> — for warm-engine filtering</li>
     </ul>
 
-    <h3>Fuel Film Primary (.m1pkg or .csv, optional)</h3>
-    <p>Select the M1 Tune package (<code>.m1pkg</code>) the log was recorded with. The tool reads <strong>Fuel Film Primary Main</strong> from it and fills in the Fuel Film Scale, Offset, Fast Percentage and the four time constants from the same tune, so there is nothing to copy by hand. The line under the file input shows which tune was read.</p>
-    <p>The time constants are small tables in M1 Tune (by coolant temperature; Fast Part by engine speed). When one has more than one site, the tool reads it at 90 °C, or at the Fuel Film Primary Reference Engine Speed for Fast Part, and says so under the file input.</p>
+    <h3>Tune (.m1pkg, optional)</h3>
+    <p>Choose the tune the log was recorded with — a stored tune or its M1 Tune package (<code>.m1pkg</code>). The tool reads <strong>Fuel Film Primary Main</strong> from it and fills in the Fuel Film Scale, Offset, Fast Percentage and the four time constants from the same tune, so there is nothing to copy by hand. The line under the tune controls shows which tune was read.</p>
+    <p>The time constants are small tables in M1 Tune (by coolant temperature; Fast Part by engine speed). When one has more than one site, the tool reads it at 90 °C, or at the Fuel Film Primary Reference Engine Speed for Fast Part, and says so under the tune controls.</p>
     <p>Tunes imported in the <a href="../m1-config/index.html">M1 Config Viewer</a> appear in <strong>Or a stored tune</strong>; choosing a log
       suggests the one that was most likely in the ECU when it was recorded (the latest tune from the same ECU saved before the log). Picking a
-      file or another tune yourself always takes precedence.</p>
-    <p>A CSV export of Fuel Film Primary Main (M1 v2 format) still works; then enter the scale, offset and time constants yourself. Either way, <code>Fuel_Film_Prim_Main_Corrected.csv</code> imports back into M1 Tune.</p>
+      <code>.m1pkg</code> or another tune yourself always takes precedence.</p>
+    <p>Without a tune, enter the scale, offset and time constants yourself; the events and recommendations still work, but there is no table to
+      correct. With a tune, <code>Fuel_Film_Prim_Main_Corrected.csv</code> imports back into M1 Tune.</p>
 
     <h3>MAP Rate Threshold (default: 200 kPa/s)</h3>
     <p>The minimum rate of MAP change to qualify as a transient event. Lower values detect more events (including mild throttle changes); higher values only catch aggressive tip-ins.</p>

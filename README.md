@@ -20,7 +20,7 @@ values can use a tune stored in the M1 Config Viewer (suggested from the log's E
 results to the Tuning History and open the matching stretch of the log in an embedded Log Viewer (**Show in log**).
 
 ### VE Table Tuning
-Analyze MoTeC log data against your current VE table to compute per-cell correction percentages. The table can come straight from an M1 Tune package (`.m1pkg`, reads Engine Efficiency Main) or from a CSV export. Produces downloadable CSVs ready to import back into MoTeC M1 Tune.
+Analyze MoTeC log data against your current VE table to compute per-cell correction percentages. The table is Engine Efficiency Main, read from the tune (a stored tune or an `.m1pkg`). Produces downloadable CSVs ready to import back into MoTeC M1 Tune.
 
 **Features:**
 - Accepts CSV log exports or raw `.ld` binary log files
