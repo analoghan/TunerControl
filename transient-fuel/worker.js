@@ -592,7 +592,7 @@ function analyzeTransients(logText, settings) {
 
 /**
  * Analyze transients from a .ld binary file.
- * Uses parseLdFile from the knock worker (included via script tag).
+ * Uses parseLdFile from lib/ld-parser.js (loaded by the page before this file).
  */
 function analyzeTransientsLd(buffer, settings) {
     // parseLdFile returns { columnNames, data, maxFreq }

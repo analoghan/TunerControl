@@ -68,7 +68,8 @@
   <div id="summary" class="running">Running tests…</div>
   <div id="results"></div>
 
-  <!-- Load worker.js as a regular script so its functions are in global scope -->
+  <!-- The shared .ld reader, then worker.js as a regular script so its functions are in global scope -->
+  <script src="../lib/ld-parser.js"></script>
   <script src="../ve-table/worker.js"></script>
   <!-- Load injector worker.js for injector analysis tests -->
   <script src="../injector/worker.js"></script>

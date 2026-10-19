@@ -754,191 +754,8 @@ function buildOutputs(correctionGrid, veTable) {
 }
 
 // ---------------------------------------------------------------------------
-// MoTeC .ld Binary Parser
+// MoTeC .ld logs (parseLdColumns in lib/ld-parser.js, which the page loads before this worker)
 // ---------------------------------------------------------------------------
-
-/**
- * Maps .ld dot-separated channel names to the CSV-style names used by resolveChannels.
- */
-const LD_NAME_MAP = {
-    'Engine.Speed':                          'Engine Speed',
-    'Inlet.Manifold.Pressure':               'Inlet Manifold Pressure',
-    'Exhaust.Lambda.Bank 1':                 'Exhaust Lambda Bank 1',
-    'Exhaust.Lambda.Bank 2':                 'Exhaust Lambda Bank 2',
-    'Exhaust.Lambda':                        'Exhaust Lambda',
-    'Throttle.Position':                     'Throttle Position',
-    'Fuel.Pressure.Direct.Bank 1':           'Fuel Pressure Direct Bank 1',
-    'Fuel.Pressure.Direct.Bank 1.Aim':       'Fuel Pressure Direct Bank 1 Aim',
-    'Coolant.Temperature':                   'Coolant Temperature',
-    'Inlet.Air.Temperature':                 'Inlet Air Temperature',
-    'Fuel.Mixture Aim':                      'Fuel Mixture Aim',
-};
-
-function normalizeLdChannelNameWithUnit(ldName, unit) {
-    if (LD_NAME_MAP[ldName]) {
-        return LD_NAME_MAP[ldName];
-    }
-    if (ldName === 'Fuel.Cylinder 1.Primary.Output.P' && unit === 'ms') {
-        return 'Fuel Cylinder 1 Primary Output Pulse Width 1';
-    }
-    if (ldName === 'Fuel.Cylinder 1.Primary.Output.P' && unit === 'dBTDC') {
-        return 'Fuel Cylinder 1 Primary Output Pulse Angle 1';
-    }
-    if (ldName === 'Fuel.Closed Loop.Control.Bank 1.' && unit === '%Trim') {
-        return 'Fuel Closed Loop Control Bank 1 Trim';
-    }
-    if (ldName === 'Fuel.Closed Loop.Control.Bank 2.' && unit === '%Trim') {
-        return 'Fuel Closed Loop Control Bank 2 Trim';
-    }
-    return ldName.replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function readString(view, offset, length) {
-    const bytes = [];
-    for (let i = 0; i < length; i++) {
-        const b = view.getUint8(offset + i);
-        if (b === 0) break;
-        bytes.push(b);
-    }
-    return String.fromCharCode.apply(null, bytes).trim();
-}
-
-function decodeFloat16(h) {
-    const sign = (h >> 15) & 1;
-    const exp = (h >> 10) & 0x1f;
-    const frac = h & 0x3ff;
-    if (exp === 0) {
-        return (sign ? -1 : 1) * Math.pow(2, -14) * (frac / 1024);
-    } else if (exp === 31) {
-        return frac ? NaN : (sign ? -Infinity : Infinity);
-    }
-    return (sign ? -1 : 1) * Math.pow(2, exp - 15) * (1 + frac / 1024);
-}
-
-function readChannelData(buffer, chan) {
-    if (!chan.dataType || chan.bytesPerSample === 0) {
-        return new Float64Array(chan.nData);
-    }
-    const result = new Float64Array(chan.nData);
-    const view = new DataView(buffer);
-    let offset = chan.dataPtr;
-    for (let i = 0; i < chan.nData; i++) {
-        if (offset + chan.bytesPerSample > buffer.byteLength) break;
-        switch (chan.dataType) {
-            case 'float32': result[i] = view.getFloat32(offset, true); break;
-            case 'float16': result[i] = decodeFloat16(view.getUint16(offset, true)); break;
-            case 'int16':   result[i] = view.getInt16(offset, true); break;
-            case 'int32':   result[i] = view.getInt32(offset, true); break;
-            default:        result[i] = 0;
-        }
-        offset += chan.bytesPerSample;
-    }
-    return result;
-}
-
-/**
- * Parses a MoTeC .ld binary file and returns column names and row-based data
- * in the same format as the CSV parser output.
- *
- * @param {ArrayBuffer} buffer - The raw .ld file contents
- * @param {function} progressCallback - Called with (channelsProcessed, totalChannels)
- * @returns {{columnNames: string[], data: number[][]}}
- */
-function parseLdFile(buffer, progressCallback) {
-    const view = new DataView(buffer);
-    const metaPtr = view.getUint32(8, true);
-    const numChanns = view.getUint32(86, true);
-
-    if (metaPtr === 0 || numChanns === 0) {
-        throw new Error('Invalid .ld file: no channel metadata found');
-    }
-
-    const CHAN_HEADER_SIZE = 124;
-    const channels = [];
-    let ptr = metaPtr;
-
-    for (let ch = 0; ch < numChanns && ptr !== 0; ch++) {
-        if (ptr + CHAN_HEADER_SIZE > buffer.byteLength) break;
-        const nextPtr = view.getUint32(ptr + 4, true);
-        const chanDataPtr = view.getUint32(ptr + 8, true);
-        const nData = view.getUint32(ptr + 12, true);
-        const dtypeA = view.getUint16(ptr + 18, true);
-        const dtypeVal = view.getUint16(ptr + 20, true);
-        const freq = view.getUint16(ptr + 22, true);
-        const shift = view.getInt16(ptr + 24, true);
-        const mul = view.getInt16(ptr + 26, true);
-        const scale = view.getInt16(ptr + 28, true);
-        const dec = view.getInt16(ptr + 30, true);
-        const name = readString(view, ptr + 32, 32);
-        const shortName = readString(view, ptr + 64, 8);
-        const unit = readString(view, ptr + 72, 12);
-
-        let bytesPerSample = 0, dataType = null;
-        if (dtypeA === 0x07) {
-            if (dtypeVal === 2) { bytesPerSample = 2; dataType = 'float16'; }
-            else if (dtypeVal === 4) { bytesPerSample = 4; dataType = 'float32'; }
-        } else if (dtypeA === 0 || dtypeA === 0x03 || dtypeA === 0x05) {
-            if (dtypeVal === 2) { bytesPerSample = 2; dataType = 'int16'; }
-            else if (dtypeVal === 4) { bytesPerSample = 4; dataType = 'int32'; }
-        }
-
-        channels.push({ name, shortName, unit, freq, dataPtr: chanDataPtr, nData, dataType, bytesPerSample, shift, mul, scale, dec });
-        ptr = nextPtr;
-    }
-
-    if (channels.length === 0) {
-        throw new Error('No channels found in .ld file');
-    }
-
-    let maxFreq = 0;
-    for (let i = 0; i < channels.length; i++) {
-        if (channels[i].freq > maxFreq) maxFreq = channels[i].freq;
-    }
-
-    let baseSamples = 0;
-    for (let i = 0; i < channels.length; i++) {
-        if (channels[i].freq === maxFreq) { baseSamples = channels[i].nData; break; }
-    }
-    if (baseSamples === 0) {
-        throw new Error('Could not determine sample count from .ld file');
-    }
-
-    const columnNames = ['Time'];
-    const channelData = [];
-    const timeArr = new Float64Array(baseSamples);
-    const dt = 1.0 / maxFreq;
-    for (let t = 0; t < baseSamples; t++) { timeArr[t] = t * dt; }
-    channelData.push(timeArr);
-
-    for (let ci = 0; ci < channels.length; ci++) {
-        const chan = channels[ci];
-        const normalizedName = normalizeLdChannelNameWithUnit(chan.name, chan.shortName);
-        columnNames.push(normalizedName);
-
-        const rawData = readChannelData(buffer, chan);
-        const transformed = new Float64Array(rawData.length);
-        const decFactor = Math.pow(10, -chan.dec);
-        for (let s = 0; s < rawData.length; s++) {
-            transformed[s] = (rawData[s] / chan.scale * decFactor + chan.shift) * chan.mul;
-        }
-
-        if (chan.freq === maxFreq) {
-            channelData.push(transformed);
-        } else {
-            const ratio = maxFreq / chan.freq;
-            const upsampled = new Float64Array(baseSamples);
-            for (let u = 0; u < baseSamples; u++) {
-                const srcIdx = Math.min(Math.floor(u / ratio), transformed.length - 1);
-                upsampled[u] = transformed[srcIdx];
-            }
-            channelData.push(upsampled);
-        }
-
-        if (progressCallback) { progressCallback(ci + 1, channels.length); }
-    }
-
-    return { columnNames, data: null, baseSamples, channelData };
-}
 
 /**
  * Converts parsed .ld data into LogSample objects compatible with the VE analysis pipeline.
@@ -949,7 +766,7 @@ function parseLdFile(buffer, progressCallback) {
  * @returns {{ samples: LogSample[], channelWarnings: string[] }}
  */
 function parseLdLog(buffer, onProgress) {
-    const parsed = parseLdFile(buffer, (channelsProcessed, totalChannels) => {
+    const parsed = parseLdColumns(buffer, (channelsProcessed, totalChannels) => {
         // Progress during channel parsing (first phase)
     });
 
@@ -963,7 +780,7 @@ function parseLdLog(buffer, onProgress) {
             overrunStateIdx, fuelCutCountIdx } = channelIndices;
 
     // Build samples from channel data arrays
-    // channelData[0] is the Time array (generated during parseLdFile)
+    // channelData[0] is the Time array (generated by parseLdColumns)
     const samples = [];
     const BATCH_SIZE = 500000;
 
@@ -1316,7 +1133,6 @@ if (typeof module !== 'undefined') {
         parseVETable,
         resolveChannels,
         parseLog,
-        parseLdFile,
         parseLdLog,
         computeSampleCorrection,
         buildOutputs,

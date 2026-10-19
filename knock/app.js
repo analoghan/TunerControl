@@ -205,8 +205,9 @@ function handleFileSelect(event) {
  * @returns {Worker} A new Web Worker instance
  */
 function createKnockWorker() {
+    var ldUrl = new URL('../lib/ld-parser.js', window.location.href).href;   // .ld reader, used by the worker
     var workerUrl = new URL('worker.js', window.location.href).href;
-    var blob = new Blob(['importScripts("' + workerUrl + '");'], { type: 'application/javascript' });
+    var blob = new Blob(['importScripts("' + ldUrl + '", "' + workerUrl + '");'], { type: 'application/javascript' });
     return new Worker(URL.createObjectURL(blob));
 }
 

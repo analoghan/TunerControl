@@ -117,7 +117,7 @@ LogPanel.prototype._build = function () {
 
 LogPanel.prototype._worker = function () {
     if (this.worker) return this.worker;
-    var urls = ['../ve-table/worker.js', '../transient-fuel/worker.js', 'log-file.js', 'worker.js'].map(function (u) {
+    var urls = ['../lib/ld-parser.js', '../ve-table/worker.js', '../transient-fuel/worker.js', 'log-file.js', 'worker.js'].map(function (u) {
         return JSON.stringify(new URL(u, LV_SCRIPT_BASE).href);
     });
     var blob = new Blob(['importScripts(' + urls.join(',') + ');'], { type: 'application/javascript' });

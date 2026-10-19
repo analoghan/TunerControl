@@ -296,9 +296,10 @@ tsInit().then(tsList).then((list) => {
  */
 function createWorker() {
     // Construct absolute URL to worker.js relative to this page
+    const ldUrl = new URL('../lib/ld-parser.js', window.location.href).href;   // .ld reader, used by the worker
     const workerUrl = new URL('worker.js', window.location.href).href;
     const blob = new Blob(
-        ['importScripts("' + workerUrl + '");'],
+        ['importScripts("' + ldUrl + '", "' + workerUrl + '");'],
         { type: 'application/javascript' }
     );
     const blobUrl = URL.createObjectURL(blob);

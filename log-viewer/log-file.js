@@ -1,7 +1,7 @@
 /**
  * log-viewer/log-file.js — Reads MoTeC logs channel by channel for the Log Viewer.
- * Works in a worker and in Node; uses normalizeLdChannelNameWithUnit and splitCsvLine from ve-table/worker.js
- * so channel names match the analysis tools.
+ * Works in a worker and in Node; uses ldReadChannels and decodeFloat16 from lib/ld-parser.js and splitCsvLine from
+ * ve-table/worker.js, so channel names match the analysis tools.
  *
  *   lvOpenLog(data, name)  data: ArrayBuffer (.ld) or string (.csv)
  *     → { kind, channels: [{ name, unit, freq, n }], duration, baseFreq }
@@ -10,37 +10,11 @@
  *   lvBaseTime(log)        → Float64Array of base-rate times
  */
 
-function lvLdString(view, offset, length) {
-    var s = '';
-    for (var i = 0; i < length; i++) {
-        var b = view.getUint8(offset + i);
-        if (b === 0) break;
-        s += String.fromCharCode(b);
-    }
-    return s.trim();
-}
-
 function lvOpenLd(buffer) {
-    var view = new DataView(buffer);
-    var metaPtr = view.getUint32(8, true), count = view.getUint32(86, true);
-    if (metaPtr === 0 || count === 0) throw new Error('Invalid .ld file: no channel metadata found');
-    var channels = [], ptr = metaPtr;
-    for (var ch = 0; ch < count && ptr !== 0; ch++) {
-        if (ptr + 124 > buffer.byteLength) break;
-        var dtypeA = view.getUint16(ptr + 18, true), dtypeVal = view.getUint16(ptr + 20, true);
-        var type = null;
-        if (dtypeA === 0x07) type = dtypeVal === 2 ? 'float16' : dtypeVal === 4 ? 'float32' : null;
-        else if (dtypeA === 0 || dtypeA === 0x03 || dtypeA === 0x05) type = dtypeVal === 2 ? 'int16' : dtypeVal === 4 ? 'int32' : null;
-        var ldName = lvLdString(view, ptr + 32, 32), shortName = lvLdString(view, ptr + 64, 8);
-        channels.push({
-            name: normalizeLdChannelNameWithUnit(ldName, shortName), unit: lvLdString(view, ptr + 72, 12),
-            freq: view.getUint16(ptr + 22, true), n: view.getUint32(ptr + 12, true),
-            ld: { ptr: view.getUint32(ptr + 8, true), type: type, shift: view.getInt16(ptr + 24, true), mul: view.getInt16(ptr + 26, true),
-                  scale: view.getInt16(ptr + 28, true), dec: view.getInt16(ptr + 30, true) },
-        });
-        ptr = view.getUint32(ptr + 4, true);
-    }
-    channels = channels.filter(function (c) { return c.freq > 0 && c.n > 0; });
+    var channels = ldReadChannels(buffer).map(function (c) {
+        return { name: c.name, unit: c.unit, freq: c.freq, n: c.nData,
+                 ld: { ptr: c.dataPtr, type: c.dataType, shift: c.shift, mul: c.mul, scale: c.scale, dec: c.dec } };
+    }).filter(function (c) { return c.freq > 0 && c.n > 0; });
     if (!channels.length) throw new Error('No channels found in .ld file');
     // The base rate and length are those of the fastest channel, as the analysis tools use.
     var baseFreq = Math.max.apply(null, channels.map(function (c) { return c.freq; }));

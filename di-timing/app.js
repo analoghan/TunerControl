@@ -65,7 +65,7 @@ function analyzeLog(evc, primaryLimit) {
     if (!diLogFile) return Promise.resolve(null);
     if (diWorker) diWorker.terminate();
     var base = new URL('.', window.location.href).href;
-    var urls = ['../ve-table/worker.js', '../log-viewer/log-file.js', 'di-calc.js', 'worker.js'].map(function (u) { return JSON.stringify(new URL(u, base).href); });
+    var urls = ['../lib/ld-parser.js', '../ve-table/worker.js', '../log-viewer/log-file.js', 'di-calc.js', 'worker.js'].map(function (u) { return JSON.stringify(new URL(u, base).href); });
     var blob = new Blob(['importScripts(' + urls.join(',') + ');'], { type: 'application/javascript' });
     var url = URL.createObjectURL(blob);
     diWorker = new Worker(url);

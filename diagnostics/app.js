@@ -74,9 +74,10 @@ analyzeBtn.addEventListener('click', function() {
         if (worker) { worker.terminate(); worker = null; }
 
         // The injector worker supplies the lean-episode analysis; this tool's worker loads last so its handler wins.
+        var ldUrl = new URL('../lib/ld-parser.js', window.location.href).href;
         var injectorUrl = new URL('../injector/worker.js', window.location.href).href;
         var workerUrl = new URL('worker-diagnostics.js', window.location.href).href;
-        var blob = new Blob(['importScripts("' + injectorUrl + '", "' + workerUrl + '");'], { type: 'application/javascript' });
+        var blob = new Blob(['importScripts("' + ldUrl + '", "' + injectorUrl + '", "' + workerUrl + '");'], { type: 'application/javascript' });
         worker = new Worker(URL.createObjectURL(blob));
 
         worker.onmessage = function(e) {
