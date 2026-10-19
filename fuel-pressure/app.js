@@ -60,7 +60,7 @@ function handleFileSelect(event) {
         selectedFile = file;
         analyzeBtn.disabled = false;
         fileError.hidden = true;
-        suggestStoredTune(file);
+        tunePicker.suggest(file);
     } else {
         selectedFile = null;
         analyzeBtn.disabled = true;
@@ -346,78 +346,21 @@ function renderSummary(analysis) {
 // Tune (rail pressure aim table and control gains)
 // ---------------------------------------------------------------------------
 
-var tuneRail = null, tunePicked = false, storedTunes = [], tuneId = null;
+var tuneRail = null, tuneId = null;
 var lastRunInfo = null;   // { file, rail, tuneId } of the shown results, for the tuning history
-var pkgInput = document.getElementById('pkg-input');
-var tuneSelect = document.getElementById('tune-select');
-var tuneHint = document.getElementById('tune-hint');
-var tuneStatus = document.getElementById('tune-status');
 
-function setTune(rail, sourceLabel) {
-    tuneRail = rail;
-    if (!rail) { tuneStatus.textContent = 'No tune chosen: choose one for advice on the rail pressure control gains and aim table.'; return; }
-    tuneStatus.textContent = sourceLabel + ': ' + (rail.tuneName || 'tune') + '. Proportional Gain ' + rail.pGainPctPerBar + ' %/bar, Integral Gain ' +
-        rail.iGainPctPerBarS + ' %/(bar·s)' + (rail.aim ? ', aim table ' + rail.aim.rpm.length + ' rpm × ' + rail.aim.volume.length + ' fuel volume sites' : '') +
-        '.' + (rail.notes.length ? ' ' + rail.notes.join(' ') : '');
-}
-
-pkgInput.addEventListener('change', function () {
-    var file = pkgInput.files[0];
-    if (!file) return;
-    tunePicked = true;
-    tuneSelect.value = '';
-    tuneHint.textContent = '';
-    file.arrayBuffer().then(function (buf) { tuneId = null; setTune(m1pkgRail(parseM1Pkg(buf)), 'Tune file ' + file.name); })
-        .catch(function (err) { setTune(null); showErrorBanner('Could not read the rail pressure settings from ' + file.name + ': ' + err.message); });
+var tunePicker = tsPicker({
+    pkgInput: document.getElementById('pkg-input'), select: document.getElementById('tune-select'), row: document.getElementById('tune-row'),
+    hint: document.getElementById('tune-hint'), status: document.getElementById('tune-status'), extract: m1pkgRail,
+    none: 'No tune chosen: choose one for advice on the rail pressure control gains and aim table.', what: 'the rail pressure settings',
+    describe: function (rail) {
+        return 'Proportional Gain ' + rail.pGainPctPerBar + ' %/bar, Integral Gain ' + rail.iGainPctPerBarS + ' %/(bar·s)' +
+            (rail.aim ? ', aim table ' + rail.aim.rpm.length + ' rpm × ' + rail.aim.volume.length + ' fuel volume sites' : '') +
+            '.' + (rail.notes.length ? ' ' + rail.notes.join(' ') : '');
+    },
+    onError: function (msg) { showErrorBanner(msg); },
+    onChange: function (rail, id) { tuneRail = rail; tuneId = id; }
 });
-
-function useStoredTune(id, hint, suggested) {
-    if (!id) { setTune(null); tuneHint.textContent = ''; return Promise.resolve(); }
-    tuneSelect.value = id;
-    tuneHint.textContent = 'Loading…';
-    return tsLoad(id).then(function (pkg) {
-        if (tuneSelect.value !== id) return;
-        pkgInput.value = '';
-        tuneId = id;
-        setTune(m1pkgRail(pkg), 'Stored tune');
-        tuneHint.textContent = hint || '';
-        tuneHint.classList.toggle('suggested', !!suggested);
-    }).catch(function (err) {
-        setTune(null);
-        tuneHint.textContent = '';
-        showErrorBanner('Could not read the rail pressure settings from the stored tune: ' + err.message);
-    });
-}
-
-tuneSelect.addEventListener('change', function () {
-    tunePicked = !!tuneSelect.value;
-    useStoredTune(tuneSelect.value, '', false);
-});
-
-function suggestStoredTune(file) {
-    if (!storedTunes.length || tunePicked || typeof tsLogInfo === 'undefined') return;
-    tsLogInfo(file).then(function (info) {
-        var sug = tsSuggest(storedTunes, info);
-        if (sug.tune) return useStoredTune(sug.tune.id, sug.reason, true);
-        tuneHint.textContent = sug.reason;
-        tuneHint.classList.remove('suggested');
-    });
-}
-
-if (typeof tsInit !== 'undefined') {
-    tsInit().then(tsList).then(function (list) {
-        storedTunes = list;
-        if (!list.length) return;
-        list.forEach(function (t) {
-            var o = document.createElement('option');
-            o.value = t.id;
-            o.textContent = tsLabel(t);
-            tuneSelect.appendChild(o);
-        });
-        document.getElementById('tune-row').hidden = false;
-        if (selectedFile) suggestStoredTune(selectedFile);
-    }).catch(function () { /* no stored tunes: the file input still works */ });
-}
 
 var RAIL_SEVERITY_CLASS = { warning: 'rail-warning', info: 'rail-info', good: 'rail-good' };
 

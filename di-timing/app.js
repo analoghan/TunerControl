@@ -3,7 +3,7 @@
  * limits, and (optionally) a review of the tune's Fuel Timing Primary Main table and a log. Calculations: di-calc.js.
  */
 
-var diTune = null, diTuneId = null, diTunePicked = false, diStored = [], diLogFile = null, diLogResult = null, diWorker = null;
+var diTune = null, diTunePicker = null, diLogFile = null, diLogResult = null, diWorker = null;
 var diPwEdited = false;   // the user typed a design pulse width: don't replace it with the log's
 
 function $(id) { return document.getElementById(id); }
@@ -25,9 +25,10 @@ function showError(msg) { $('error').hidden = !msg; $('error').textContent = msg
 
 // --- tune ---------------------------------------------------------------------------------------------------
 
-function setTune(di, label) {
+/** A tune fills the limits, spark, phaser and RPM sites from the tune and recalculates (its timing table is reviewed). */
+function onDiTune(di) {
     diTune = di;
-    if (!di) { $('tune-status').textContent = 'No tune chosen: enter the limits below, or choose a tune to fill them and review its timing table.'; return; }
+    if (!di) return;
     if (di.startLimit !== null) $('start-limit').value = di.startLimit;
     if (di.primaryLimit !== null) $('primary-limit').value = di.primaryLimit;
     if (di.spark !== null) $('max-spark').value = Math.ceil(di.spark);
@@ -37,43 +38,18 @@ function setTune(di, label) {
         $('max-rpm').value = r[r.length - 1];
         if (gaps.every(function (g) { return g === gaps[0]; })) $('rpm-step').value = gaps[0];
     }
-    $('tune-status').textContent = label + ': ' + (di.tuneName || 'tune') + '. Filled the Injection Start Limit (' + di.startLimit + '), Primary Limit (' +
-        di.primaryLimit + '), most spark advance (' + di.spark + '° BTDC)' + (di.camAim ? ', cam phaser (' + di.camAim.min + '–' + di.camAim.max + '° advance)' : '') +
-        ' and the RPM sites from the tune.';
     calculate();
 }
 
-$('pkg-input').addEventListener('change', function () {
-    var f = $('pkg-input').files[0];
-    if (!f) return;
-    diTunePicked = true; diTuneId = null; $('tune-select').value = '';
-    f.arrayBuffer().then(function (buf) { setTune(m1pkgDi(parseM1Pkg(buf)), 'Tune file ' + f.name); })
-        .catch(function (err) { showError('Could not read ' + f.name + ': ' + err.message); });
+diTunePicker = tsPicker({
+    pkgInput: $('pkg-input'), select: $('tune-select'), row: $('tune-row'), hint: $('tune-hint'), status: $('tune-status'), extract: m1pkgDi,
+    none: 'No tune chosen: enter the limits below, or choose a tune to fill them and review its timing table.',
+    describe: function (di) {
+        return 'Filled the Injection Start Limit (' + di.startLimit + '), Primary Limit (' + di.primaryLimit + '), most spark advance (' + di.spark +
+            '° BTDC)' + (di.camAim ? ', cam phaser (' + di.camAim.min + '–' + di.camAim.max + '° advance)' : '') + ' and the RPM sites from the tune.';
+    },
+    onError: showError, onChange: onDiTune
 });
-
-function useStoredTune(id, hint, suggested) {
-    if (!id) { setTune(null); $('tune-hint').textContent = ''; return Promise.resolve(); }
-    $('tune-select').value = id;
-    $('tune-hint').textContent = 'Loading…';
-    return tsLoad(id).then(function (pkg) {
-        if ($('tune-select').value !== id) return;
-        diTuneId = id; $('pkg-input').value = '';
-        $('tune-hint').textContent = hint || '';
-        $('tune-hint').classList.toggle('suggested', !!suggested);
-        setTune(m1pkgDi(pkg), 'Stored tune');
-    }).catch(function (err) { $('tune-hint').textContent = ''; showError('Could not read the stored tune: ' + err.message); });
-}
-
-$('tune-select').addEventListener('change', function () { diTunePicked = !!$('tune-select').value; useStoredTune($('tune-select').value, '', false); });
-
-if (typeof tsInit === 'function') {
-    tsInit().then(tsList).then(function (list) {
-        diStored = list;
-        if (!list.length) return;
-        list.forEach(function (t) { var o = document.createElement('option'); o.value = t.id; o.textContent = tsLabel(t); $('tune-select').appendChild(o); });
-        $('tune-row').hidden = false;
-    }).catch(function () { /* no stored tunes */ });
-}
 
 // --- log ----------------------------------------------------------------------------------------------------
 
@@ -81,12 +57,7 @@ $('log-input').addEventListener('change', function () {
     diLogFile = $('log-input').files[0] || null;
     diLogResult = null;
     $('log-status').textContent = diLogFile ? diLogFile.name : '';
-    if (diLogFile && diStored.length && !diTunePicked && typeof tsLogInfo === 'function') {
-        tsLogInfo(diLogFile).then(function (info) {
-            var s = tsSuggest(diStored, info);
-            if (s.tune) useStoredTune(s.tune.id, s.reason, true); else { $('tune-hint').textContent = s.reason; $('tune-hint').classList.remove('suggested'); }
-        });
-    }
+    if (diLogFile) diTunePicker.suggest(diLogFile);
     calculate();
 });
 

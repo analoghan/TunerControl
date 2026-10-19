@@ -35,8 +35,6 @@ var collectedWarnings = [];
 var tuneKnock = null;      // knock settings from the chosen tune (m1pkg-knock.js), or null
 var tuneId = null;         // stored tune id of tuneKnock (null for a .m1pkg file)
 var lastRunInfo = null;    // { file, settings, tuneId, tuneName } of the shown results, for the tuning history
-var tunePicked = false;    // the user chose the tune source themselves
-var storedTunes = [];
 var lastRunFile = null;    // the log of the shown results, for the log panel
 var logPanel = null, logPanelReady = null;
 
@@ -44,10 +42,6 @@ var logPanel = null, logPanelReady = null;
 // Tune (knock threshold table, ignition table axes, knock inputs)
 // ---------------------------------------------------------------------------
 
-var pkgInput = document.getElementById('pkg-input');
-var tuneSelect = document.getElementById('tune-select');
-var tuneHint = document.getElementById('tune-hint');
-var tuneStatus = document.getElementById('tune-status');
 var thresholdMode = document.getElementById('threshold-mode');
 var thresholdInput = document.getElementById('threshold-input');
 
@@ -55,17 +49,20 @@ function fmtThresholdTable(t) {
     return t.rpm.map(function (r, i) { return Math.round(r) + ' rpm ' + (+t.values[0][i].toFixed(1)) + '%'; }).join(', ');
 }
 
-function setTune(knock, sourceLabel) {
+/** A new tune (or none): use its Knock Threshold table when it has one, and show its knock control settings. */
+function onKnockTune(knock, id) {
     tuneKnock = knock;
+    tuneId = id;
     var tuneOpt = thresholdMode.querySelector('option[value="tune"]');
     tuneOpt.disabled = !(knock && knock.threshold);
     if (knock && knock.threshold) thresholdMode.value = 'tune';
     else if (thresholdMode.value === 'tune') thresholdMode.value = 'fixed';
     syncThresholdInput();
     renderTuneSettings();
-    if (!knock) { tuneStatus.textContent = 'No tune chosen: knock is judged against the fixed threshold below.'; return; }
-    tuneStatus.textContent = sourceLabel + ': ' + (knock.tuneName || 'tune') + '. ' +
-        (knock.threshold ? 'Knock Threshold ' + fmtThresholdTable(knock.threshold) + '. ' : 'No Knock Threshold table found. ') +
+}
+
+function describeKnockTune(knock) {
+    return (knock.threshold ? 'Knock Threshold ' + fmtThresholdTable(knock.threshold) + '. ' : 'No Knock Threshold table found. ') +
         (knock.ignitionAxes ? 'Knock grid uses the Ignition Timing Main sites. ' : '') +
         (knock.inputs ? 'Knock inputs per cylinder read from the tune.' : '') + (knock.notes.length ? ' ' + knock.notes.join(' ') : '');
 }
@@ -126,68 +123,13 @@ boreInput.addEventListener('input', function () {
 function syncThresholdInput() { thresholdInput.disabled = thresholdMode.value === 'tune'; }
 thresholdMode.addEventListener('change', syncThresholdInput);
 
-pkgInput.addEventListener('change', function () {
-    var file = pkgInput.files[0];
-    if (!file) return;
-    tunePicked = true;
-    tuneSelect.value = '';
-    tuneHint.textContent = '';
-    file.arrayBuffer().then(function (buf) {
-        tuneId = null;
-        setTune(m1pkgKnock(parseM1Pkg(buf)), 'Tune file ' + file.name);
-    }).catch(function (err) {
-        setTune(null);
-        showErrorBanner('Could not read the knock settings from ' + file.name + ': ' + err.message);
-    });
+/** The optional tune: a .m1pkg or a stored tune, suggested from the log's ECU serial and time. */
+var tunePicker = tsPicker({
+    pkgInput: document.getElementById('pkg-input'), select: document.getElementById('tune-select'), row: document.getElementById('tune-row'),
+    hint: document.getElementById('tune-hint'), status: document.getElementById('tune-status'), extract: m1pkgKnock, describe: describeKnockTune,
+    none: 'No tune chosen: knock is judged against the fixed threshold below.', what: 'the knock settings',
+    onError: function (msg) { showErrorBanner(msg); }, onChange: onKnockTune
 });
-
-function useStoredTune(id, hint, suggested) {
-    if (!id) { setTune(null); tuneHint.textContent = ''; return Promise.resolve(); }
-    tuneSelect.value = id;
-    tuneHint.textContent = 'Loading…';
-    return tsLoad(id).then(function (pkg) {
-        if (tuneSelect.value !== id) return;
-        pkgInput.value = '';
-        tuneId = id;
-        setTune(m1pkgKnock(pkg), 'Stored tune');
-        tuneHint.textContent = hint || '';
-        tuneHint.classList.toggle('suggested', !!suggested);
-    }).catch(function (err) {
-        setTune(null);
-        tuneHint.textContent = '';
-        showErrorBanner('Could not read the knock settings from the stored tune: ' + err.message);
-    });
-}
-
-tuneSelect.addEventListener('change', function () {
-    tunePicked = !!tuneSelect.value;
-    useStoredTune(tuneSelect.value, '', false);
-});
-
-function suggestStoredTune(file) {
-    if (!storedTunes.length || tunePicked || typeof tsLogInfo === 'undefined') return;
-    tsLogInfo(file).then(function (info) {
-        var sug = tsSuggest(storedTunes, info);
-        if (sug.tune) return useStoredTune(sug.tune.id, sug.reason, true);
-        tuneHint.textContent = sug.reason;
-        tuneHint.classList.remove('suggested');
-    });
-}
-
-if (typeof tsInit !== 'undefined') {
-    tsInit().then(tsList).then(function (list) {
-        storedTunes = list;
-        if (!list.length) return;
-        list.forEach(function (t) {
-            var o = document.createElement('option');
-            o.value = t.id;
-            o.textContent = tsLabel(t);
-            tuneSelect.appendChild(o);
-        });
-        document.getElementById('tune-row').hidden = false;
-        if (selectedFile) suggestStoredTune(selectedFile);
-    }).catch(function () { /* no stored tunes: the file input still works */ });
-}
 
 /** Analysis settings for the worker: the threshold (tune table or fixed %), ignition axes and knock inputs. */
 function knockSettings() {
@@ -243,7 +185,7 @@ function handleFileSelect(event) {
         selectedFile = file;
         analyzeBtn.disabled = false;
         fileError.hidden = true;
-        suggestStoredTune(file);
+        tunePicker.suggest(file);
     } else {
         selectedFile = null;
         analyzeBtn.disabled = true;
