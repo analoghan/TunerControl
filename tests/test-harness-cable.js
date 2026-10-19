@@ -149,10 +149,13 @@ describe('Harness — cables', function () {
     assert.ok(/,Knock 1,/.test(harnessCutListCsv(m, wires)));
   });
 
-  it('draws the twist and shield in the block diagram', function () {
-    var m = hcbModel(), svg = harnessBlockDiagram(m, 'KNOCK', { cables: harnessCables(m).byEndpoint }).svg;
-    assert.ok(/class="cable"/.test(svg) && /<ellipse/.test(svg) && />STP</.test(svg));
+  it('draws a cable as a twisted rope with its shield in the block diagram', function () {
+    var m = hcbModel(), cables = harnessCables(m).byEndpoint, svg = harnessBlockDiagram(m, 'KNOCK', { cables: cables }).svg;
+    assert.ok(/class="cable rope"/.test(svg) && />STP</.test(svg));
+    assert.ok(/stroke="#e4e4e4"/.test(svg), 'shield sheath');
     assert.ok(!/class="cable"/.test(harnessBlockDiagram(m, 'KNOCK', {}).svg), 'only when asked');
+    var ckp = harnessBlockDiagram(m, 'CKP', { cables: cables }).svg;
+    assert.ok(/class="cable/.test(ckp) && />3C S</.test(ckp), 'a triple whose conductors end in different columns keeps the short mark');
   });
 
   it('flags a cable whose conductors are swapped across a mated connector', function () {

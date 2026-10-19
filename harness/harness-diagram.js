@@ -8,8 +8,8 @@
  * Both return { svg, width, height }. Elements carry data-endpoint="CONN.CAVITY" (a row) or
  * data-node="ID" (a block) for click handling. opts.imageUrls maps image id → URL for the pictures drawn
  * under the focused block in the block diagram; opts.hardware is the ECU prefix for the overview (default M1xx).
- * opts.cables (harnessCables(model).byEndpoint) marks the cables leaving the focused connector: the twist, a dashed shield
- * oval, a tick to the shield/drain row and a tag (STP, UTP, 3C S…).
+ * opts.cables (harnessCables(model).byEndpoint) draws the cables leaving the focused connector as twisted ropes (2–4 strands,
+ * a grey sheath and the drain alongside when shielded) and tags them (STP, UTP, 3C S…).
  */
 
 var HD_COLORS = {
@@ -242,16 +242,22 @@ function harnessBlockDiagram(model, id, opts) {
     var fbox = hdBox(x0, 20, w0, focus.id, isSplice ? 'Splice' + (focus.type ? ' · ' + focus.type : '')
         : [focus.connector, focus.title !== focus.id ? focus.title : ''].filter(Boolean).join(' · '), focusRows,
         'focus' + (isSplice ? ' splice' : ''), null);
+    // Where each focus row's wire ends: column 1, or straight to column 2 (behind the column 1 boxes).
+    var ends = [], dest = {};
     links.forEach(function (l) {
         var g = l.group;
         if (g.moved) return;
         var ty = g.kind === 'missing' || l.entry === null ? g.box.top + 15 : g.box.y(l.entry);   // nothing to match: the header
-        wires += hdWirePath(x0 + w0, fbox.y(l.from), x1, ty, hdWireStyle(l.wire), l.title + ' · ' + (l.wire || ''));
+        ends.push(dest[l.from] = { from: l.from, x: x1, y: ty, wire: l.wire, title: l.title + ' · ' + (l.wire || '') });
     });
-    // Straight to column 2, behind the column 1 boxes.
     direct.forEach(function (d) {
-        wires += hdWirePath(x0 + w0, fbox.y(d.from), x2, d.y, hdWireStyle(d.wire), d.title + ' · ' + (d.wire || ''));
+        ends.push(dest[d.from] = { from: d.from, x: x2, y: d.y, wire: d.wire, title: d.title + ' · ' + (d.wire || '') });
     });
+    var cables = opts.cables && !isSplice ? hdCableMarks(rows, fbox, x0 + w0, opts.cables, dest) : { wires: '', marks: '', drawn: {} };
+    ends.forEach(function (e) {
+        if (!cables.drawn[e.from]) wires += hdWirePath(x0 + w0, fbox.y(e.from), e.x, e.y, hdWireStyle(e.wire), e.title);
+    });
+    wires += cables.wires;
     // Unterminated / Eyelet / Battery / Device: a short wire ending in a symbol (cap, ring terminal, battery cell, box), connected at this end only.
     stubs.forEach(function (s) {
         var y = fbox.y(s.from), xs = x0 + w0, xe = xs + 46, sym, xl;
@@ -275,7 +281,7 @@ function harnessBlockDiagram(model, id, opts) {
             '" width="' + (s.end.label.length * 6 + 12) + '" height="16" rx="3" fill="#fff" stroke="#bbb"/>' + sym +
             '<text class="dim" x="' + (xl + 5) + '" y="' + (y + 4) + '">' + hdEsc(s.end.label) + '</text></g>';
     });
-    if (opts.cables && !isSplice) body += hdCableMarks(rows, fbox, x0 + w0, opts.cables);
+    body += cables.marks;
     var yImg = 20 + fbox.height + 16, pics = '';
     (focus.images || []).forEach(function (im) {
         var url = opts.imageUrls && opts.imageUrls[im.id];
@@ -292,9 +298,103 @@ function harnessBlockDiagram(model, id, opts) {
     return { svg: hdSvg(width, height, wires + fbox.svg + body + pics), width: width, height: height };
 }
 
-/** Twist, shield oval and tag for each cable whose wires leave the focus rows (one mark per run of neighbouring rows). */
-function hdCableMarks(rows, fbox, xs, byEndpoint) {
-    var out = '', byCable = [], seen = [];
+var HD_ROPE_FAN = 36;   // px at each end where a cable's conductors fan out of the rope to their rows
+
+/** Points along hdWirePath's horizontal S-curve, about every 2 px, with the distance along it: [[x, y, dist], …]. */
+function hdCurvePoints(x1, y1, x2, y2) {
+    var mx = (x1 + x2) / 2, steps = Math.max(4, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 2)), pts = [], dist = 0;
+    for (var i = 0; i <= steps; i++) {
+        var t = i / steps, u = 1 - t;
+        var x = u * u * u * x1 + 3 * u * u * t * mx + 3 * u * t * t * mx + t * t * t * x2;
+        var y = u * u * u * y1 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y2;
+        if (i) dist += Math.hypot(x - pts[i - 1][0], y - pts[i - 1][1]);
+        pts.push([x, y, dist]);
+    }
+    return pts;
+}
+
+/** The point d px to the side of pts[i] (positive = below on a path heading right). */
+function hdSide(pts, i, d) {
+    var a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+    var dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+    return [pts[i][0] - dy / len * d, pts[i][1] + dx / len * d];
+}
+
+function hdPoly(p) { return p.map(function (q) { return q[0].toFixed(1) + ',' + q[1].toFixed(1); }).join(' '); }
+
+/** One strand (or part of one) in its colour over a dark edge, with its stripe. */
+function hdStrand(p, style, dash) {
+    var pts = hdPoly(p);
+    return '<polyline points="' + pts + '" stroke="#3a3a3a" stroke-width="' + (style.width + 2) + '" fill="none"/>' +
+        '<polyline points="' + pts + '" stroke="' + style.color + '" stroke-width="' + style.width + '" fill="none"/>' +
+        (style.stripe ? '<polyline points="' + pts + '" stroke="' + style.stripe + '" stroke-width="' + Math.max(1, style.width / 2.5) +
+            '" stroke-dasharray="' + (dash || '7 7') + '" fill="none"/>' : '');
+}
+
+/**
+ * A cable as a twisted rope from the focus box (x xs) to the blocks it reaches (x xt): its conductors leave their rows, twist
+ * round each other (2 or 3 strands, over and under) along the run and fan out to their far rows; a shielded cable gets a grey
+ * sheath with the drain wire running alongside it. conds/drains: [{ y0, y1, style, title }] (a drain's y1 may be null: it ends
+ * elsewhere and is drawn on its own). Returns { wires, tagX, tagY }.
+ */
+function hdCableRope(conds, drains, shielded, xs, xt) {
+    function mean(l, k) { return l.reduce(function (s, c) { return s + c[k]; }, 0) / l.length; }
+    var pts = hdCurvePoints(xs + HD_ROPE_FAN, mean(conds, 'y0'), xt - HD_ROPE_FAN, mean(conds, 'y1'));
+    var n = conds.length, len = pts[pts.length - 1][2], wmax = Math.max.apply(null, conds.map(function (c) { return c.style.width; }));
+    var amp = n === 2 ? 3.4 : 2.4 + n * 0.8, period = len / Math.max(1, Math.round(len / (n === 2 ? 20 : 24)));
+    // Whole twists, so each strand leaves the rope on the side it entered; the start phase keeps the strands apart there.
+    var phase0 = Math.PI / 2 + Math.PI / (2 * n);
+    function ang(k, i) { return 2 * Math.PI * pts[i][2] / period + phase0 + 2 * Math.PI * k / n; }
+    // Strand k goes to the k-th row from the top, the strand starting highest to the top row.
+    var order = conds.map(function (c, k) { return k; }).sort(function (a, b) { return Math.sin(ang(a, 0)) - Math.sin(ang(b, 0)); });
+    var byY0 = conds.slice().sort(function (a, b) { return a.y0 - b.y0; }), strandOf = [];
+    order.forEach(function (k, r) { strandOf[k] = byY0[r]; });
+    var out = '', back = '', front = '', ends = '';
+    var sheath = amp + wmax / 2 + 3;
+    if (shielded) {
+        out += '<polyline points="' + hdPoly(pts) + '" stroke="#e4e4e4" stroke-width="' + (2 * sheath) + '" fill="none"/>';
+        [-sheath, sheath].forEach(function (d) {
+            out += '<polyline points="' + hdPoly(pts.map(function (q, i) { return hdSide(pts, i, d); })) +
+                '" stroke="#777" stroke-width="1.2" stroke-dasharray="4 3" fill="none"/>';
+        });
+    }
+    // Each strand split where it passes behind / in front of the others; behind parts first.
+    for (var k = 0; k < n; k++) {
+        var c = strandOf[k], seg = [], depth = null;
+        for (var i = 0; i < pts.length; i++) {
+            var p = hdSide(pts, i, amp * Math.sin(ang(k, i))), d = Math.cos(ang(k, i)) >= 0;
+            if (depth !== null && d !== depth) {
+                seg.push(p);
+                if (depth) front += hdStrand(seg, c.style, '4 4'); else back += hdStrand(seg, c.style, '4 4');
+                seg = [];
+            }
+            depth = d;
+            seg.push(p);
+        }
+        if (depth) front += hdStrand(seg, c.style, '4 4'); else back += hdStrand(seg, c.style, '4 4');
+        var s = hdSide(pts, 0, amp * Math.sin(ang(k, 0))), e = hdSide(pts, pts.length - 1, amp * Math.sin(ang(k, pts.length - 1)));
+        ends += hdWirePath(xs, c.y0, s[0], s[1], c.style, c.title) + hdWirePath(e[0], e[1], xt, c.y1, c.style, c.title);
+    }
+    // Drain wires alongside, on the side of their rows.
+    drains.forEach(function (w, j) {
+        var below = w.y0 >= mean(conds, 'y0'), off = (below ? 1 : -1) * (sheath + 2.5 + w.style.width / 2 + j * (w.style.width + 3));
+        var along = pts.map(function (q, i) { return hdSide(pts, i, off); }), a = along[0], z = along[along.length - 1];
+        ends += '<g class="wire"><title>' + hdEsc(w.title) + '</title>' + hdStrand(along, w.style) + '</g>' +
+            hdWirePath(xs, w.y0, a[0], a[1], w.style, w.title) + hdWirePath(z[0], z[1], xt, w.y1, w.style, w.title);
+    });
+    var top = Math.min.apply(null, [pts[0][1]].concat(drains.map(function (w) { return w.y0 < pts[0][1] ? pts[0][1] - sheath - 6 : pts[0][1]; })));
+    return { wires: out + back + front + ends, tagX: xs + HD_ROPE_FAN + 6, tagY: top - sheath - 4 };
+}
+
+/**
+ * The cables whose wires leave the focus rows (one per run of neighbouring rows). dest[i] = { x, y, wire, title } is where row i's
+ * wire ends. A run whose conductors all end at the same x is drawn as a rope (hdCableRope) and its rows marked in drawn; any
+ * other run gets a short twist where it leaves the box. Every run gets a shield oval / tick and a tag (STP, UTP, 3C S…).
+ * Returns { wires (behind the boxes), marks (over them), drawn }.
+ */
+function hdCableMarks(rows, fbox, xs, byEndpoint, dest) {
+    var wires = '', out = '', drawn = {}, byCable = [], seen = [];
+    dest = dest || {};
     rows.forEach(function (r, i) {
         var c = byEndpoint[r.endpoint];
         if (!c) return;
@@ -308,15 +408,28 @@ function hdCableMarks(rows, fbox, xs, byEndpoint) {
         byCable[k].forEach(function (i) {
             if (run && i === run[run.length - 1] + 1) run.push(i); else runs.push(run = [i]);
         });
-        var type = c.type, tag = type ? type.short : 'Cable';
+        var type = c.type, tag = type ? type.short : 'Cable', shielded = type ? type.shielded : c.shields.length > 0;
         var title = c.name + ' · ' + (type ? type.label : 'cable') + (c.pn ? ' · ' + c.pn : '') +
             (c.problems.length ? ' — ' + c.problems.map(function (p) { return p.message; }).join(' ') : '');
         runs.forEach(function (run) {
             var cond = run.filter(function (i) { return !shieldRows[rows[i].endpoint]; }), shield = run.filter(function (i) { return shieldRows[rows[i].endpoint]; });
             var span = cond.length ? cond : run, top = fbox.y(span[0]), bottom = fbox.y(span[span.length - 1]), cx = xs + 30, cy = (top + bottom) / 2;
+            var xt = cond.length && dest[cond[0]] ? dest[cond[0]].x : null;
+            var rope = cond.length >= 2 && cond.length <= 4 && cond.every(function (i) { return dest[i] && dest[i].x === xt; });
+            var tx = xs + 50, ty = top - 4;
+            if (rope) {
+                var end = function (i) { return { y0: fbox.y(i), y1: dest[i] && dest[i].x === xt ? dest[i].y : null, style: hdWireStyle(rows[i].wire), title: dest[i] ? dest[i].title : rows[i].endpoint }; };
+                var drains = shield.filter(function (i) { return dest[i] && dest[i].x === xt; });
+                var r = hdCableRope(cond.map(end), drains.map(end), shielded, xs, xt);
+                wires += '<g class="cable rope"><title>' + hdEsc(title) + '</title>' + r.wires + '</g>';
+                cond.concat(drains).forEach(function (i) { drawn[i] = true; });
+                shield = shield.filter(function (i) { return drains.indexOf(i) < 0; });
+                tx = r.tagX; ty = r.tagY;
+                cx = xs + HD_ROPE_FAN; top = bottom = cy = (top + bottom) / 2;
+            }
             out += '<g class="cable"><title>' + hdEsc(title) + '</title>';
             // The twist: neighbouring conductors cross over and back, each in its own colour over a dark edge, ending on its own row.
-            for (var j = 0; j + 1 < cond.length; j++) {
+            for (var j = 0; !rope && j + 1 < cond.length; j++) {
                 var y1 = fbox.y(cond[j]), y2 = fbox.y(cond[j + 1]), a = hdWireStyle(rows[cond[j]].wire), b = hdWireStyle(rows[cond[j + 1]].wire);
                 out += '<rect x="' + (xs + 17) + '" y="' + (y1 - 4) + '" width="26" height="' + (y2 - y1 + 8) + '" fill="#fff"/>';
                 [[y2, y1, b], [y1, y2, a]].forEach(function (l) {
@@ -328,21 +441,21 @@ function hdCableMarks(rows, fbox, xs, byEndpoint) {
                             '" stroke-dasharray="4 4" fill="none"/>' : '');
                 });
             }
-            if (type && type.shielded) {
-                out += '<ellipse cx="' + cx + '" cy="' + cy + '" rx="17" ry="' + ((bottom - top) / 2 + 9) + '" fill="none" stroke="#666" stroke-width="1.4" stroke-dasharray="4 3"/>';
-                // The shield / drain wire's row: a tick from the oval to it.
+            if (shielded) {
+                var ry = rope ? 0 : (bottom - top) / 2 + 9;
+                if (!rope) out += '<ellipse cx="' + cx + '" cy="' + cy + '" rx="17" ry="' + ry + '" fill="none" stroke="#666" stroke-width="1.4" stroke-dasharray="4 3"/>';
+                // A shield / drain row not drawn along the rope (it ends elsewhere): a tick from the shield to it.
                 shield.forEach(function (i) {
-                    var ys = fbox.y(i), edge = ys > cy ? bottom + 9 : top - 9;
+                    var ys = fbox.y(i), edge = rope ? cy + (ys > cy ? 8 : -8) : ys > cy ? bottom + 9 : top - 9;
                     out += '<line x1="' + cx + '" y1="' + edge + '" x2="' + cx + '" y2="' + ys + '" stroke="#666" stroke-width="1.4"/>' +
                         '<circle cx="' + cx + '" cy="' + ys + '" r="2.2" fill="#666"/>';
                 });
             }
-            var tx = xs + 50, ty = top - 4;
             out += '<rect x="' + (tx - 2) + '" y="' + (ty - 9) + '" width="' + (tag.length * 6 + 4) + '" height="11" rx="2" fill="#fff" stroke="#bbb"/>' +
                 '<text class="dim" x="' + tx + '" y="' + ty + '" style="font-size:9px">' + hdEsc(tag) + '</text></g>';
         });
     });
-    return out;
+    return { wires: wires, marks: out, drawn: drawn };
 }
 
 function harnessOverviewDiagram(model, opts) {

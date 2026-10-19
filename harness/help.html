@@ -217,9 +217,12 @@ Location | Pin        | Conductor Part Number | Conductor Description | ECU Func
       <li>Across a mated connector (System tab): a cable conductor that meets a different conductor — another colour, or the shield — on the
         other side, i.e. the pair is swapped across the join.</li>
     </ul>
-    <p>Block diagrams draw each cable where it leaves the connector: the conductors twisted, a dashed oval for the shield, a tick to the shield
-      or drain row and a tag — <em>STP</em> / <em>UTP</em> for a shielded / unshielded pair, <em>3C S</em> for a shielded triple. The cut list,
-      its CSV and the pinout sheets have a Cable column.</p>
+    <p>Block diagrams (and the PDF's) draw each cable as a twisted rope, like the CAN diagrams: its conductors leave their rows, twist round
+      each other (two or three strands) all the way to the far end and fan out to their rows there. A shielded cable runs in a grey dashed
+      sheath with its shield / drain wire alongside; a drain that ends somewhere else gets a tick from the sheath to its row. A tag names the
+      type — <em>STP</em> / <em>UTP</em> for a shielded / unshielded pair, <em>3C S</em> for a shielded triple. When a cable's conductors
+      don't all end in the same column (one runs on to a splice's far side, or ends unterminated) it is drawn as before: a short twist where
+      it leaves the connector and a dashed oval for the shield. The cut list, its CSV and the pinout sheets have a Cable column.</p>
 
     <h2 id="diagrams">Diagrams and tracing</h2>
     <p>The <strong>Diagram</strong> tab draws diagrams from the harness itself — they update as you edit. Choose what to show:</p>

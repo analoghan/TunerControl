@@ -1534,7 +1534,7 @@ function pdfBlockHtml(block, isConnector, opts, urls) {
         return row;
     })) + '</div>';
     if (opts[isConnector ? 'connectorDiagrams' : 'spliceDiagrams']) {
-        html += pdfFigure(harnessBlockDiagram(state.model, block.id, { imageUrls: opts.pictures ? urls : {} }).svg, block.id + ' wiring diagram');
+        html += pdfFigure(harnessBlockDiagram(state.model, block.id, { imageUrls: opts.pictures ? urls : {}, cables: state.cables ? state.cables.byEndpoint : null }).svg, block.id + ' wiring diagram');
     } else if (opts.pictures) {
         html += (block.images || []).map(function (im) {
             return urls[im.id] ? '<figure class="pr-figure"><img src="' + esc(urls[im.id]) + '" alt="">' +
@@ -1580,7 +1580,7 @@ function exportPdf() {
             var tableOpts = opts[k[1]] ? opts : null;
             k[4].forEach(function (b, i) {
                 var html = tableOpts ? pdfBlockHtml(b, k[0], opts, urls[b.id])
-                    : pdfFigure(harnessBlockDiagram(state.model, b.id, { imageUrls: opts.pictures ? urls[b.id] : {} }).svg, b.id + ' wiring diagram');
+                    : pdfFigure(harnessBlockDiagram(state.model, b.id, { imageUrls: opts.pictures ? urls[b.id] : {}, cables: state.cables ? state.cables.byEndpoint : null }).svg, b.id + ' wiring diagram');
                 // Each block with a diagram starts a page; tables alone run on.
                 sections.push({ title: i === 0 ? k[3] : '', html: html, newPage: sections.length > 0 && (i === 0 || !!opts[k[2]]) });
             });
