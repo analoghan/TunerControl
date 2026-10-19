@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Backup &amp; Restore — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content h3 { color: #fff; margin-top: 16px; margin-bottom: 4px; font-size: 1rem; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #ff9800; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255,152,0,0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Backup &amp; Restore</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Backup &amp; Restore — Help</h1>
+    <p>TunerControl keeps your data in one of two places: on the <strong>TunerControl server</strong> (when the pages are served from it), or in
+      <strong>this browser</strong> (IndexedDB) when they aren't. The line at the top of the page says which. A backup is one JSON file with
+      everything stored there, and it can be restored into either kind of storage.</p>
+
+    <h2>What a Backup Holds</h2>
+    <ul>
+      <li>Every tune imported into the M1 Config Viewer, with its original <code>.m1pkg</code> file.</li>
+      <li>Your I/O resource names and labels.</li>
+      <li>The Tuning History (saved VE, transient fuel, knock and fuel pressure runs).</li>
+      <li>Every harness with all of its revisions, harness systems with their joins and CAN networks, and the harness pictures.</li>
+      <li>This browser's page settings (remembered choices on the tool pages).</li>
+    </ul>
+    <p>It does <strong>not</strong> hold your log files (they are never stored — you open them from disk each time) or the server's access
+      token.</p>
+
+    <h2>Making a Backup</h2>
+    <ol>
+      <li>Check <strong>Stored now</strong> to see what is there.</li>
+      <li>Click <strong>Download backup</strong>. The browser saves the file; the page shows its size and contents.</li>
+      <li>Keep it somewhere other than the server or this computer.</li>
+    </ol>
+    <div class="warning">
+      <strong>Browser storage can disappear.</strong> Clearing site data, a private window or a new browser profile starts empty. Without the
+      server, back up after importing tunes or saving harnesses.
+    </div>
+
+    <h2>Restoring</h2>
+    <ol>
+      <li>Click <strong>Choose backup file…</strong> and pick the JSON file. The page shows when and where it was made and what it holds.</li>
+      <li>Click <strong>Restore</strong> (or Cancel).</li>
+    </ol>
+    <p>Restoring <strong>adds</strong> what isn't stored yet and never deletes. Anything already stored with the same id is left as it is, so
+      restoring the same file twice is safe and a restore can't roll back newer work. Resource names, labels and page settings are set from the
+      backup. When it's done, the page says how many of each were added.</p>
+    <p>Backups made with the M1 Config Viewer's older <em>Export backup</em> restore too; they hold only M1 Config Viewer data (tunes, and names and labels in later versions).</p>
+
+    <h2>Common Uses</h2>
+    <h3>Moving from browser storage to the server</h3>
+    <p>Open this page without the server and download a backup, then open it from the server and restore it. Everything keeps its id, so
+      harness systems still point at their harnesses.</p>
+    <h3>Recovering a lost server</h3>
+    <p>Set up the server again (see <code>server/README.md</code>), open this page from it and restore the latest backup. The same file also
+      restores into a browser, so the data can be used before the server is back.</p>
+    <h3>A second computer or browser</h3>
+    <p>Restore the backup there. With a server you don't need to: every browser that opens the pages from the server sees the same data.</p>
+
+    <div class="tip">
+      <strong>On the server:</strong> the same backup is available at <code>GET /api/backup</code> (and restored with <code>POST /api/backup</code>),
+      so it can be scheduled. The SQLite database file itself can also be copied with <code>sqlite3 … ".backup …"</code> — see
+      <code>server/README.md</code>.
+    </div>
+  </div>
+</body>
+</html>

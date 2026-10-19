@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Injector Duty Cycle — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content h3 { color: #fff; margin-top: 16px; margin-bottom: 4px; font-size: 1rem; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #ff9800; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255,152,0,0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Injector Duty Cycle</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Injector Duty Cycle — Help</h1>
+    <p>Shows how close the injectors come to their limit across rpm and load, and how much of the load range the log actually covers. Results are
+      in seconds and in stretches that last a while, not single samples, so one glitch can't make the injectors look maxed out.</p>
+
+    <h2>Quick Start</h2>
+    <ol>
+      <li>Choose a MoTeC log (<code>.ld</code> or CSV) with <strong>Engine Speed</strong> and <strong>Fuel Injector Primary Duty Cycle</strong>
+        (Secondary Duty Cycle is used if there is no primary). Inlet Manifold Pressure and Fuel Cylinder 1 Primary Output Pulse Width 1 add the
+        load coverage and the injection window.</li>
+      <li>Set the warning and critical levels (default 80 % and 90 %).</li>
+      <li>Click <strong>Analyze</strong>.</li>
+    </ol>
+
+    <h2>What Duty Cycle Means on a DI M1</h2>
+    <p>On a port-injected engine, duty cycle is the share of the whole 720° engine cycle the injector is open. On a direct-injection M1 the logged
+      Fuel Injector Primary Duty Cycle is a share of the <strong>injection window</strong> instead: the crank angle the injection is allowed to
+      use. Dividing the pulse in crank degrees by the duty cycle comes out at an almost constant angle, which the tool reports as the
+      <em>implied injection window</em>. 100 % means the pulse fills the window, not that the injector is open all the time.</p>
+    <p>So there are three ways to get headroom back at the top end:</p>
+    <ul>
+      <li><strong>A longer window</strong>: start injection earlier, within the valve events (see <a href="../di-timing/index.html">DI Injection
+        Timing</a>).</li>
+      <li><strong>More rail pressure</strong>: the same fuel goes in with a shorter pulse, if the pump can hold it (see
+        <a href="../fuel-pressure/index.html">DI Fuel Pressure</a>).</li>
+      <li><strong>Larger injectors.</strong></li>
+    </ul>
+
+    <h2>Results</h2>
+    <h3>Summary</h3>
+    <ul>
+      <li><strong>Peak held 0.3 s</strong>: the highest duty cycle the injectors stayed at for 0.3 s, with the rpm (and MAP) where it happened.
+        This is the number the status and advice use.</li>
+      <li><strong>Engine running</strong>, <strong>time above warning</strong> and <strong>time above critical</strong>, in seconds.</li>
+      <li><strong>Highest reached</strong>: the top rpm and MAP in the log. Duty cycle above these isn't measured.</li>
+      <li><strong>Injection window (implied)</strong>: median of pulse degrees ÷ duty cycle, shown once at least 100 samples have a usable
+        pulse.</li>
+    </ul>
+    <h3>Duty Cycle by RPM</h3>
+    <p>One row per 500 rpm band: time spent there, the 95th percentile, the peak held for 0.3 s (with the MAP there), the single highest sample,
+      and a status (OK / WARNING / CRITICAL) from the held peak.</p>
+    <h3>High Duty Cycle Episodes</h3>
+    <p>Stretches above the warning level that last at least 0.3 s (gaps up to 0.2 s are joined), highest first, with time, length, rpm and MAP.</p>
+    <h3>Recommendations</h3>
+    <p>How the held peak compares with your levels, and how much load the log covers. Under 2 s above 100 kPa is flagged as too little boost to
+      judge full-load headroom.</p>
+
+    <div class="warning">
+      <strong>A cruise log can't show full-load headroom.</strong> Duty cycle rises with rpm and load, so log full-throttle pulls to near the rev
+      limit (safely) before relying on the result.
+    </div>
+
+    <div class="tip">
+      <strong>Tip:</strong> if the secondary injectors are also used in the log, the tool says so; the numbers here cover the primary
+      injectors.
+    </div>
+  </div>
+</body>
+</html>

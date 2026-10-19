@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cross-Tool Diagnostics — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content h3 { color: #fff; margin-top: 16px; margin-bottom: 4px; font-size: 1rem; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #ff9800; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255,152,0,0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content table { border-collapse: collapse; margin: 8px 0 12px; font-size: 0.85rem; }
+    .help-content th, .help-content td { border: 1px solid #333; padding: 4px 10px; text-align: left; color: #ccc; vertical-align: top; }
+    .help-content th { background: #1a1a1a; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Diagnostics</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Cross-Tool Diagnostics — Help</h1>
+    <p>Diagnostics reads one MoTeC M1 log and checks fuelling, knock and DI rail pressure together, so a problem that shows up in more than one
+      place is reported once with its likely cause. For example, knock that only happens while the engine is lean points at fuelling, not timing.
+      It is a quick screen: each finding names the tool to open for the detailed analysis.</p>
+
+    <h2>Quick Start</h2>
+    <ol>
+      <li>Choose a MoTeC log: the <code>.ld</code> file itself or a CSV export from i2.</li>
+      <li>Optionally add the tune: a stored tune from the M1 Config Viewer (suggested from the log's ECU serial and date), or a <code>.m1pkg</code>
+        file. With a tune, the injector findings use its Minimum Volume and Linearisation.</li>
+      <li>Click <strong>Analyze All</strong>.</li>
+    </ol>
+
+    <h2>Channels Used</h2>
+    <p>Everything is optional except Engine Speed; a check whose channels are missing is skipped.</p>
+    <ul>
+      <li><strong>Fuelling:</strong> Exhaust Lambda Bank 1 / Bank 2 (or Exhaust Lambda), Fuel Mixture Aim, Fuel Closed Loop Control Bank 1 / 2
+        Trim, Fuel Cylinder 1 Primary Output Pulse Width 1, Engine Overrun State, Inlet Manifold Pressure.</li>
+      <li><strong>Rail pressure:</strong> Fuel Pressure Direct Bank 1 and its Aim (logged in MPa; shown in bar).</li>
+      <li><strong>Knock:</strong> Ignition Cylinder 1–8 Knock Level.</li>
+    </ul>
+
+    <h2>Summary</h2>
+    <table>
+      <tr><th>Tile</th><th>What it counts</th></tr>
+      <tr><td>Log Duration / Total Samples</td><td>Length of the log. <code>.ld</code> logs are resampled to the fastest channel (100 Hz), so samples
+        are not a measure of how much data there is — the counts below are episodes, not samples.</td></tr>
+      <tr><td>Lean Episodes (fuelling)</td><td>Stretches of at least 0.3 s with lambda above 1.06 while the injectors kept firing — real lean
+        running.</td></tr>
+      <tr><td>Injection Cuts (no overrun)</td><td>Lean episodes where the injector pulse width went to zero without the overrun fuel cut (Engine
+        Overrun State 2). On an M1 that is usually Fuel Injector Primary Minimum Volume switching all injectors off.</td></tr>
+      <tr><td>Knock Events</td><td>Stretches where any cylinder's knock level is above 20 % (one event per stretch, not per sample).</td></tr>
+      <tr><td>Pressure Below Aim</td><td>Share of the running time with rail pressure more than 2 bar below its aim.</td></tr>
+      <tr><td>Injecting Below 1 ms</td><td>Share of injecting time with pulses under 1 ms, the DI injector's short-pulse (non-linear) region.</td></tr>
+    </table>
+    <p>Lean episodes during the overrun fuel cut are expected (lambda reads air about 0.4 s after the cut) and are not counted as problems.</p>
+
+    <h2>Findings</h2>
+    <p>Findings are sorted critical → warning → info. Each says what was measured and what to check next.</p>
+    <table>
+      <tr><th>Finding</th><th>Shown when</th></tr>
+      <tr><td>Knock Events Correlated with Lean Fueling</td><td>More than 5 knock events and over 15 % of them start while lambda is above 1.06
+        with the injectors firing. Fix the fuelling before pulling timing.</td></tr>
+      <tr><td>Injection Cut Without Overrun</td><td>3 or more injection cuts without the overrun cut. With the tune, it compares the logged fuel
+        volume with Minimum Volume and its Hysteresis.</td></tr>
+      <tr><td>Lean Episodes With Rail Pressure Below Aim</td><td>3 or more lean-while-fuelling episodes with the rail more than 10 bar below aim.</td></tr>
+      <tr><td>Sustained CL Trim Offset — Bank 1 / 2</td><td>The closed-loop trim averages more than ±5 % while closed loop is active. A trim
+        that big everywhere points at the fuel model as a whole (injector reference flow, fuel pressure) rather than single VE cells.</td></tr>
+      <tr><td>Fuel Pressure Tracking Issue</td><td>Rail pressure is more than 2 bar below aim for over 15 % of the running time.</td></tr>
+      <tr><td>Knock Events Detected (Not Lean-Related)</td><td>Knock events with none of them during lean running — timing-related knock.</td></tr>
+      <tr><td>Lean at Short Pulse Widths</td><td>At least half of 3+ lean-while-fuelling episodes had pulses under 1 ms.</td></tr>
+      <tr><td>Linearisation Doesn't Cover Short Pulses</td><td>With a tune: more than 5 % of injecting time is under 1 ms but Fuel Injector
+        Primary Linearisation has a single Fuel Volume site, so it can't correct short pulses.</td></tr>
+      <tr><td>No Cross-Domain Issues Detected</td><td>None of the above.</td></tr>
+    </table>
+
+    <div class="warning">
+      <strong>Knock here uses a fixed 20 % level.</strong> A typical M1 Knock Threshold table runs 20–40 % of the knock level scale by rpm, so this
+      is only a first look. The <a href="../knock/index.html">Knock Analyzer</a> reads the tune's own Knock Threshold table, and its count is the
+      one to act on.
+    </div>
+
+    <h2>Where to Go Next</h2>
+    <ul>
+      <li><strong>Lean episodes, injection cuts, short pulses, Linearisation:</strong> <a href="../injector/index.html">Injector Characterization</a>
+        (Lean Spike Analysis, Injector Settings From the Tune).</li>
+      <li><strong>Rail pressure:</strong> <a href="../fuel-pressure/index.html">DI Fuel Pressure</a> — whether it is a pump capacity limit (high
+        rpm and load) or a control problem (everywhere).</li>
+      <li><strong>Knock:</strong> <a href="../knock/index.html">Knock Analyzer</a> — events per cylinder against the tune's threshold, and the RPM
+        × load grid.</li>
+      <li><strong>Trim offsets:</strong> <a href="../ve-table/index.html">VE Table Tuning</a> once the injector data and fuel pressure are
+        right.</li>
+    </ul>
+
+    <div class="tip">
+      <strong>Tip:</strong> a short log gives small counts, and the findings need several episodes before they say anything. Use a drive that covers
+      idle, cruise, tip-ins and some load.
+    </div>
+  </div>
+</body>
+</html>

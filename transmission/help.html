@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transmission Shift Analyzer — Help</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #036ffc; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content h3 { color: #fff; margin-top: 16px; margin-bottom: 4px; font-size: 1rem; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content a { color: #036ffc; }
+    .help-content code { background: #222; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #ff9800; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255,152,0,0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content table { border-collapse: collapse; margin: 8px 0 12px; font-size: 0.85rem; }
+    .help-content th, .help-content td { border: 1px solid #333; padding: 4px 10px; text-align: left; color: #ccc; vertical-align: top; }
+    .help-content th { background: #1a1a1a; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Shift Analyzer</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Transmission Shift Analyzer — Help</h1>
+    <p>For a ZF 8HP on a TurboLamik TCU. It reads a TunerPro RT log of the TCU, times every shift from the moment it is requested to the moment the
+      new gear is in, looks for flare (slip) and bumps, and checks whether the TCU's clutch adaptation could learn. With the TCU bin it also reads
+      the gear ratios, start gear, blip limits and the correction tables, and names the tables to look at for each finding.</p>
+
+    <h2>Files</h2>
+    <table>
+      <tr><th>File</th><th>Needed</th><th>What it is</th></tr>
+      <tr><td>Log <code>.xdl</code> or <code>.csv</code></td><td>Yes</td><td>A TunerPro RT datalog of the TCU, or a CSV exported from it.</td></tr>
+      <tr><td><code>.adx</code></td><td>With an <code>.xdl</code></td><td>The channel definitions that go with the log; the <code>.xdl</code> holds raw
+        values only.</td></tr>
+      <tr><td>Bin <code>.bin</code></td><td>Optional</td><td>The TCU calibration.</td></tr>
+      <tr><td><code>.xdf</code></td><td>With a <code>.bin</code></td><td>The definition for that firmware. Tables are found by name pattern, so the
+        V10.75 and V10.78 names both work.</td></tr>
+    </table>
+    <p>Use the <code>.adx</code> and <code>.xdf</code> for the TCU's firmware version.</p>
+
+    <h3>Channels</h3>
+    <ul>
+      <li><strong>Required:</strong> Gear.</li>
+      <li><strong>For full shift timing:</strong> Gear Target, Input RPM, Output RPM. Without Gear Target the delay before the ratio moves can't
+        be measured; without Input / Output RPM, neither can the shift phases, flare and feel.</li>
+      <li><strong>Also used:</strong> Engine RPM, TPS, Engine TQ (Nm), Oil Temp (C), Vehicle Speed (km/h), Time 1 Shift Time, Foot Brake, Blip
+        Status, TQ Cut 1/2 Flag, Adaptation Activation Parameter, Program Sw., Upshift Mode, Lockup Slip %, and the Clutch 1-A … 5-D Pres.
+        Adaptation channels.</li>
+    </ul>
+
+    <h2>How a Shift Is Timed</h2>
+    <p>The TCU changes <strong>Gear Target</strong> when it requests a shift and changes <strong>Gear</strong> only once the new ratio (Input ÷
+      Output RPM) has been reached — on an upshift about a second later. So each shift runs from the Gear Target change to the Gear change, in two
+      parts:</p>
+    <ul>
+      <li><strong>Delay</strong>: request until the ratio has moved more than 2 % from the old gear's. This is the oncoming element filling and
+        taking torque.</li>
+      <li><strong>Ratio change</strong>: until the ratio is within 1.5 % of the new gear's for 0.1 s. The TCU's own <strong>Time 1 Shift
+        Time</strong> counts this part and is shown next to it as a check.</li>
+    </ul>
+    <p>All times come from the log's timestamps. TunerPro writes rows in pairs with the same time; only one row per timestamp is used. Gear ratios
+      are measured from the log; a gear that isn't held long enough takes the bin's ratio, or the standard 8HP ratio without a bin.</p>
+    <p>Requests that are cancelled before Gear changes, take longer than 5 s, or happen with Output RPM under 150 (too coarse to measure) are counted
+      in the Summary and left out of the timing.</p>
+
+    <h3>Shift types</h3>
+    <table>
+      <tr><th>Type</th><th>Upshift</th><th>Downshift</th></tr>
+      <tr><td>power</td><td>TPS ≥ 5 % or torque &gt; 30 Nm</td><td>TPS &gt; 20 % (kickdown)</td></tr>
+      <tr><td>light</td><td>Some throttle or torque, below that</td><td>—</td></tr>
+      <tr><td>coast</td><td>No throttle and no torque</td><td>Off the brake, TPS ≤ 20 %</td></tr>
+      <tr><td>brake</td><td>—</td><td>Foot brake on</td></tr>
+    </table>
+
+    <h2>Shift Feel</h2>
+    <ul>
+      <li><strong>Flare</strong>: input speed above where it should be held — on an upshift above the old gear's speed (Output RPM × ratio), on a
+        downshift above the new gear's. The highest excess held for 0.1 s; flagged from 100 rpm.</li>
+      <li><strong>Sag / bump</strong>: vehicle acceleration worked out from Output RPM (slope over 0.25 s, scaled to km/h with the logged vehicle
+        speed), against its median in the 0.5 s before the request. Sag is the drop during the shift, bump the rise at the catch; bumps are flagged
+        from 0.15 g. Braking shifts are left out of the findings because the brake moves the acceleration more than the shift does.</li>
+      <li><strong>Blip</strong> and <strong>torque cut</strong>: whether the TCU asked for them during the shift.</li>
+    </ul>
+
+    <h2>Results</h2>
+    <h3>Findings</h3>
+    <p>Only patterns that repeat: a finding needs at least 2 shifts of that kind and at least half of that transition's shifts. Flare, bump and
+      a slow start (more than 0.8 s before the ratio moves, upshifts) are checked per transition. Each finding names the tables
+      TurboLamik's shift-quality guide points to — Pulse Correction, Time Correction with Slow Ram, and that shift's Correction Start / End.
+      These thresholds are this tool's, not TurboLamik's.</p>
+    <h3>Summary</h3>
+    <p>Shift counts, log length, oil temperature range at the shifts, gears used, the start gear from the bin, and the measured gear ratios.</p>
+    <h3>Shifts by Transition and All Shifts</h3>
+    <p>Medians per gear change (delay, ratio change, total, TCU shift time, flare, sag, bump, oil, blip, type), then every shift. Click a shift in
+      the list to chart it; the buttons show all, upshifts or downshifts.</p>
+    <h3>Shift Elements</h3>
+    <p>The 8HP applies three of its five elements (A–E) in each gear, and each shift hands over from one to another. Results are grouped by the
+      oncoming element, so a weak element shows up across every shift that applies it.</p>
+    <table>
+      <tr><th>Gear</th><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td><td>6</td><td>7</td><td>8</td></tr>
+      <tr><th>Applied</th><td>ABC</td><td>ABE</td><td>BCE</td><td>BDE</td><td>BCD</td><td>CDE</td><td>ACD</td><td>ADE</td></tr>
+    </table>
+
+    <h3>Adaptation</h3>
+    <p>The TCU learns clutch pressure adaptation on five shifts only: <strong>3→4 (D), 4→5 (C), 5→6 (E), 6→7 (A)</strong> upshifts and the
+      <strong>6→5 (B)</strong> downshift. The section shows how long the Adaptation Activation Parameter spent on each code, the code at each of
+      those shifts, and how the logged clutch adaptation values moved from the start to the end of the log.</p>
+    <table>
+      <tr><th>Code</th><th>Meaning</th><th>Code</th><th>Meaning</th></tr>
+      <tr><td>0</td><td>Conditions met (learning)</td><td>9</td><td>Sport mode (Upshift Mode not 0)</td></tr>
+      <tr><td>1</td><td>Torque too high (&gt; 180 Nm)</td><td>10</td><td>Oil too cold (&lt; 55 °C)</td></tr>
+      <tr><td>2</td><td>Torque too low (&lt; 55 Nm)</td><td>11</td><td>Oil too hot (&gt; 80 °C)</td></tr>
+      <tr><td>4</td><td>Throttle too low (&lt; 2 %)</td><td>12</td><td>Limp mode</td></tr>
+      <tr><td>5</td><td>Engine speed too high (&gt; 3200 rpm)</td><td>13</td><td>Active fault</td></tr>
+      <tr><td>6</td><td>Engine speed too low (&lt; 1600 rpm)</td><td>14</td><td>Gear below 3rd</td></tr>
+      <tr><td>8</td><td>Driven too short a time</td><td>15</td><td>Gear above 7th</td></tr>
+      <tr><td></td><td></td><td>16</td><td>Adaptation disabled in the program</td></tr>
+    </table>
+    <p>Codes are from the official TurboLamik manual (<a href="https://manual.turbolamik.eu/">manual.turbolamik.eu</a>), which the logs match;
+      the community guide (turbolamik.help) lists them differently. The manual warns the limits can change between firmware versions.</p>
+    <p>To let it learn: oil 55–80 °C (or the bin's Oil Temp MIN / Max), Program 1, 1600–3200 rpm, 55–180 Nm, light steady throttle through those
+      shifts, about 20 times.</p>
+
+    <h3>Bin Settings</h3>
+    <p>With a bin: gear ratios, start gear per program (Program Selector, ST. GEAR row), the adaptation oil window, blip limits (Min RPM for blip,
+      Max TPS / TQ for blip, Clutch Slip Blip Deactivation, Blip Out), the Correction Start / End tables for the shifts in the log, and the
+      shift-feel tables (Pulse / Time Correction, Slow Ram, Gear Pulse Correction %, Corr. Temp.).</p>
+
+    <div class="warning">
+      <strong>Judge shift quality with warm oil.</strong> Below the adaptation window the TCU adds its cold corrections (Corr. Temp. Gear UP / DOWN,
+      Corr. Temp. Pulse Time), so cold shifts show cold behaviour. If every shift in the log was cold, the tool says so first. Change base shift
+      tables only from a warm-oil log; problems that happen only cold belong in the temperature tables.
+    </div>
+
+    <div class="tip">
+      <strong>Start gear 2:</strong> if the bin's start gear is 2 in every program, 1st isn't used, and the Summary says so — a log with no 1st gear
+      is then expected, not a fault.
+    </div>
+  </div>
+</body>
+</html>
