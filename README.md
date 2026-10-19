@@ -274,6 +274,7 @@ node tests/test-timing-correlation.js
 node tests/test-worst-conditions.js
 node tests/test-fp-analysis.js            # DI Fuel Pressure
 node tests/test-small-tools.js            # Idle, Duty Cycle, Charge Cooling
+node tests/test-diagnostics.js            # Diagnostics knock findings
 node tests/test-transmission.js           # TurboLamik Shift Analyzer
 ```
 

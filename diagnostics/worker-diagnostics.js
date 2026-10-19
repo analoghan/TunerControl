@@ -254,17 +254,16 @@ function runCrossDiagnostics(columnNames, data, tune) {
         });
     }
 
-    // Finding: Knock events correlated with lean condition
-    if (knockEvents > 5 && knockWithLean > 0) {
-        var pct = (knockWithLean / knockEvents * 100).toFixed(0);
-        if (pct > 15) {
-            findings.push({
-                severity: 'critical',
-                title: 'Knock Events Correlated with Lean Fueling',
-                body: pct + '% of knock events (' + knockWithLean + '/' + knockEvents + ') occur simultaneously with lean lambda (>1.06). The engine is knocking because it\'s running lean — fix fueling before pulling timing.',
-                action: 'Address the lean condition first (check VE table, fuel pressure, injector PW). Pulling timing alone will not solve knock caused by lean fueling.'
-            });
-        }
+    // Finding: Knock events correlated with lean condition (more than 5 events, over 15 % of them while lean)
+    var knockLeanPct = knockEvents ? Math.round(knockWithLean / knockEvents * 100) : 0;
+    var knockLeanCorrelated = knockEvents > 5 && knockLeanPct > 15;
+    if (knockLeanCorrelated) {
+        findings.push({
+            severity: 'critical',
+            title: 'Knock Events Correlated with Lean Fueling',
+            body: knockLeanPct + '% of knock events (' + knockWithLean + '/' + knockEvents + ') occur simultaneously with lean lambda (>1.06). The engine is knocking because it\'s running lean — fix fueling before pulling timing.',
+            action: 'Address the lean condition first (check VE table, fuel pressure, injector PW). Pulling timing alone will not solve knock caused by lean fueling.'
+        });
     }
 
     // Finding: Global CL trim bias (injector reference flow issue)
@@ -300,13 +299,17 @@ function runCrossDiagnostics(columnNames, data, tune) {
         }
     }
 
-    // Finding: Knock events present
-    if (knockEvents > 0 && knockWithLean === 0) {
+    // Finding: Knock events present but not tied to lean running (none lean, or too few / too small a share to say)
+    if (knockEvents > 0 && !knockLeanCorrelated) {
+        var leanNote = knockWithLean === 0 ? ' with normal fueling. This points at ignition timing — the advance is too aggressive for the conditions.'
+            : ', ' + knockWithLean + ' of them while lean (lambda > 1.06) — ' + (knockEvents <= 5 ? 'too few events to tell whether fueling is the cause.'
+                : 'only ' + knockLeanPct + '%, so most of it points at ignition timing.');
         findings.push({
             severity: 'warning',
-            title: 'Knock Events Detected (Not Lean-Related)',
-            body: knockEvents + ' knock events (knock level above 20%) with normal fueling. This is timing-related knock — the ignition advance is too aggressive for the current conditions.',
-            action: 'Confirm in the Knock Analyzer with your tune (it uses the tune\'s own Knock Threshold table), then use its RPM × Load grid to find which cells need timing reduction. Start with 1-2° and re-log.'
+            title: knockWithLean === 0 ? 'Knock Events Detected (Not Lean-Related)' : 'Knock Events Detected',
+            body: knockEvents + ' knock events (knock level above 20%)' + leanNote,
+            action: 'Confirm in the Knock Analyzer with your tune (it uses the tune\'s own Knock Threshold table), then use its RPM × Load grid to find which cells need timing reduction. Start with 1-2° and re-log.' +
+                (knockWithLean ? ' Check the lean episodes in the Injector tool too.' : '')
         });
     }
 
