@@ -9,17 +9,17 @@
  *   - model.cableTypes [{ pn, conductors, shielded }]: the user's own list (e.g. Ethernet Cable, a vendor's shielded triple).
  *   - The description: "(Shielded 3)", "(3 Wire Shielded)", "(Twisted Pair)". harnessCables also counts every other row
  *     with the same part number as that cable (a shield row described only as "Shield").
- * harnessCables(model, wires) → { cables: [cable], byEndpoint: { 'CONN.CAV': cable }, untyped: [{ pn, count }] }
+ * harnessCables(model, wires) → { cables: [cable], byEndpoint: { 'CONN.CAV': cable }, byRecord: Map(pin or splice row → cable), untyped: [{ pn, count }] }
  *   wires: harnessCutList(model) (worked out when not given).
  *   cable = { name, explicit, pn, type, conductors: [wire], shields: [wire], wires: [wire], anchor: { block, cavities }, problems: [] }
  *   problems: [{ severity: 'error' | 'warning' | 'info', message }].
- *   The Cable column of a cavity (pin.cable) decides: a name puts the wire in that cable, "-" keeps it out of every cable, blank
+ *   The Cable column of a cavity or splice row (pin.cable, wire.cable) decides: a name puts the wire in that cable, "-" keeps it out of every cable, blank
  *   leaves it to detection. Detection groups the cable wires (same part number) that run between the same two connectors, in
  *   cavity order with one conductor of each colour (+ a shield); then joins what is left through the connector it shares, so a
  *   return or shield that runs to a splice joins the pair it belongs to. Small connectors (sensors) are joined first.
  *   untyped: part numbers that look like a cable (cable, pair, twisted, ethernet, shielded…) but aren't recognised — add them to
  *   model.cableTypes.
- * harnessNameCables(model, cables) — writes each detected cable's name into the Cable column of its wires (both ends).
+ * harnessNameCables(model, cables) — writes each detected cable's name into the Cable column of its wires (both ends, cavities and splice rows).
  * harnessRenameCable(model, oldName, newName) — renames a cable in every row that names it.
  * harnessCableColor(description) — the conductor's colour ('white/blue'), or 'shield' for a shield or drain.
  */
@@ -192,8 +192,13 @@ function harnessCables(model, wires) {
     rest.forEach(function (u) { addCable(u.items, '', false); });
     cables.sort(function (a, b) { return (a.anchor.block + ' ' + a.name < b.anchor.block + ' ' + b.name) ? -1 : 1; });
 
-    var byEndpoint = {};
-    cables.forEach(function (c) { c.wires.forEach(function (w) { [w.from, w.to].forEach(function (e) { if (e.kind === 'pin') byEndpoint[e.label] = c; }); }); });
+    var byEndpoint = {}, byRecord = new Map();
+    cables.forEach(function (c) {
+        c.wires.forEach(function (w) {
+            [w.from, w.to].forEach(function (e) { if (e.kind === 'pin') byEndpoint[e.label] = c; });
+            (w.rows || []).forEach(function (r) { byRecord.set(r, c); });
+        });
+    });
 
     var untyped = {};
     all.forEach(function (x) {
@@ -202,23 +207,15 @@ function harnessCables(model, wires) {
         var k = p.toLowerCase();
         (untyped[k] = untyped[k] || { pn: p, count: 0 }).count++;
     });
-    return { cables: cables, byEndpoint: byEndpoint, untyped: Object.keys(untyped).map(function (k) { return untyped[k]; }) };
+    return { cables: cables, byEndpoint: byEndpoint, byRecord: byRecord, untyped: Object.keys(untyped).map(function (k) { return untyped[k]; }) };
 }
 
 /** The cavity rows of a wire's connector ends. */
-function hcRows(model, wire) {
-    var index = harnessIndex(model);
-    return [wire.from, wire.to].filter(function (e) { return e.kind === 'pin'; }).map(function (e) {
-        var c = index.connectors[e.block];
-        return c ? c.pins[e.label.slice(e.block.length + 1)] : null;
-    }).filter(Boolean);
-}
-
 function harnessNameCables(model, cables) {
     var n = 0;
     cables.forEach(function (c) {
         if (c.explicit) return;
-        c.wires.forEach(function (w) { hcRows(model, w).forEach(function (p) { p.cable = c.name; n++; }); });
+        c.wires.forEach(function (w) { (w.rows || []).forEach(function (r) { r.cable = c.name; n++; }); });
         c.explicit = true;
     });
     return n;
@@ -226,9 +223,9 @@ function harnessNameCables(model, cables) {
 
 function harnessRenameCable(model, oldName, newName) {
     var key = harnessText(oldName).toLowerCase(), n = 0;
-    model.connectors.forEach(function (c) {
-        c.pins.forEach(function (p) { if (harnessText(p.cable).toLowerCase() === key) { p.cable = harnessText(newName); n++; } });
-    });
+    function rename(r) { if (harnessText(r.cable).toLowerCase() === key) { r.cable = harnessText(newName); n++; } }
+    model.connectors.forEach(function (c) { c.pins.forEach(rename); });
+    model.splices.forEach(function (s) { s.wires.forEach(rename); });
     return n;
 }
 

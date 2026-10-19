@@ -131,9 +131,22 @@ describe('Harness — cables', function () {
     assert.equal(m.connectors[2].pins[1].cable, 'KNOCK 1, 2, SHIELD', 'both ends of each wire');
     assert.equal(m.connectors[0].pins[1].cable, 'KNOCK 1, 2, SHIELD');
     assert.ok(harnessCables(m).cables.every(function (c) { return c.explicit; }));
+    assert.equal(m.splices[0].wires[0].cable, 'KNOCK 1, 2, SHIELD', 'splice rows too');
     harnessRenameCable(m, 'knock 1, 2, shield', 'Knock 1');
     assert.equal(m.connectors[0].pins[1].cable, 'Knock 1');
+    assert.equal(m.splices[0].wires[1].cable, 'Knock 1');
     assert.equal(hcbByName(harnessCables(m).cables, 'Knock 1').wires.length, 3);
+  });
+
+  it('takes a cable name from a splice row, and finds each row\'s cable', function () {
+    var m = hcbModel();
+    m.splices[0].wires[0].cable = 'Knock 1';   // SPL.0V → KNOCK.2
+    var r = harnessCables(m), knock = hcbByName(r.cables, 'Knock 1');
+    assert.ok(knock && knock.explicit, JSON.stringify(r.cables.map(function (c) { return c.name; })));
+    assert.equal(r.byRecord.get(m.connectors[2].pins[1]), knock, 'the cavity at the other end');
+    assert.equal(r.byRecord.get(m.splices[0].wires[0]), knock);
+    m.splices[0].wires[0].cable = '-';
+    assert.equal(harnessCables(m).byRecord.get(m.connectors[2].pins[1]), undefined, '"-" on the splice row leaves the wire out');
   });
 
   it('keeps the Cable column through the workbook and puts it in the cut list', function () {
@@ -144,6 +157,11 @@ describe('Harness — cables', function () {
     assert.deepEqual(knock.pins.map(function (p) { return p.cable; }), ['Knock 1', '', '']);
     assert.ok(harnessPinExportFields(knock).indexOf('cable') >= 0);
     assert.equal(harnessPinExportFields(again.connectors.filter(function (c) { return c.id === 'ETH'; })[0]).indexOf('cable'), -1, 'no column without a name');
+    m.splices[0].wires[1].cable = 'Knock 1';
+    var spl = harnessFromWorkbook({ sheets: harnessToWorkbook(m).map(function (s) { return { name: s.name, rows: s.rows }; }) }, 'T').splices[0];
+    assert.deepEqual(spl.wires.map(function (w) { return w.cable; }), ['', 'Knock 1', '', ''], 'splice rows');
+    assert.equal(harnessSpliceFields(spl).indexOf('cable'), 4);
+    assert.deepEqual(harnessSpliceFields({ wires: [{ end: 'A' }] }), HARNESS_WIRE_FIELDS, 'no column without a name');
     var wires = harnessCutList(m);
     harnessCables(m, wires);
     assert.ok(/,Knock 1,/.test(harnessCutListCsv(m, wires)));

@@ -20,6 +20,7 @@ var HDIFF_CONNECTOR_FIELDS = [['title', 'Title'], ['sheet', 'Sheet'], ['connecto
     ['mateConn', 'Mate connector'], ['matePin', 'Mate pin'], ['notes', 'Notes'], ['chassisFunction', 'Chassis Function column']];
 var HDIFF_SPLICE_FIELDS = [['sheet', 'Sheet'], ['type', 'Splice type'], ['boot', 'Boot'], ['notes', 'Notes']];
 var HDIFF_PIN_FIELDS = HARNESS_PIN_FIELDS.concat('chassis', 'cable');
+var HDIFF_WIRE_FIELDS = HARNESS_WIRE_FIELDS.concat('cable');
 
 function hdiffValue(v) {
     if (v === true) return 'on';
@@ -102,8 +103,8 @@ function hdiffBlocks(before, after, isConnector, renames, renamer) {
         var entry = { id: a.id, before: b, after: a, renamedFrom: b.id !== a.id ? b.id : null, followRename: 0,
                       fields: hdiffFields(b, a, isConnector ? HDIFF_CONNECTOR_FIELDS : HDIFF_SPLICE_FIELDS), rows: [], images: { added: 0, removed: 0 } };
         var recField = isConnector ? 'cavity' : 'end', refField = isConnector ? 'remote' : 'end';
-        var fields = isConnector ? HDIFF_PIN_FIELDS : HARNESS_WIRE_FIELDS;
-        var labels = isConnector ? harnessPinColumns(a, fields) : fields.map(function (f, i) { return HARNESS_WIRE_COLUMNS[i]; });
+        var fields = isConnector ? HDIFF_PIN_FIELDS : HDIFF_WIRE_FIELDS;
+        var labels = isConnector ? harnessPinColumns(a, fields) : harnessSpliceColumns(null, fields);
         // Splice wires are matched by their end, with the old end rewritten for renamed connectors.
         var keyB = function (r) { return isConnector ? harnessText(r.cavity) : renamer(harnessText(r.end)).toLowerCase(); };
         var keyA = function (r) { return isConnector ? harnessText(r.cavity) : harnessText(r.end).toLowerCase(); };

@@ -4,8 +4,9 @@
  * harnessCutList(model) → [wire]: one entry per physical wire, joining the two rows that describe it (a cavity and the cavity or
  *   splice end it goes to). wire = { key, from: end, to: end, wirePn, wire, function, length, problem }
  *   end = { label, kind: 'pin' | 'splice' | 'terminal' | 'outside' | 'missing' | 'none', block, terminal }
- *   wire.cable is the Cable column of either end ('' when neither names one; harness-cable.js groups the wires into cables and
- *   sets wire.cableName, which the CSV writes) and wire.cableConflict the two names when the ends disagree.
+ *   wire.cable is the Cable column of either end — a cavity or a splice row ('' when neither names one; harness-cable.js groups the
+ *   wires into cables and sets wire.cableName, which the CSV writes) and wire.cableConflict the two names when the ends disagree.
+ *   wire.rows are the model's records that describe the wire (its cavity and/or splice rows).
  *   key identifies the wire for its optional length (model.wireLengths[key]); it is the two ends' names, sorted.
  *   problem: '' or why the row needs a look (the two ends list different wires, the other end is missing…).
  * harnessBom(model, wires) → { connectors, boots, splices, terminals, plugs, ends, wire } — each a list of
@@ -93,7 +94,7 @@ function harnessCutList(model) {
         else if (to.kind === 'none') problem = 'No other end is given.';
         var ca = harnessText(a.cable), cb = b ? harnessText(b.cable) : '';
         wires.push({ key: key, from: from, to: to, wirePn: pa || pb, wire: da || db, function: harnessText(a.function) || (b ? harnessText(b.function) : ''),
-                     length: hbLength(model, key), problem: problem, cable: ca || cb,
+                     length: hbLength(model, key), problem: problem, cable: ca || cb, rows: b ? [a, b] : [a],
                      cableConflict: ca && cb && ca.toLowerCase() !== cb.toLowerCase() ? [ca, cb] : null });
     }
 

@@ -32,7 +32,7 @@ var HARNESS_PIN_COLUMNS = ['Location', 'Pin', 'Conductor Part Number', 'Conducto
 var HARNESS_CHASSIS_COLUMN = 'Chassis Function';
 /**
  * The multi-conductor cable a wire belongs to (harness-cable.js): a name, "-" for none, or blank to leave it to detection. An
- * optional column, shown where a connector has cable wires and written when a cavity names a cable.
+ * optional column of connectors and splices, always shown in the editor and written when a row of the block names a cable.
  */
 var HARNESS_CABLE_COLUMN = 'Cable';
 var HARNESS_WIRE_FIELDS = ['end', 'wirePn', 'wire', 'function'];
@@ -82,8 +82,21 @@ function harnessPinFields(connector, withCable) {
     return withCable || hmHasCable(connector) ? fields.concat('cable') : fields;
 }
 
-function hmHasCable(connector) {
-    return !!connector && connector.pins.some(function (p) { return harnessText(p.cable); });
+/** Whether a connector's cavities or a splice's rows name a cable. */
+function hmHasCable(block) {
+    return !!block && (block.pins || block.wires || []).some(function (p) { return harnessText(p.cable); });
+}
+
+/** A splice's wire fields: the four fixed ones, plus Cable when withCable or one of its rows names a cable. */
+function harnessSpliceFields(splice, withCable) {
+    return withCable || hmHasCable(splice) ? HARNESS_WIRE_FIELDS.concat('cable') : HARNESS_WIRE_FIELDS;
+}
+
+/** Headings for a splice's wire fields: its own spreadsheet headings, and Cable. */
+function harnessSpliceColumns(splice, fields) {
+    return fields.map(function (f, k) {
+        return f === 'cable' ? HARNESS_CABLE_COLUMN : (splice && splice.columns && splice.columns[k]) || HARNESS_WIRE_COLUMNS[k] || f;
+    });
 }
 
 /** Pin fields written on export: Chassis Function also when it is switched off but a cavity has some (off only hides it); Cable when a cavity names one. */
@@ -171,23 +184,19 @@ function harnessFromWorkbook(workbook, name) {
                 });
                 chassisCol = -1;
                 cableCol = -1;
-                if (block.pins) {
-                    block.columns[4] = 'ECU Function';   // "Engine Function", "Function" … in older sheets
-                    for (var h = HARNESS_PIN_FIELDS.length; h < r.length; h++) {
-                        var head = r[h].toLowerCase();
-                        if (head === HARNESS_CHASSIS_COLUMN.toLowerCase() && chassisCol < 0) { chassisCol = h; block.chassisFunction = true; }
-                        if (head === HARNESS_CABLE_COLUMN.toLowerCase() && cableCol < 0) cableCol = h;
-                    }
+                if (block.pins) block.columns[4] = 'ECU Function';   // "Engine Function", "Function" … in older sheets
+                for (var h = block.pins ? HARNESS_PIN_FIELDS.length : HARNESS_WIRE_FIELDS.length; h < r.length; h++) {
+                    var head = r[h].toLowerCase();
+                    if (block.pins && head === HARNESS_CHASSIS_COLUMN.toLowerCase() && chassisCol < 0) { chassisCol = h; block.chassisFunction = true; }
+                    if (head === HARNESS_CABLE_COLUMN.toLowerCase() && cableCol < 0) cableCol = h;
                 }
                 continue;
             }
             if (!inTable) continue;
             var fields = block.pins ? HARNESS_PIN_FIELDS : HARNESS_WIRE_FIELDS, rec = {};
             fields.forEach(function (f, k) { rec[f] = r[k] || ''; });
-            if (block.pins) {
-                rec.chassis = chassisCol >= 0 ? r[chassisCol] || '' : '';
-                rec.cable = cableCol >= 0 ? r[cableCol] || '' : '';
-            }
+            if (block.pins) rec.chassis = chassisCol >= 0 ? r[chassisCol] || '' : '';
+            rec.cable = cableCol >= 0 ? r[cableCol] || '' : '';
             (block.pins || block.wires).push(rec);
         }
         if (kind) model.sheets.push({ name: sheet.name, kind: kind });
@@ -271,7 +280,7 @@ function harnessToWorkbook(model, imageData) {
         });
         sheet.splices.forEach(function (s) {
             block(s.id, [['SPLICE', s.type], ['BOOT', s.boot], ['NOTES', s.notes]],
-                s.columns || HARNESS_WIRE_COLUMNS, s.wires, HARNESS_WIRE_FIELDS, s.images);
+                harnessSpliceColumns(s, harnessSpliceFields(s)), s.wires, harnessSpliceFields(s), s.images);
         });
         return { name: sheet.name, rows: rows, bold: bold, rowStyles: styles, images: images, widths: [16, 18, 22, 34, 40, 26, 22, 22, 18] };
     });
@@ -619,7 +628,7 @@ if (typeof module !== 'undefined' && module.exports) {
         harnessHasWire: harnessHasWire, harnessEndpointName: harnessEndpointName, harnessText: harnessText,
         harnessSplitCandidates: harnessSplitCandidates, harnessSheetGroups: harnessSheetGroups, harnessSplitSheet: harnessSplitSheet,
         harnessMergeBlocks: harnessMergeBlocks, harnessFreeId: harnessFreeId, harnessFindBlock: harnessFindBlock,
-        harnessPinFields: harnessPinFields, harnessPinExportFields: harnessPinExportFields, harnessPinColumns: harnessPinColumns,
+        harnessPinFields: harnessPinFields, harnessSpliceFields: harnessSpliceFields, harnessSpliceColumns: harnessSpliceColumns, harnessPinExportFields: harnessPinExportFields, harnessPinColumns: harnessPinColumns,
         harnessUpgrade: harnessUpgrade, HARNESS_CABLE_COLUMN: HARNESS_CABLE_COLUMN,
         HARNESS_PIN_FIELDS: HARNESS_PIN_FIELDS, HARNESS_WIRE_FIELDS: HARNESS_WIRE_FIELDS
     };

@@ -439,9 +439,10 @@ function cableIssues() {
     return out;
 }
 
-/** The editor's pin fields for a connector: with the Cable column when one of its wires is in a cable. */
-function connectorFields(c) {
-    var withCable = !!state.cables && c.pins.some(function (p) { return state.cables.byEndpoint[harnessEndpointName(c.id, p.cavity)]; });
+/** A connector's pin fields: the editor always has the Cable column (to name a cable on any connector); elsewhere (the PDF) only
+ * when one of its wires is in a cable. */
+function connectorFields(c, editor) {
+    var withCable = editor || !!state.cables && c.pins.some(function (p) { return state.cables.byEndpoint[harnessEndpointName(c.id, p.cavity)]; });
     return harnessPinFields(c, withCable);
 }
 
@@ -670,7 +671,10 @@ function fieldsHtml(block, fields) {
 }
 
 function rowsHtml(kind, block, records, fields, columns) {
-    var html = '<div class="table-scroll"><table class="event-table data-table edit-table"><thead><tr><th class="mark-col"></th>' +
+    // The cable names in the harness, offered when typing in the Cable column.
+    var names = fields.indexOf('cable') >= 0 && state.cables ? state.cables.cables.map(function (c) { return c.name; }) : [];
+    var html = (names.length ? '<datalist id="cable-names">' + names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>' : '') +
+        '<div class="table-scroll"><table class="event-table data-table edit-table"><thead><tr><th class="mark-col"></th>' +
         fields.map(function (f, i) { return '<th>' + esc(columns[i] || f) + '</th>'; }).join('') +
         '<th><span class="sr-only">Actions</span></th></tr></thead><tbody>';
     var remoteField = kind === 'pin' ? 'remote' : 'end', canUses = kind === 'pin' && state.system ? canPinUses(canNetworks(), currentKey()) : {};
@@ -679,9 +683,9 @@ function rowsHtml(kind, block, records, fields, columns) {
         html += '<tr data-row="' + i + '"><td class="mark-col" data-marker="' + kind + '|' + esc(block.id) + '|' + i + '">' +
             markerHtml(rowIssues(kind, block.id, i), i, open) + '</td>';
         fields.forEach(function (f) {
-            var detected = f === 'cable' && !harnessText(rec.cable) && state.cables ? state.cables.byEndpoint[harnessEndpointName(block.id, rec.cavity)] : null;
+            var detected = f === 'cable' && !harnessText(rec.cable) && state.cables ? state.cables.byRecord.get(rec) : null;
             var input = '<input type="text" class="cell-input cell-' + f + '" data-row="' + i + '" data-field="' + f + '" value="' +
-                esc(rec[f]) + '" aria-label="' + esc(f + ' row ' + (i + 1)) + '"' +
+                esc(rec[f]) + '" aria-label="' + esc(f + ' row ' + (i + 1)) + '"' + (f === 'cable' ? ' list="cable-names"' : '') +
                 (detected ? ' placeholder="' + esc(detected.name) + '" title="Detected cable: ' + esc(detected.name) + ' — type a name to fix it, or - to leave it out"' : '') + '>';
             if (f === remoteField) {
                 input = '<div class="remote-cell">' + input + '<button class="link-btn" data-goto="' + i + '" title="Go to the other end" ' +
@@ -715,7 +719,7 @@ function renderConnectorEditor() {
         fieldsHtml(c, CONNECTOR_FIELDS) +
         '<label class="check-label chassis-toggle" title="A free-text column for what each wire connects to outside this harness">' +
         '<input type="checkbox" id="chassis-toggle"' + (c.chassisFunction ? ' checked' : '') + '> Chassis Function column</label>' +
-        imagesHtml(c) + rowsHtml('pin', c, c.pins, connectorFields(c), harnessPinColumns(c, connectorFields(c))) +
+        imagesHtml(c) + rowsHtml('pin', c, c.pins, connectorFields(c, true), harnessPinColumns(c, connectorFields(c, true))) +
         '<button class="btn btn-secondary btn-small" id="add-row">Add cavity</button>';
     loadThumbnails(el);
 }
@@ -788,7 +792,7 @@ function renderSpliceEditor() {
         return;
     }
     el.innerHTML = editorHeadHtml(s, 'splice') +
-        fieldsHtml(s, SPLICE_FIELDS) + imagesHtml(s) + rowsHtml('wire', s, s.wires, HARNESS_WIRE_FIELDS, s.columns || []) +
+        fieldsHtml(s, SPLICE_FIELDS) + imagesHtml(s) + rowsHtml('wire', s, s.wires, harnessSpliceFields(s, true), harnessSpliceColumns(s, harnessSpliceFields(s, true))) +
         '<button class="btn btn-secondary btn-small" id="add-row">Add wire</button>';
     loadThumbnails(el);
 }
@@ -920,7 +924,7 @@ function wireEditor(containerId, isConnector) {
             setDirty(true); runChecks(); renderAll();
         } else if (t.id === 'add-row') {
             var blank = {};
-            (isConnector ? HARNESS_PIN_FIELDS.concat('chassis', 'cable') : HARNESS_WIRE_FIELDS).forEach(function (f) { blank[f] = ''; });
+            (isConnector ? HARNESS_PIN_FIELDS.concat('chassis', 'cable') : HARNESS_WIRE_FIELDS.concat('cable')).forEach(function (f) { blank[f] = ''; });
             if (isConnector) {
                 var nums = recs.map(function (p) { return parseInt(p.cavity, 10); }).filter(function (n) { return !isNaN(n); });
                 if (nums.length === recs.length && nums.length) blank.cavity = String(Math.max.apply(null, nums) + 1);
@@ -1519,13 +1523,16 @@ function pdfBlockHtml(block, isConnector, opts, urls) {
         html += '<p class="pr-note">' + fields.map(function (f) { return '<strong>' + esc(f[1]) + ':</strong> ' + esc(block[f[0]]); }).join(' · ') + '</p>';
     }
     var kind = isConnector ? 'pin' : 'wire', recs = isConnector ? block.pins : block.wires;
-    var keys = isConnector ? connectorFields(block) : HARNESS_WIRE_FIELDS;
+    var keys = isConnector ? connectorFields(block)
+        : harnessSpliceFields(block, !!state.cables && block.wires.some(function (w) { return state.cables.byRecord.get(w); }));
     var problems = recs.some(function (r, i) { return rowIssues(kind, block.id, i).length; });
-    var headers = (isConnector ? harnessPinColumns(block, keys) : keys.map(function (k, i) { return (block.columns || [])[i] || HARNESS_WIRE_COLUMNS[i] || k; }))
-        .map(esc);
+    var headers = (isConnector ? harnessPinColumns(block, keys) : harnessSpliceColumns(block, keys)).map(esc);
     if (problems) headers.push('Problem');
     html += prTable(headers, recs.map(function (r, i) {
-        var row = keys.map(function (k) { return esc(r[k]); });
+        var row = keys.map(function (k) {
+            var c = k === 'cable' && !harnessText(r.cable) && state.cables ? state.cables.byRecord.get(r) : null;   // a detected cable's name
+            return esc(c ? c.name : r[k]);
+        });
         if (problems) {
             row.push(rowIssues(kind, block.id, i).map(function (x) {
                 return '<span class="status-' + (x.severity === 'error' ? 'error' : 'warning') + '">' + esc(x.message) + '</span>';
@@ -2322,7 +2329,7 @@ var addState = null;   // { file, incoming }
 function sameBlock(a, b) {
     function key(x) {
         return JSON.stringify([x.title, x.connector, x.mateConn, x.matePin, x.type, x.boot, x.notes,
-            (x.pins || x.wires || []).map(function (r) { return (x.pins ? HARNESS_PIN_FIELDS.concat('chassis', 'cable') : HARNESS_WIRE_FIELDS).map(function (f) { return harnessText(r[f]); }); })]);
+            (x.pins || x.wires || []).map(function (r) { return (x.pins ? HARNESS_PIN_FIELDS.concat('chassis', 'cable') : HARNESS_WIRE_FIELDS.concat('cable')).map(function (f) { return harnessText(r[f]); }); })]);
     }
     return !!a.pins === !!b.pins && key(a) === key(b);
 }
