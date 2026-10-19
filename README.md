@@ -4,11 +4,16 @@
   <img src="TunerControlLogo.png" alt="TunerControl" width="400">
 </p>
 
-A zero-dependency, browser-based toolkit for MoTeC M1 ECU tuning and analysis. No installation, no build step, no backend server required — just open in a browser and go.
+A zero-dependency, browser-based toolkit for engine and transmission tuning: MoTeC M1 ECU analysis, a Haltech VE tool and a TurboLamik
+8HP shift analyzer. No installation, no build step and no npm — open it in a browser and go. An optional Node server keeps tunes, harnesses
+and the tuning history in one place for every browser; without it everything is stored in the browser.
 
 ---
 
 ## Tools
+
+The landing page has four sections: **MoTeC M1 Tuning** (everything below up to Backup & Restore), **Haltech Tuning**, **TurboLamik
+Transmission** and **Calculators**.
 
 The MoTeC M1 tools are built around a supercharged GM Gen V LT4 (M142 ECU + E888 expander) but work with any M1 log. Analysis tools that need tune
 values can use a tune stored in the M1 Config Viewer (suggested from the log's ECU serial and time) or a `.m1pkg` file, and most can save their
@@ -137,6 +142,11 @@ Design and check wiring harnesses built around the M1 ECU.
 - Restores into a server or a browser (empty or not): adds what is missing and keeps anything already there with the same id, so it
   is safe to run twice; older M1 Config Viewer backups restore too
 
+### Haltech VE Table Tuning
+The VE Table tool for a Haltech Nexus: reads an NSP datalog (CSV) and a VE table copied out of NSP (Copy Table → CSV), and computes per-cell
+corrections from wideband lambda against target lambda (with short/long term trims when logged). Same filters as the M1 version (hit count,
+coolant temperature, run time, outlier σ, minimum change, scaling), a 3D surface plot, and a corrected table to paste back into NSP.
+
 ### TurboLamik Shift Analyzer (ZF 8HP)
 
 For a TurboLamik 8HP TCU (here with a Haltech Nexus R5): reads a TunerPro RT log (`.xdl` with its `.adx`, or `.csv`) and optionally the
@@ -188,60 +198,59 @@ Node.js 22.13+. See [server/README.md](server/README.md) for systemd and Docker 
 ## Project Structure
 
 ```
-index.html                  — Landing page with tool navigation
+index.html                  — Landing page (MoTeC M1, Haltech, TurboLamik, Calculators)
 TunerControlLogo.png        — Project logo
+motec/index.html            — MoTeC M1 tool menu
 
-ve-table/                   — VE Table Tuning Tool
-  index.html                — Tool UI
-  app.js                    — Main thread: UI, Worker lifecycle, rendering, 3D plot
-  worker.js                 — Worker thread: parsing, filtering, correction, output
-  styles.css                — Dark theme styling
-  help.html                 — Comprehensive documentation and usage guide
+Each analysis tool is index.html + app.js (UI) + worker.js (parsing and analysis in a Web Worker) + styles.css + help.html,
+plus the files named here:
 
-injector/                   — Injector Characterization Tool
-  index.html, app.js, charts.js, worker.js, m1pkg-injector.js (tune settings, also used by diagnostics/), styles.css
-
-knock/                      — Knock Analyzer
-  index.html, app.js, charts.js, worker.js, styles.css
-
-idle/                       — Idle Behavior Analyzer
-  index.html, app.js, charts.js, worker.js, styles.css
-
-fuel-pressure/              — DI Fuel Pressure Deep Dive
-  index.html, app.js, charts.js, worker.js, styles.css
-
-calculators/                — Unit Conversion Calculators
-  index.html                — Main calculators page
-  lambda-fuel.html          — Lambda/AFR fuel conversion chart (gasoline & E85)
-
+ve-table/                   — VE Table Tuning (m1pkg-ve.js reads Engine Efficiency Main from a tune)
 transient-fuel/             — Transient Fuel Analyzer (film-correct.js = table corrections, m1pkg-film.js)
+knock/                      — Knock Analyzer (charts.js, knock-freq.js + frequency-calc.html, m1pkg-knock.js)
+fuel-pressure/              — DI Fuel Pressure Deep Dive (charts.js, m1pkg-rail.js)
 di-timing/                  — DI Injection Timing (di-calc.js = GM Gen V method, m1pkg-di.js, worker.js log check)
-diagnostics/                — Unified diagnostics from one log
-duty-cycle/, charge-cooling/ — Injector Duty Cycle, Charge Cooling Gain
-log-viewer/                 — Log Viewer + embeddable LogPanel (log-file.js, log-chart.js, log-panel.js)
+injector/                   — Injector Characterization (charts.js, m1pkg-injector.js — also used by diagnostics/)
+diagnostics/                — Diagnostics from one log (worker-diagnostics.js; loads injector/worker.js first)
+idle/                       — Idle Behavior Analyzer (charts.js, m1pkg-idle.js)
+duty-cycle/                 — Injector Duty Cycle (duty-analysis.js)
+charge-cooling/             — Charge Cooling Gain (cc-analysis.js)
+log-viewer/                 — Log Viewer + embeddable LogPanel (log-file.js, log-chart.js, log-panel.js/.css)
 history/                    — Tuning History (run-store.js, run-builders.js, run-save.css)
 
 m1-config/                  — M1 Config Viewer (.m1pkg import, tune history, compare, follow, labels, Firmware I/O, PDF)
-  index.html, app.js, format.js, resource-names.js, tune-source.js, tune-db.js, tune-api.js, worker.js, styles.css
+                              format.js (units), links.js (follow settings), resource-names.js, history.js,
+                              tune-db.js / tune-api.js (browser / server storage), tune-source.js + tune-picker.js
+                              (the stored-tune picker the analysis tools use), worker.js
 
-harness/                    — Harness Builder (.xlsx import/add/export, editor, checks, diagrams, systems, tune comparison, PDF)
-  index.html, app.js, harness-model.js, harness-tune.js, harness-diagram.js, harness-system.js, harness-can.js, harness-store.js, styles.css
+harness/                    — Harness Builder: harness-model.js, harness-build.js (cut list, BOM), harness-pinout.js,
+                              harness-diff.js (revision compare), harness-diagram.js, harness-system.js, harness-can.js,
+                              harness-tune.js, harness-store.js
 
 backup/                     — Backup & Restore page (backup-page.js; the format and both backends are in lib/backup.js)
 
-lib/                        — Vendored libraries (Chart.js, zoom plugin, Hammer.js) and shared code
-                              (ld-parser.js, m1pkg-parser.js, xz-decoder.js, xlsx.js, print-report.js/.css for PDF export, backup.js)
+haltech/                    — Haltech menu and ve-table/ (Haltech NSP VE Table Tuning)
 
-server/                     — Optional Node server: static files + SQLite API for tunes and harnesses (see server/README.md)
+turbolamik/index.html       — TurboLamik menu
+transmission/               — TurboLamik 8HP Shift Analyzer: shift-analysis.js (shift timing, flare, adaptation),
+                              bin-reader.js (TCU bin tables found by pattern), xdl-parser.js (TunerPro logs)
+
+calculators/                — Unit conversions (index.html) and the lambda/AFR fuel chart (lambda-fuel.html)
+
+lib/                        — Vendored libraries (Chart.js, zoom plugin, Hammer.js) and shared code:
+                              ld-parser.js, m1pkg-parser.js + xz-decoder.js, xlsx.js, print-report.js/.css (PDF export),
+                              backup.js
+
+server/                     — Optional Node server: static files + SQLite API (server.js lists the API, db.js the
+                              schema; see server/README.md)
 deploy/                     — systemd unit for the server (Dockerfile at the repo root)
 
-tests/                      — Browser-based test suite
-  index.html                — Test harness (no build step required)
-  test-*.js                 — Unit and property-based tests
-
-analysis/                   — Reference data and analysis scripts (not part of the app)
-files/                      — Sample log and VE table files for testing
+tests/                      — Browser test suite (index.html) and Node test scripts
+docs/archive/               — Early design specs and the tuning-knowledge RAG design (historical, not kept up to date)
 ```
+
+Logs, tune packages and other personal data go in `files/`, and the server's database in `data/`; both are git-ignored and not
+part of the repository.
 
 ---
 
@@ -251,15 +260,24 @@ files/                      — Sample log and VE table files for testing
 2. Open `http://localhost:8080/tests/index.html` in a browser.
 3. The test harness runs all unit and property-based tests and displays a pass/fail summary.
 
-Node tests (server API and the analysis workers):
+Node tests (server API, analysis workers and the smaller tools) — each script prints its own pass/fail count:
 
 ```bash
-node tests/run-server-tests.js
-node tests/test-knock-analysis.js
-node tests/test-fp-analysis.js
-node tests/test-worker-pipeline.js
-node tests/test-transmission.js
+node tests/run-server-tests.js            # server API and database (in-memory SQLite)
+node tests/test-worker-pipeline.js        # VE parsing and analysis
+node tests/run-channel-resolver-tests.js  # VE channel names
+node tests/run-property10.js              # VE correction property test
+node tests/test-knock-analysis.js         # Knock Analyzer
+node tests/test-knock-channel-resolution.js
+node tests/test-cylinder-distribution.js
+node tests/test-timing-correlation.js
+node tests/test-worst-conditions.js
+node tests/test-fp-analysis.js            # DI Fuel Pressure
+node tests/test-small-tools.js            # Idle, Duty Cycle, Charge Cooling
+node tests/test-transmission.js           # TurboLamik Shift Analyzer
 ```
+
+The other `tests/test-*.js` files run in the browser suite only.
 
 ---
 
