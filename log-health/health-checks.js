@@ -490,16 +490,20 @@ function lhCheckFuelModel(c, add, opts) {
             var ls = lhQuantile(logged, 0.5), cs = lhQuantile(calc, 0.5), e0 = lhQuantile(lhPick(comp, c.running, 10), 0.5) / 100;
             if (Math.abs(ls / cs - 1) > 0.005) add(g, 'warn', 'Logged stoich ' + lhFmt(ls, 2) + ' doesn\'t follow this tune\'s fuel properties (' + lhFmt(cs, 2) + ')',
                 'Either a different tune ran the log, or composition/stoich is set up in a way this check doesn\'t model.', [], [['Fuel Stoichiometric Ratio'], ['Fuel Composition']]);
-            // If the sensor reports ethanol content (most flex sensors do), the blend should go to pure ethanol, not the alternative fuel.
+            // Flex sensors report ethanol content (E85 reads 85 %), so MoTeC's Flex Fuel guide says the Alternative Fuel must be pure ethanol.
             if (f.altStoich > 9.3) {
                 var ETH_STOICH = 9.0, ETH_DENSITY = 789, mfe = e0 * ETH_DENSITY / (e0 * ETH_DENSITY + (1 - e0) * f.density);
                 var trueStoich = mfe * ETH_STOICH + (1 - mfe) * f.stoich, err = (ls / trueStoich - 1) * 100;
+                // Injected volume ∝ 1 / (stoich × density): the VE scale that keeps fuelling the same at this composition after the change.
+                var veScale = trueStoich * (e0 * ETH_DENSITY + (1 - e0) * f.density) / (ls * (e0 * f.altDensity + (1 - e0) * f.density));
                 add(g, Math.abs(err) > 2 ? 'warn' : 'info', 'Stoich ' + lhFmt(ls, 2) + ' at ' + lhFmt(e0 * 100) + ' % composition assumes the alternative fuel is ' +
                     'stoich ' + lhFmt(f.altStoich, 2) + ' (E85-like)',
                     'Fuel Composition blends from Fuel Properties (' + lhFmt(f.stoich, 2) + ') to Alternative Fuel Properties (' + lhFmt(f.altStoich, 2) + ', ' + lhFmt(f.altDensity, 0) +
                     ' kg/m³). If the sensor reports ethanol content, ' + lhFmt(e0 * 100) + ' % ethanol is stoich ≈ ' + lhFmt(trueStoich, 2) + ', and the fuel model is ' +
                     lhFmt(Math.abs(err)) + ' % ' + (err > 0 ? 'lean' : 'rich') + ' before closed loop (trims would read ' + (err > 0 ? '+' : '−') + lhFmt(Math.abs(err)) + ' %). ' +
-                    'If the sensor is scaled to E85 content, this is right. Check the sensor\'s output scaling against the Alternative Fuel settings.',
+                    'MoTeC\'s Flex Fuel guide: a flex sensor reports ethanol content (E85 reads 85 %), so the Alternative Fuel must be set up as 100 % ethanol ' +
+                    '(stoich 9.0, density ~789 kg/m³, molar mass 46.07). Only a sensor translation scaled to E85 content makes an E85 Alternative Fuel right. ' +
+                    'After changing it, scale Engine Efficiency by about ' + lhFmt(veScale * 100, 1) + ' % so fuelling at this composition stays where VE was tuned.',
                     [], [['Fuel Stoichiometric Ratio'], ['Fuel Composition'], ['Fuel Closed Loop Control Bank 1 Trim', 'Fuel Closed Loop Control Bank 2 Trim']]);
             }
         }
