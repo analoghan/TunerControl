@@ -16,7 +16,7 @@ The landing page has four sections: **MoTeC M1 Tuning** (everything below up to 
 Transmission** and **Calculators**.
 
 The MoTeC M1 page groups its tools in the calibration order: **Check the log** (Log Health, Log Viewer, Cross-Tool Diagnostics), **Airflow & fuel
-model** (VE, MAP Rescale, Charge Cooling, Transient Fuel), **Direct injection** (Injector Characterization, DI Fuel Pressure, DI Injection Timing,
+model** (VE, MAP Rescale, Closed-Loop Period, Charge Cooling, Transient Fuel), **Direct injection** (Injector Characterization, DI Fuel Pressure, DI Injection Timing,
 Duty Cycle), **Ignition, knock & idle** (Knock Analyzer, Ignition Review, Idle), and **Tunes & wiring** (M1 Config Viewer, Tuning History, Harness Builder), with Backup & Restore below.
 
 The MoTeC M1 tools are built around a supercharged GM Gen V LT4 (M142 ECU + E888 expander) but work with any M1 log. Analysis tools that need tune
@@ -62,6 +62,12 @@ Analyze MoTeC log data against your current VE table to compute per-cell correct
 Detects throttle tip-ins and tip-outs in a log and measures the lambda excursion after each — lean spikes, rich overshoot, recovery time — to
 calibrate the fuel film tables. With a tune it reads the film tables and suggests per-cell corrections, reports tip-ins that go rich before
 the lean spike, and skips events that overlap a fuel cut (overrun cut or injectors off at Minimum Volume) so they aren't mistaken for film. Events open in the log; runs save to the Tuning History.
+
+### Closed-Loop Period
+Times the lambda sensor's response to fuelling steps — mixture aim steps from a step test (MoTeC's method: hold a point, step the aim −0.1 λ) and
+clean overrun fuel cuts — and compares the delay with **Fuel Closed Loop Period** at the step's exhaust mass flow. Pools steps from several logs,
+suggests a Period per site only from enough consistent steps (rounded up: a slightly long Period is the safe side), says at which rpm × MAP the logs
+reached the untested sites, and copies the Period row for M1 Tune. Every step opens in the log.
 
 ### Knock Analyzer
 Knock events per stretch (not per sample) against the tune's own **Knock Threshold** table, per cylinder, with an RPM × load grid, operating
@@ -257,6 +263,7 @@ plus the files named here:
 ve-table/                   — VE Table Tuning (m1pkg-ve.js reads Engine Efficiency Main from a tune)
 transient-fuel/             — Transient Fuel Analyzer (film-correct.js = table corrections, m1pkg-film.js)
 knock/                      — Knock Analyzer (charts.js, knock-freq.js + frequency-calc.html, m1pkg-knock.js)
+cl-period/                  — Closed-Loop Period (cl-analysis.js = clAnalyze over one or more logs, m1pkg-cl.js)
 ignition/                   — Ignition Review (ign-analysis.js = igAnalyze, m1pkg-ignition.js; uses the Log Health log helpers)
 fuel-pressure/              — DI Fuel Pressure Deep Dive (charts.js, m1pkg-rail.js)
 di-timing/                  — DI Injection Timing (di-calc.js = GM Gen V method, m1pkg-di.js, worker.js log check)
@@ -320,6 +327,7 @@ node tests/run-property10.js              # VE correction property test
 node tests/test-knock-analysis.js         # Knock Analyzer
 node tests/test-knock-calibration.js      # Knock threshold and gain calibration
 node tests/test-ignition.js               # Ignition Review
+node tests/test-cl-period.js              # Closed-Loop Period step timing
 node tests/test-knock-channel-resolution.js
 node tests/test-cylinder-distribution.js
 node tests/test-timing-correlation.js

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Closed-Loop Period — MoTeC M1</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <link rel="stylesheet" href="../log-viewer/log-panel.css">
+  <link rel="stylesheet" href="../lib/print-report.css">
+  <style>
+    .lh-group h3 { margin: 18px 0 6px; font-size: 1rem; color: #ddd; }
+    .lh-finding { padding: 8px 12px; margin-bottom: 6px; border-radius: 4px; border-left: 3px solid; background: #161616; }
+    .lh-finding.fail { border-left-color: #f44336; } .lh-finding.warn { border-left-color: #ff9800; }
+    .lh-finding.info { border-left-color: #2196f3; } .lh-finding.ok { border-left-color: #4caf50; }
+    .lh-title { font-weight: 600; font-size: 0.9rem; }
+    .lh-sev { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 6px; }
+    .lh-finding.fail .lh-sev { color: #f44336; } .lh-finding.warn .lh-sev { color: #ff9800; }
+    .lh-finding.info .lh-sev { color: #2196f3; } .lh-finding.ok .lh-sev { color: #4caf50; }
+    .lh-detail { color: #bbb; font-size: 0.85rem; margin-top: 3px; }
+    .cl-btn { margin-top: 5px; padding: 3px 10px; font-size: 0.75rem; color: #fff; background: #222; border: 1px solid #E31837; border-radius: 4px; cursor: pointer; }
+    .cl-btn:hover { background: #333; }
+    .cl-table { border-collapse: collapse; font-size: 0.8rem; margin: 6px 0 4px; }
+    .cl-table th, .cl-table td { border: 1px solid #2c2c2c; padding: 4px 8px; text-align: right; }
+    .cl-table th { color: #999; font-weight: 600; background: #161616; }
+    .cl-table td.note { text-align: left; color: #bbb; max-width: 380px; }
+    .cl-table td.shorter, .cl-table td.longer { color: #ff9800; font-weight: 600; }
+    .cl-scroll { overflow-x: auto; }
+    .cl-legend { font-size: 0.8rem; color: #999; margin-top: 4px; }
+    #print-report .lh-finding { background: #fff !important; break-inside: avoid; }
+    #print-report .lh-title { color: #111 !important; } #print-report .lh-detail { color: #333 !important; }
+    #print-report .cl-table th { background: #eee !important; color: #111 !important; }
+    #print-report .cl-table td { color: #111 !important; }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Closed-Loop Period</h1>
+    <p class="subtitle">Times how long the lambda sensor takes to start moving after a fuelling step — mixture aim steps from a step test
+      (MoTeC's method) and clean overrun fuel cuts — and compares it with Fuel Closed Loop Period at the step's exhaust mass flow. Choose
+      several logs to pool their steps.</p>
+
+    <div class="form-section">
+      <div class="file-row">
+        <label for="log-input">MoTeC Logs (.ld or .csv, one or more):</label>
+        <input type="file" id="log-input" accept=".ld,.csv" multiple />
+      </div>
+      <div class="file-row">
+        <label for="pkg-input">Tune (.m1pkg):</label>
+        <input type="file" id="pkg-input" accept=".m1pkg">
+      </div>
+      <div class="file-row" id="tune-row" hidden>
+        <label for="tune-select">Or a stored tune:</label>
+        <select id="tune-select" class="tune-select"><option value="">— choose a tune from the M1 Config Viewer —</option></select>
+        <span id="tune-hint" class="tune-hint"></span>
+      </div>
+      <p id="tune-status" class="tune-status"></p>
+      <div class="button-row">
+        <button id="analyze-btn" disabled>Time the steps</button>
+        <a href="help.html" class="help-link-btn">Help</a>
+      </div>
+    </div>
+
+    <div id="error-container" class="error-banner" hidden></div>
+    <p id="progress" class="section-desc" hidden>Timing…</p>
+
+    <section id="results-section" class="results-section" hidden>
+      <div class="report-block">
+        <h2>Findings</h2>
+        <div id="summary"></div>
+        <button id="pdf-btn" class="cl-btn">Export PDF</button>
+        <div id="findings"></div>
+      </div>
+      <div class="report-block">
+        <h2>Period by Exhaust Mass Flow</h2>
+        <div id="sites"></div>
+      </div>
+      <div class="report-block">
+        <h2>Steps</h2>
+        <div id="events"></div>
+      </div>
+      <div class="report-block">
+        <h2>Log</h2>
+        <div id="log-panel"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="../lib/xz-decoder.js"></script>
+  <script src="../lib/m1pkg-parser.js"></script>
+  <script src="../lib/print-report.js"></script>
+  <script src="../m1-config/tune-db.js"></script>
+  <script src="../m1-config/tune-api.js"></script>
+  <script src="../m1-config/tune-source.js"></script>
+  <script src="../m1-config/tune-picker.js"></script>
+  <script src="../log-viewer/log-chart.js"></script>
+  <script src="../log-viewer/log-panel.js"></script>
+  <script src="../ve-table/m1pkg-ve.js"></script>
+  <script src="m1pkg-cl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

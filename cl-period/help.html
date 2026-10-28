@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Closed-Loop Period — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Closed-Loop Period</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Closed-Loop Period — Help</h1>
+    <p><b>Fuel Closed Loop Period</b> (by Exhaust Mass Flow) is the time from a change in fuelling to the lambda sensor starting to see it — the
+      transport delay. The closed loop waits that long before judging its last correction. Too long and the control is lazy: trims lag and lambda
+      wanders off aim. Too short and it is hyperactive: it corrects again before the first correction arrives, and lambda oscillates (MoTeC training 39).
+      Set the Period first, then the trim gain (training 40). VE Table Tuning's "from the tune" lambda delay also uses this table.</p>
+
+    <h2>The step test (MoTeC's method)</h2>
+    <ol>
+      <li>Log Exhaust Lambda Bank 1 / 2 and Fuel Mixture Aim as fast as the logger allows, with Engine Speed, Inlet Manifold Pressure, Engine Load,
+        Fuel Stoichiometric Ratio and Engine Overrun State. MoTeC sets Fuel Closed Loop Control Trim Minimum / Maximum to 0 so the trim can't act;
+        the onset is measurable with the trim on too, since it only reacts after the Period.</li>
+      <li>Hold a steady point near one exhaust flow site (the findings say which rpm × MAP the logs reached each site at).</li>
+      <li>In Fuel Mixture Aim Main, change the cell you are in by −0.1 λ (e.g. 1.00 → 0.90). Hold 3 s. Put it back. Hold 3 s. Three times.</li>
+      <li>Repeat at the other flow sites, then load the log(s) here.</li>
+    </ol>
+    <p>An aim step counts when the aim moves ≥ 0.03 λ within 0.25 s, holds 1 s before and 1.5 s after, with rpm within 250 and MAP within 8 kPa,
+      no overrun cut and the engine running ≥ 30 s. Its delay is the time until lambda has moved a quarter of the step (at least 0.01 λ); the sensor must
+      reach half the step within 2 s or the step is not counted for that bank.</p>
+
+    <h2>Overrun cuts as natural steps</h2>
+    <p>An overrun fuel cut is a step to no fuel. A cut counts when lambda was within 0.08 λ of aim 0.5 s and 0.05 s before it, the cut lasted ≥ 0.8 s, above
+      1200 rpm, engine warm. Its delay is the time until lambda reads 0.1 λ leaner. The cut state is logged at 10 Hz, so the real cut can be up to 100 ms
+      before the logged one: suggestions from cuts add 50 ms. Cuts happen at low exhaust flow (closed throttle), so they only measure the low sites.</p>
+
+    <h2>Suggestions</h2>
+    <ul>
+      <li>Steps are grouped at the nearest Period site. A site needs 3 aim steps or 4 clean cuts, and the delays' p10–p90 within 150 ms.</li>
+      <li>Suggested = the median delay (+50 ms from cuts), rounded <b>up</b> to 50 ms — a slightly long Period is the safe side. Differences under 100 ms
+        are left alone.</li>
+      <li>Sites without measurements keep their value; blend them toward the measured ones by hand. <b>Copy Period row</b> copies the whole row for M1 Tune.</li>
+      <li>With lambda logged at 10 Hz, one step is timed to about ±50 ms; several steps per site average that out.</li>
+    </ul>
+    <div class="tip">Choose several logs to pool their steps (all must have run a tune with the same Period table). Every step opens in the log with
+      Show in log.</div>
+  </div>
+</body>
+</html>
