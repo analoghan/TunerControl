@@ -15,7 +15,7 @@ and the tuning history in one place for every browser; without it everything is 
 The landing page has four sections: **MoTeC M1 Tuning** (everything below up to Backup & Restore), **Haltech Tuning**, **TurboLamik
 Transmission** and **Calculators**.
 
-The MoTeC M1 page groups its tools in the calibration order: **Check the log** (Log Health, Log Viewer, Cross-Tool Diagnostics), **Airflow & fuel
+The MoTeC M1 page groups its tools in the calibration order: **Check the log** (Log Health, Log Viewer, Cross-Tool Diagnostics, Pull Report), **Airflow & fuel
 model** (VE, MAP Rescale, Closed-Loop Period, Charge Cooling, Transient Fuel), **Direct injection** (Injector Characterization, DI Fuel Pressure, DI Injection Timing,
 Duty Cycle), **Ignition, knock & idle** (Knock Analyzer, Ignition Review, Idle), and **Tunes & wiring** (M1 Config Viewer, Tuning History, Harness Builder), with Backup & Restore below.
 
@@ -86,7 +86,13 @@ by table cell. Never suggests adding timing.
 
 ### DI Fuel Pressure Deep Dive
 Rail pressure vs aim (MPa logged, shown in bar), overshoot/undershoot and tracking grids by RPM and fuel volume, and pump checks (how hard the HPFP is driven, undershoot with the pump near its limit). With a
-tune it reviews the rail pressure control settings and suggests changes backed by how much data supports them.
+tune it reviews the rail pressure control settings and suggests changes backed by how much data supports them. Low-side (lift pump) pressure by fuel
+flow: droop, dips below 250 kPa, when Fuel Pump 2 comes in, and how much rail undershoot came while the feed sagged.
+
+### Pull Report
+Every full-throttle or boost pull (MAP ≥ 100 kPa or pedal ≥ 85 % for 0.8 s) in one or more logs: lambda per bank against the aim 0.3 s earlier,
+closed-loop trims, knock per cylinder against Knock Threshold, timing, rail and low-side fuel pressure, injector duty, temperatures, oil pressure
+against 10 psi per 1000 rpm, voltages, limits and cuts. Flags per pull, the worst case of each across pulls, and every pull opens in the log.
 
 ### DI Injection Timing
 Start of injection for direct injection from the cam profile and valve events, using the GM Gen V calculator method (0.006" valve events,
@@ -263,6 +269,7 @@ plus the files named here:
 ve-table/                   — VE Table Tuning (m1pkg-ve.js reads Engine Efficiency Main from a tune)
 transient-fuel/             — Transient Fuel Analyzer (film-correct.js = table corrections, m1pkg-film.js)
 knock/                      — Knock Analyzer (charts.js, knock-freq.js + frequency-calc.html, m1pkg-knock.js)
+pulls/                      — Pull Report (pull-analysis.js = puAnalyze over one or more logs)
 cl-period/                  — Closed-Loop Period (cl-analysis.js = clAnalyze over one or more logs, m1pkg-cl.js)
 ignition/                   — Ignition Review (ign-analysis.js = igAnalyze, m1pkg-ignition.js; uses the Log Health log helpers)
 fuel-pressure/              — DI Fuel Pressure Deep Dive (charts.js, m1pkg-rail.js)
@@ -328,6 +335,7 @@ node tests/test-knock-analysis.js         # Knock Analyzer
 node tests/test-knock-calibration.js      # Knock threshold and gain calibration
 node tests/test-ignition.js               # Ignition Review
 node tests/test-cl-period.js              # Closed-Loop Period step timing
+node tests/test-pulls.js                  # Pull Report
 node tests/test-knock-channel-resolution.js
 node tests/test-cylinder-distribution.js
 node tests/test-timing-correlation.js

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pull Report — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Pull Report</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Pull Report — Help</h1>
+    <p>A pull is at least 0.8 s with Inlet Manifold Pressure ≥ 100 kPa or Throttle Pedal ≥ 85 %, above 1500 rpm, with the engine running ≥ 30 s
+      (gaps under 0.4 s are joined). On a supercharged engine that also catches boost at part pedal; those are marked as not full-throttle.
+      Choose several logs to see all their pulls in one table. The tune is optional: it gives Knock Threshold, so knock is judged against it.</p>
+
+    <h2>What each pull shows</h2>
+    <ul>
+      <li><b>Lambda</b> — median per bank past the first 0.5 s (the tip-in), and the most lean against the aim 0.3 s earlier (the lambda delay measured
+        on this car), held 0.2 s. Flagged at 0.03 λ leaner (0.05 λ = fail). Banks more than 0.03 λ apart are flagged. Closed-loop trims of 5 % or more
+        are noted: the fuel model is off there (VE Table Tuning).</li>
+      <li><b>Knock</b> — each cylinder's peak (held 50 ms) against Knock Threshold at that rpm: 80 % = check, 100 % = fail. Knock trims, when logged,
+        show retard per cylinder.</li>
+      <li><b>Timing</b> — minimum and median Ignition Timing; Ignition Timing State other than Normal is noted.</li>
+      <li><b>Fuel supply</b> — rail pressure under aim (held 0.2 s) beyond the larger of 10 bar and 10 % of the aim, with the pump control reached;
+        low-side pressure below 250 kPa (fail) or dropping 50 kPa from the second before the pull; Fuel Pump 2 state; injector duty ≥ 85 %.</li>
+      <li><b>Temperatures</b> — inlet air at 60 °C or more is flagged (heat-soaked charge); charge, coolant and oil temperature are listed.</li>
+      <li><b>Oil pressure</b> — checked against 10 psi (69 kPa) per 1000 rpm, held 0.2 s.</li>
+      <li><b>Electrical, limits, cuts</b> — battery under 12.5 V, Throttle Limit or Engine Speed Limit State active, Ignition Cut, a change in Fuel Output
+        Cut Count outside overrun.</li>
+    </ul>
+    <p><b>Across pulls</b> lists each kind of flag once, with its worst case and how many pulls had it. <b>Show</b> opens a pull's flags, all its numbers
+      and the log around it.</p>
+    <div class="tip">For a pull worth tuning from: warm engine, 3rd gear, from about 2500 rpm to the shift point, pedal to the floor, on a closed road
+      or a dyno. Log lambda, MAP, pedal and rail pressure fast (50 Hz), injector duty at 10–20 Hz and the knock trims at 20 Hz.</div>
+  </div>
+</body>
+</html>

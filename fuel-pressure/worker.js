@@ -74,7 +74,9 @@ var CHANNEL_MAP = {
     inj_duty:           ['Fuel Injector Primary Duty Cycle'],
     fuel_flow:          ['Fuel Flow'],
     fuel_volume:        ['Fuel Volume Primary', 'Fuel Volume'],
-    throttle_pedal:     ['Throttle Pedal']
+    throttle_pedal:     ['Throttle Pedal'],
+    low_press:          ['Fuel Pressure', 'Fuel Pressure Sensor'],   // low-side (lift pump) pressure, exact names only
+    pump2:              ['Fuel Pump 2 State']
 };
 
 var REQUIRED_CHANNELS = ['fuel_press', 'fuel_press_aim', 'rpm'];
@@ -805,6 +807,104 @@ function analyzeRailControl(a, rail, sampleRate) {
     return res;
 }
 
+// ---------------------------------------------------------------------------
+// Low-side (lift pump) pressure: the high-pressure pump's supply. A sagging feed starves the HPFP and shows up as rail undershoot.
+// ---------------------------------------------------------------------------
+
+var LOW_MIN_KPA = 250;                 // below this (gauge) the feed is too low for the HPFP
+var LOW_DROOP_KPA = 50;                // droop from the light-load median worth reporting
+var LOW_FLOW_BINS = [0, 500, 1000, 1500, 2000, 3000];   // Fuel Flow, ml/min
+var LOW_START_S = 3;                   // after each start the pumps are still priming
+
+/**
+ * a = { time, rpm, low (kPa), flow (ml/min) | null, pump2 | null, error (rail − aim, bar) }
+ * → { base, min, bins: [{ from, to, seconds, median, p2, pump2Pct }], droop, droopFlow, below: { episodes, seconds, first },
+ *     pump2: { seconds, onFlow, minBeforeOn } | null, railLinked: % | null, advice: [{ severity: 'warning' | 'good', text }] } | null
+ */
+function analyzeLowSide(a, sampleRate) {
+    var n = a.low.length, ok = new Array(n), since = -1;
+    for (var i = 0; i < n; i++) {
+        var run = a.rpm[i] >= MIN_RUNNING_RPM && !isNaN(a.low[i]);
+        if (!run) { since = -1; ok[i] = false; continue; }
+        if (since < 0) since = a.time[i];
+        ok[i] = a.time[i] - since >= LOW_START_S;
+    }
+    function q(arr, p) { if (!arr.length) return NaN; var s2 = arr.slice().sort(function (x, y) { return x - y; }); return s2[Math.min(s2.length - 1, Math.floor(p * (s2.length - 1) + 0.5))]; }
+    var all = [], flows = [];
+    for (i = 0; i < n; i++) if (ok[i]) { all.push(a.low[i]); if (a.flow && !isNaN(a.flow[i])) flows.push(a.flow[i]); }
+    if (all.length < sampleRate * 10) return null;
+    var light = [], flowMid = flows.length ? q(flows, 0.5) : null;
+    for (i = 0; i < n; i++) if (ok[i] && (!a.flow || a.flow[i] <= flowMid)) light.push(a.low[i]);
+    var r1 = function (v) { return Math.round(v); };
+    var out = { base: r1(q(light, 0.5)), min: r1(q(all, 0.005)), bins: [], droop: null, droopFlow: null, below: { episodes: 0, seconds: 0, first: null },
+                pump2: null, railLinked: null, advice: [] };
+
+    if (a.flow) LOW_FLOW_BINS.forEach(function (from, b) {
+        var to = b + 1 < LOW_FLOW_BINS.length ? LOW_FLOW_BINS[b + 1] : Infinity, v = [], on = 0;
+        for (var k = 0; k < n; k++) if (ok[k] && a.flow[k] >= from && a.flow[k] < to) { v.push(a.low[k]); if (a.pump2 && a.pump2[k] > 0) on++; }
+        if (v.length / sampleRate < 1) return;
+        out.bins.push({ from: from, to: to === Infinity ? null : to, seconds: Math.round(v.length / sampleRate * 10) / 10, median: r1(q(v, 0.5)), p2: r1(q(v, 0.02)),
+                        pump2Pct: a.pump2 ? Math.round(on / v.length * 100) : null });
+    });
+    if (out.bins.length >= 2) {   // droop needs flow above the lightest bin
+        var top = out.bins[out.bins.length - 1];
+        out.droop = out.base - top.median;
+        out.droopFlow = top.from;
+    }
+
+    // Stretches below the minimum (≥ 0.3 s)
+    var start = -1;
+    for (i = 0; i <= n; i++) {
+        var low = i < n && ok[i] && a.low[i] < LOW_MIN_KPA;
+        if (low && start < 0) start = i;
+        if (!low && start >= 0) {
+            var dur = (i - start) / sampleRate;
+            if (dur >= 0.3) { out.below.episodes++; out.below.seconds += dur; if (out.below.first === null) out.below.first = a.time[start]; }
+            start = -1;
+        }
+    }
+    out.below.seconds = Math.round(out.below.seconds * 10) / 10;
+
+    // Second pump: how long on, the fuel flow when it switches on, and the lowest feed in the second before it does
+    if (a.pump2) {
+        var onS = 0, onFlows = [], before = [], w = Math.round(sampleRate);
+        for (i = 1; i < n; i++) {
+            if (ok[i] && a.pump2[i] > 0) onS++;
+            if (a.pump2[i] > 0 && !(a.pump2[i - 1] > 0) && ok[i]) {
+                if (a.flow) onFlows.push(a.flow[i]);
+                var lo = Infinity;
+                for (var j = Math.max(0, i - w); j < i; j++) if (ok[j] && a.low[j] < lo) lo = a.low[j];
+                if (lo < Infinity) before.push(lo);
+            }
+        }
+        if (onS || onFlows.length) out.pump2 = { seconds: Math.round(onS / sampleRate * 10) / 10, switchOns: before.length,
+            onFlow: onFlows.length ? r1(q(onFlows, 0.5)) : null, minBeforeOn: before.length ? r1(Math.min.apply(null, before)) : null };
+    }
+
+    // Rail undershoot while the feed sagged
+    var under = 0, underSag = 0;
+    for (i = 0; i < n; i++) {
+        if (!ok[i] || !(a.error[i] < -TOLERANCE_BAR)) continue;
+        under++;
+        if (a.low[i] < out.base - LOW_DROOP_KPA) underSag++;
+    }
+    if (under >= sampleRate) out.railLinked = Math.round(underSag / under * 100);
+
+    if (out.below.episodes) out.advice.push({ severity: 'warning', text: 'Low-side fuel pressure fell below ' + LOW_MIN_KPA + ' kPa ' + out.below.episodes + ' time' +
+        (out.below.episodes > 1 ? 's' : '') + ' (' + out.below.seconds + ' s, first at ' + out.below.first.toFixed(1) + ' s) with the engine running. The HPFP needs a ' +
+        'steady feed; check the lift pump, its supply voltage, the filter and the regulator.' });
+    if (out.droop !== null && out.droop >= LOW_DROOP_KPA) out.advice.push({ severity: 'warning', text: 'The feed drops ' + out.droop + ' kPa from ' + out.base +
+        ' kPa at light load to ' + (out.base - out.droop) + ' kPa above ' + out.droopFlow + ' ml/min of fuel flow. A return-style regulator should hold it within a few kPa: ' +
+        'the lift pump or its wiring is near its limit there.' });
+    else if (out.droop !== null) out.advice.push({ severity: 'good', text: 'The feed holds ' + (out.droop <= 0 ? 'at or above' : 'within ' + out.droop + ' kPa of') +
+        ' its light-load ' + out.base + ' kPa up to the highest fuel flow in this log (' + out.droopFlow + '+ ml/min).' });
+    if (out.railLinked !== null && out.railLinked >= 30) out.advice.push({ severity: 'warning', text: out.railLinked + '% of the rail undershoot came while the feed was ' +
+        LOW_DROOP_KPA + '+ kPa below normal: fix the supply before touching rail control.' });
+    if (out.pump2 && out.pump2.minBeforeOn !== null && out.pump2.minBeforeOn < out.base - LOW_DROOP_KPA) out.advice.push({ severity: 'warning', text: 'The feed had already dropped to ' +
+        out.pump2.minBeforeOn + ' kPa before Fuel Pump 2 switched on (median ' + (out.pump2.onFlow !== null ? out.pump2.onFlow + ' ml/min' : '?') + '): bring the second pump in earlier.' });
+    return out;
+}
+
 function runAnalysis(columnNames, data, sampleRate, units, rail) {
     // Step 1: Resolve channels
     self.postMessage({ type: 'progress', phase: 'Resolving channels...', percent: 10 });
@@ -880,6 +980,14 @@ function runAnalysis(columnNames, data, sampleRate, units, rail) {
     var volArr = channels.fuel_volume !== -1 ? col(channels.fuel_volume) : null;
     var railControl = analyzeRailControl({ time: timeArr, rpm: rpmArr, press: pressArr, aim: aimArr, error: errorArr,
                                            control: controlArr, volume: volArr }, rail || null, sampleRate);
+
+    var lowSide = null;
+    if (channels.low_press !== -1) {
+        var lowUnit = String(units && units[channels.low_press] || 'kPa').toLowerCase();
+        var lowF = /^bar/.test(lowUnit) ? 100 : /psi/.test(lowUnit) ? 6.895 : /^mpa/.test(lowUnit) ? 1000 : 1;
+        lowSide = analyzeLowSide({ time: timeArr, rpm: rpmArr, low: col(channels.low_press).map(function (v) { return v * lowF; }), flow: flowArr,
+                                   pump2: channels.pump2 !== -1 ? col(channels.pump2) : null, error: errorArr }, sampleRate);
+    }
 
     // Step 7: Diagnostics
     self.postMessage({ type: 'progress', phase: 'Generating diagnostics...', percent: 85 });
@@ -976,6 +1084,7 @@ function runAnalysis(columnNames, data, sampleRate, units, rail) {
             errorGrid: errorGrid,
             pump: pump,
             railControl: railControl,
+            lowSide: lowSide,
             tuneName: rail ? rail.tuneName : null,
             pressurePwImpact: pressurePwImpact,
             diagnostics: diagnostics
@@ -1057,6 +1166,6 @@ if (typeof self !== 'undefined') self.onmessage = function(event) {
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { pressureToBar: pressureToBar, computeErrorStats: computeErrorStats, detectTransientEvents: detectTransientEvents,
-        buildErrorGrid: buildErrorGrid, analyzeRailControl: analyzeRailControl, railAimAt: railAimAt, analyzePumpLimit: analyzePumpLimit, generateDiagnostics: generateDiagnostics, runAnalysis: runAnalysis,
+        buildErrorGrid: buildErrorGrid, analyzeRailControl: analyzeRailControl, railAimAt: railAimAt, analyzePumpLimit: analyzePumpLimit, analyzeLowSide: analyzeLowSide, generateDiagnostics: generateDiagnostics, runAnalysis: runAnalysis,
         resolveChannels: resolveChannels, parseLdFile: parseLdFile };
 }

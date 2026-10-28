@@ -235,6 +235,7 @@ function renderReport(analysis) {
     renderWarnings(analysis.channelWarnings);
     renderSummary(analysis);
     renderRailControl(analysis.railControl, analysis.tuneName);
+    renderLowSide(analysis.lowSide);
     if (typeof rsSaveControl === 'function' && lastRunInfo) {
         var run = lastRunInfo;
         rsSaveControl(document.getElementById('history-save'), function () {
@@ -407,6 +408,25 @@ function renderRailControl(rc, tuneName) {
             html += '</tr>';
         }
         html += '</tbody></table></div>';
+    }
+    content.innerHTML = html;
+}
+
+function renderLowSide(ls) {
+    var block = document.getElementById('report-low'), content = document.getElementById('low-content');
+    block.hidden = !ls;
+    if (!ls) return;
+    var html = ls.advice.map(function (a) { return '<div class="rail-advice ' + (RAIL_SEVERITY_CLASS[a.severity] || '') + '">' + fpEsc(a.text) + '</div>'; }).join('');
+    html += '<p class="section-note">Light-load median ' + ls.base + ' kPa, lowest ' + ls.min + ' kPa (0.5th percentile)' +
+        (ls.pump2 ? '; Fuel Pump 2 on ' + ls.pump2.seconds + ' s, switched on ' + ls.pump2.switchOns + ' time' + (ls.pump2.switchOns === 1 ? '' : 's') +
+            (ls.pump2.onFlow !== null ? ' at ' + ls.pump2.onFlow + ' ml/min (median)' : '') : '') +
+        (ls.railLinked !== null ? '; ' + ls.railLinked + '% of rail undershoot with the feed sagging' : '') + '.</p>';
+    if (ls.bins.length) {
+        html += '<table class="fp-table"><thead><tr><th>Fuel flow (ml/min)</th><th>Time</th><th>Median</th><th>Low (2nd pct)</th>' +
+            (ls.bins[0].pump2Pct !== null ? '<th>Pump 2 on</th>' : '') + '</tr></thead><tbody>' + ls.bins.map(function (b) {
+                return '<tr><td>' + b.from + (b.to !== null ? '–' + b.to : '+') + '</td><td>' + b.seconds + ' s</td><td>' + b.median + ' kPa</td><td>' + b.p2 + ' kPa</td>' +
+                    (b.pump2Pct !== null ? '<td>' + b.pump2Pct + '%</td>' : '') + '</tr>';
+            }).join('') + '</tbody></table>';
     }
     content.innerHTML = html;
 }

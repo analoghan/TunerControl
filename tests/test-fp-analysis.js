@@ -186,5 +186,35 @@ check('without a tune: kinds of error only', function () {
     eq(r.volumeFactor, null);
 });
 
+console.log('Low-side pressure:');
+/** 100 Hz low-side samples: f(t) → { low, flow, pump2, error }; engine running throughout. */
+function lowLog(seconds, f) {
+    const a = { time: [], rpm: [], low: [], flow: [], pump2: [], error: [] };
+    for (let i = 0; i < seconds * 100; i++) {
+        const t = i / 100, o = Object.assign({ low: 480, flow: 200, pump2: 0, error: 0 }, f(t));
+        a.time.push(t); a.rpm.push(2000); a.low.push(o.low); a.flow.push(o.flow); a.pump2.push(o.pump2); a.error.push(o.error);
+    }
+    return a;
+}
+check('a feed that holds is reported as holding, with the flow bins', function () {
+    const r = F.analyzeLowSide(lowLog(60, (t) => (t > 40 ? { flow: 2500, pump2: 1, low: 485 } : {})), 100);
+    eq(r.base, 480); eq(r.droop, -5);
+    eq(r.bins.map(b => b.from).join(), '0,2000');
+    eq(r.bins[1].pump2Pct, 100);
+    eq(r.advice[0].severity, 'good');
+    eq(r.pump2.switchOns, 1); eq(r.pump2.onFlow, 2500);
+});
+check('droop at high flow, a dip below 250 kPa, and rail undershoot during the sag', function () {
+    const r = F.analyzeLowSide(lowLog(60, (t) => (t > 40 ? { flow: 2500, low: t > 50 && t < 51 ? 200 : 400, error: -5 } : {})), 100);
+    eq(r.droop, 80);
+    eq(r.below.episodes, 1); near(r.below.seconds, 1, 0.02);
+    eq(r.railLinked, 100);
+    eq(r.advice.filter(a => a.severity === 'warning').length, 3);
+});
+check('the first 3 s after a start are not counted (pumps priming)', function () {
+    const r = F.analyzeLowSide(lowLog(60, (t) => (t < 2 ? { low: -50 } : {})), 100);
+    eq(r.below.episodes, 0); eq(r.min, 480);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 if (failed) process.exitCode = 1;

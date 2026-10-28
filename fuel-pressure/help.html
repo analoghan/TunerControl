@@ -149,6 +149,16 @@
       undershoot is more likely control response (gains, feed-forward). Overshoot right after the aim falls is expected: the rail only
       loses pressure as fuel is injected.</p>
 
+    <h2 id="low-side">Low-Side Fuel Pressure</h2>
+    <p>Fuel Pressure (the lift pump's pressure feeding the HPFP) by Fuel Flow, from 3 s after each start (pumps priming). The light-load median is the
+      reference; the table gives the median and 2nd percentile per flow band and how often Fuel Pump 2 was on.</p>
+    <ul>
+      <li>Below 250 kPa for 0.3 s or more while running is flagged: the HPFP needs a steady feed.</li>
+      <li>A drop of 50 kPa or more at the highest flow band means the lift pump or its wiring is near its limit.</li>
+      <li>The share of rail undershoot that came while the feed sagged 50 kPa says whether to fix the supply before the rail control.</li>
+      <li>The lowest feed in the second before Fuel Pump 2 switches on shows whether the second pump comes in late.</li>
+    </ul>
+
     <h2 id="transients">Transient Detection</h2>
     <p>The tool automatically detects transient events — moments where the fuel pressure aim changes rapidly (more than 20 bar within 0.5 seconds). For each transient:</p>
     <ul>
