@@ -17,7 +17,7 @@ Transmission** and **Calculators**.
 
 The MoTeC M1 page groups its tools in the calibration order: **Check the log** (Log Health, Log Viewer, Cross-Tool Diagnostics), **Airflow & fuel
 model** (VE, MAP Rescale, Charge Cooling, Transient Fuel), **Direct injection** (Injector Characterization, DI Fuel Pressure, DI Injection Timing,
-Duty Cycle), **Ignition, knock & idle**, and **Tunes & wiring** (M1 Config Viewer, Tuning History, Harness Builder), with Backup & Restore below.
+Duty Cycle), **Ignition, knock & idle** (Knock Analyzer, Ignition Review, Idle), and **Tunes & wiring** (M1 Config Viewer, Tuning History, Harness Builder), with Backup & Restore below.
 
 The MoTeC M1 tools are built around a supercharged GM Gen V LT4 (M142 ECU + E888 expander) but work with any M1 log. Analysis tools that need tune
 values can use a tune stored in the M1 Config Viewer (suggested from the log's ECU serial and time) or a `.m1pkg` file, and most can save their
@@ -69,6 +69,14 @@ condition correlation and timing recommendations. Threshold & gain calibration (
 from the loudest cylinder's no-knock level × 1.25 — withheld until the knock frequency is near a bore-based order, and only where the log has enough
 data at load. Includes a knock sensor check (one sensor reading far lower than the other), the LT4's
 knock frequencies (first and second order from bore size) and the M1 knock control setup. Events open in the log.
+
+### Ignition Review
+Rebuilds the logged Ignition Timing in the Normal state from the tune — Ignition Timing Main blended toward Alternative Fuel Ignition Timing by fuel
+composition, at engine speed × Load Normalised (MAP in MAP load mode), plus Ignition Timing Compensation — and lists stretches where timing leaves
+it at a steady load (knock control, limits). Shows which compensation tables explain the logged compensation and what inlet air temperature takes
+under boost, the flex blend and boost rows where the Alternative Fuel table runs less advance than Main, per-cylinder trims against the knock
+input each cylinder is on (trims on one input only while the other reads low is flagged), time in each ignition state, and timing and knock margin
+by table cell. Never suggests adding timing.
 
 ### DI Fuel Pressure Deep Dive
 Rail pressure vs aim (MPa logged, shown in bar), overshoot/undershoot and tracking grids by RPM and fuel volume, and pump checks (how hard the HPFP is driven, undershoot with the pump near its limit). With a
@@ -249,6 +257,7 @@ plus the files named here:
 ve-table/                   — VE Table Tuning (m1pkg-ve.js reads Engine Efficiency Main from a tune)
 transient-fuel/             — Transient Fuel Analyzer (film-correct.js = table corrections, m1pkg-film.js)
 knock/                      — Knock Analyzer (charts.js, knock-freq.js + frequency-calc.html, m1pkg-knock.js)
+ignition/                   — Ignition Review (ign-analysis.js = igAnalyze, m1pkg-ignition.js; uses the Log Health log helpers)
 fuel-pressure/              — DI Fuel Pressure Deep Dive (charts.js, m1pkg-rail.js)
 di-timing/                  — DI Injection Timing (di-calc.js = GM Gen V method, m1pkg-di.js, worker.js log check)
 injector/                   — Injector Characterization (charts.js, m1pkg-injector.js — also used by diagnostics/)
@@ -310,6 +319,7 @@ node tests/run-channel-resolver-tests.js  # VE channel names
 node tests/run-property10.js              # VE correction property test
 node tests/test-knock-analysis.js         # Knock Analyzer
 node tests/test-knock-calibration.js      # Knock threshold and gain calibration
+node tests/test-ignition.js               # Ignition Review
 node tests/test-knock-channel-resolution.js
 node tests/test-cylinder-distribution.js
 node tests/test-timing-correlation.js

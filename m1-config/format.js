@@ -97,6 +97,8 @@ function m1cTableGrid(item) {
     function used(a) { return a ? (a.sites || a.maxSites) : 1; }
     function axisValues(a) {
         if (!a) return null;
+        // Enumerated axes (e.g. Gear) carry no site values: number the sites instead
+        if (!a.values) return Array.from({ length: used(a) }, function (_, i) { return i; });
         return a.values.slice(0, used(a)).map(function (v) { return m1cConvert(v, a).value; });
     }
     function bodyAt(ix, iy, iz) {

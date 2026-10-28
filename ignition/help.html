@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ignition Review — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Ignition Review</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Ignition Review — Help</h1>
+    <p>In the Normal ignition state the M1 runs the table plus the compensations (MoTeC training 50: Ignition Timing should equal the table
+      under normal conditions; a difference means a compensation is in play). The review rebuilds that from the tune and the log, and accounts for every degree:</p>
+    <ul>
+      <li><b>Table</b> = Ignition Timing Main + (Alternative Fuel Ignition Timing − Main) × Alternative Fuel Ignition Timing Blend at Fuel Composition,
+        looked up at Engine Speed × Engine Load Normalised. With Load Normalised Mode = Inlet Manifold Pressure, load is MAP in kPa. The Z slice is the one
+        Driver Ignition Timing Main Switch selects (its Default mapping when no switch is wired).</li>
+      <li><b>Compensation</b> = the logged Ignition Timing Compensation, and separately every non-zero "… Ignition Timing Compensation / Trim" table in the tune
+        whose inputs are logged (inlet air temperature, coolant…), to show which table it comes from.</li>
+    </ul>
+    <p>Log Ignition Timing, Ignition Timing Compensation, Ignition Timing State, Fuel Composition, Inlet Manifold Pressure, Inlet Air Temperature and the
+      eight Ignition Cylinder N Knock Level channels. Ignition Cylinder N Knock Trim (20 Hz) shows knock control's retard per cylinder.</p>
+
+    <h2>Findings</h2>
+    <ul>
+      <li><b>Ignition Timing follows the tune</b> — median and 90th percentile of logged − (table + compensation) in the Normal state. A large difference
+        means a different tune ran the log, or something not modelled sets timing.</li>
+      <li><b>Timing below / above the tune</b> — Normal-state stretches of 0.3 s or more at least 1° off, at a steady load (MAP moved less than 5 kPa
+        over ±0.2 s, since MAP is logged at 10 Hz and timing at 20 Hz). Below usually means knock control, a torque reduction or a limit.</li>
+      <li><b>Compensation</b> — how much the compensations took at cruise and under boost (≥ 100 kPa), whether the tune's tables explain the logged value,
+        and what inlet air temperature took out under boost.</li>
+      <li><b>Flex fuel</b> — the blend at the logged composition, Alternative − Main where the log ran, and boost rows where the Alternative Fuel table runs
+        less advance than Main. Ethanol cools the charge and resists knock: MoTeC training 67 starts ethanol on the petrol timing, verifies fuelling,
+        then typically finds 6–8° more at the same boost, with the knock sensors watching.</li>
+      <li><b>Cylinder trims</b> — Ignition Cylinder N Trim Main against the knock input each cylinder is on (Knock Cylinder N Resource). Trims only on one
+        input's cylinders while the other input reads several times lower is flagged: those cylinders may need the same and their sensor can't show it.</li>
+      <li><b>Knock margin</b> — cells where the loudest cylinder's 99th-percentile knock level reaches 80 % of Knock Threshold.</li>
+      <li>Ignition Timing State Limit Advance / Limit Retard / Check Timing are reported when they occur.</li>
+    </ul>
+
+    <h2>Timing by Cell</h2>
+    <p>Normal-state running binned to the nearest Ignition Timing Main site; a cell needs 0.5 s. Each shows the median logged timing, the compensation in it,
+      and the knock level as a share of the threshold (green under 50 %, amber 50–80 %, red 80 % or more). Hover a cell for the table value and
+      Alternative − Main.</p>
+    <div class="tip">The knock margin is only as good as the knock inputs: a sensor that reads low makes its cylinders look quiet. Check the Knock
+      Analyzer's sensor balance and calibration before reading green cells as room for more timing. This page never suggests adding timing.</div>
+
+    <h2>Ignition States</h2>
+    <p>Time and stretches in each Ignition Timing State, with the median timing. Only Normal follows the tables; Idle is the idle controller's
+      timing (Idle Ignition Timing Limit Advance), Engine Overrun the overrun target.</p>
+  </div>
+</body>
+</html>
