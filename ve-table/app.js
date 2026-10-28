@@ -1277,3 +1277,25 @@ function renderLambdaErrorTable(correctionGrid, tableContainer, tableLabel) {
     table.appendChild(tbody);
     tableContainer.appendChild(table);
 }
+
+// Export PDF: the stats, warnings and the result grids (lib/print-report.js). Each grid renders into a scratch container.
+document.getElementById('pdf-btn').addEventListener('click', () => {
+    const msg = lastResult;
+    if (!msg || !lastRun) return;
+    const grid = msg.correctionGrid, name = lastRun.file.name;
+    const tables = [['Correction %', (c, l) => renderCorrectionTable(grid, c, l)],
+                    ['New VE Values', (c, l) => msg.newValuesGrid && renderNewValuesTable(grid, msg.newValuesGrid, c, l)],
+                    ['Hit Counts', (c, l) => renderHitCountTable(grid, c, l)],
+                    ['Lambda Error', (c, l) => renderLambdaErrorTable(grid, c, l)],
+                    ['CL Trim', (c, l) => renderClTrimTable(grid, c, l)]];
+    const sections = [{ title: 'Summary', html: '<p>' + prEsc(document.getElementById('stats-line').textContent) + '</p>' +
+        (warningContainer.hidden ? '' : prSnapshot(warningContainer)) }];
+    tables.forEach(([title, render], i) => {
+        const c = document.createElement('div'), l = document.createElement('p');
+        render(c, l);
+        if (c.innerHTML) sections.push({ title: title, html: '<p class="pr-note">' + prEsc(l.textContent) + '</p>' + c.innerHTML, newPage: i > 0 });
+    });
+    prPrint({ title: 'VE Table Tuning', subtitle: name, fileName: 'VE Table Tuning - ' + name, landscape: true,
+        meta: [['Tune', lastRun.tune && lastRun.tune.name ? lastRun.tune.name : 'none'], ['Samples', msg.totalSamples.toLocaleString()],
+               ['Cells above threshold', msg.cellsAboveThreshold]], sections: sections });
+});

@@ -4,6 +4,8 @@
  */
 
 #print-report { display: none; }
+.pr-export-btn { padding: 6px 12px; font-size: 0.85rem; color: #fff; background: #222; border: 1px solid #E31837; border-radius: 4px; cursor: pointer; }
+.pr-export-btn:hover { background: #333; }
 
 @media print {
   @page { margin: 12mm; }
@@ -64,6 +66,23 @@
   #print-report .fw-sep { border: 0; border-top: 0.5pt solid #ccc; margin: 3px 0; }
   #print-report .status-error, #print-report .marker-error { color: #c62828 !important; }
   #print-report .status-warning, #print-report .marker-warning { color: #b45309 !important; }
+
+  /* Snapshots of rendered pages (prSnapshot): kept heat-map tints and the VE grid colours */
+  #print-report .pr-shade { background: var(--pr-bg) !important; }
+  #print-report td.positive { background: rgba(76, 175, 80, 0.3) !important; }
+  #print-report td.negative { background: rgba(244, 67, 54, 0.3) !important; }
+  #print-report td.zero { background: rgba(255, 152, 0, 0.15) !important; }
+  #print-report td.below-threshold { color: #999 !important; }
+  #print-report .correction-table { width: auto; font-size: 6.5pt; }
+  #print-report .correction-table th, #print-report .correction-table td { padding: 1px 3px !important; text-align: right; white-space: nowrap !important; }
+
+  #print-report table.pr-wide { width: auto; font-size: 6pt !important; }
+  #print-report table.pr-wide th, #print-report table.pr-wide td { padding: 1px 2px !important; white-space: nowrap !important; font-size: 6pt !important;
+    min-width: 0 !important; width: auto !important; position: static !important; }
+  #print-report .chart-panel img { max-height: 85mm; }
+  #print-report .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #print-report .chart-panel-full { grid-column: 1 / -1; }
+  #print-report .chart-panel { break-inside: avoid; }
 
   /* Figures: diagrams scale down to fit a page */
   .pr-figure { break-inside: avoid; margin: 0 0 10px; text-align: center; }

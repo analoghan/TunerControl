@@ -661,3 +661,16 @@ analyzeBtn.addEventListener('click', function() {
     clearErrorBanner();
     handleAnalyzeClick();
 });
+
+// ---------------------------------------------------------------------------
+// Export PDF: the rendered report blocks and charts (lib/print-report.js)
+// ---------------------------------------------------------------------------
+
+document.getElementById('pdf-btn').addEventListener('click', function () {
+    if (!lastRunInfo) return;
+    var name = lastRunInfo.file.name, charts = document.getElementById('charts-section');
+    var sections = prBlocks(document.getElementById('report-section'));
+    if (!charts.hidden) sections.push({ title: 'Charts', html: prSnapshot(charts.querySelector('.chart-grid')), newPage: true });
+    prPrint({ title: 'DI Fuel Pressure', subtitle: name, fileName: 'DI Fuel Pressure - ' + name,
+        meta: [['Tune', lastRunInfo.rail ? lastRunInfo.rail.tuneName : 'none']], sections: sections });
+});

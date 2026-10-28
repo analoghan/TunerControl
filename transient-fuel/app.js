@@ -351,3 +351,12 @@ function formatSci(value) {
     // MoTeC M1 v2 format: 17 decimal places, e notation
     return '"' + value.toExponential(17) + '"';
 }
+
+// Export PDF: the rendered report blocks (lib/print-report.js)
+document.getElementById('pdf-btn').addEventListener('click', function () {
+    if (!lastRun) return;
+    var name = lastRun.file.name;
+    prPrint({ title: 'Transient Fuel Analysis', subtitle: name, fileName: 'Transient Fuel - ' + name,
+        meta: [['Fuel film table', lastRun.tune && lastRun.tune.name ? lastRun.tune.name : 'none']],
+        sections: prBlocks(resultsSection) });
+});

@@ -6,6 +6,7 @@
   <title>VE Table Tuning Tool</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="../log-viewer/log-panel.css" />
+  <link rel="stylesheet" href="../lib/print-report.css">
   <link rel="stylesheet" href="../history/run-save.css" />
 </head>
 <body>
@@ -148,6 +149,7 @@
         No valid samples were processed. No cells exceeded the hit threshold.
       </div>
 
+      <button id="pdf-btn" class="pr-export-btn" type="button">Export PDF</button>
       <div id="history-save"></div>
 
       <div id="download-btns" class="download-buttons" hidden>
@@ -198,6 +200,7 @@
   <script src="../m1-config/tune-source.js"></script>
   <script src="../m1-config/tune-picker.js"></script>
   <script src="m1pkg-ve.js"></script>
+  <script src="../lib/print-report.js"></script>
   <script src="../history/run-store.js"></script>
   <script src="../history/run-builders.js"></script>
   <script src="../log-viewer/log-chart.js"></script>

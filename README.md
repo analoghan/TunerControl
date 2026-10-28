@@ -21,7 +21,7 @@ Duty Cycle), **Ignition, knock & idle** (Knock Analyzer, Ignition Review, Idle),
 
 The MoTeC M1 tools are built around a supercharged GM Gen V LT4 (M142 ECU + E888 expander) but work with any M1 log. Analysis tools that need tune
 values can use a tune stored in the M1 Config Viewer (suggested from the log's ECU serial and time) or a `.m1pkg` file, and most can save their
-results to the Tuning History and open the matching stretch of the log in an embedded Log Viewer (**Show in log**).
+results to the Tuning History, export them as a PDF report and open the matching stretch of the log in an embedded Log Viewer (**Show in log**).
 
 ### Log Health
 Run it first on every new log: looks for readings that can't be right, so sensor faults, wrong sensor setups and substituted values are caught
