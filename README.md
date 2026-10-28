@@ -15,6 +15,10 @@ and the tuning history in one place for every browser; without it everything is 
 The landing page has four sections: **MoTeC M1 Tuning** (everything below up to Backup & Restore), **Haltech Tuning**, **TurboLamik
 Transmission** and **Calculators**.
 
+The MoTeC M1 page groups its tools in the calibration order: **Check the log** (Log Health, Log Viewer, Cross-Tool Diagnostics), **Airflow & fuel
+model** (VE, MAP Rescale, Charge Cooling, Transient Fuel), **Direct injection** (Injector Characterization, DI Fuel Pressure, DI Injection Timing,
+Duty Cycle), **Ignition, knock & idle**, and **Tunes & wiring** (M1 Config Viewer, Tuning History, Harness Builder), with Backup & Restore below.
+
 The MoTeC M1 tools are built around a supercharged GM Gen V LT4 (M142 ECU + E888 expander) but work with any M1 log. Analysis tools that need tune
 values can use a tune stored in the M1 Config Viewer (suggested from the log's ECU serial and time) or a `.m1pkg` file, and most can save their
 results to the Tuning History and open the matching stretch of the log in an embedded Log Viewer (**Show in log**).
