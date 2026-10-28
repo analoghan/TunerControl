@@ -74,6 +74,19 @@ use its Minimum Volume and Linearisation.
 - **Charge Cooling Gain** — finds the aim steps of a closed-loop-off step test, compares the change in lambda with the change in aim, and
   says which way to move the gain (stays lean on a rich step = raise), as in MoTeC's training
 
+### MAP Rescale
+Converts a tune to a new Inlet Manifold Pressure sensor translation so the engine runs the same at the same sensor voltage. A translation
+change is an offset and a slope, so the old ÷ new reading differs at every pressure and a flat VE multiplier is wrong. With a tune (stored or
+`.m1pkg`), the translation its tables were made for and the new one (typed or taken from another tune) it converts:
+- Engine Efficiency Main — re-read at each site's old reading and × old ÷ new reading, so the air mass at every voltage stays the same; sites
+  whose voltage read below the old table are held (copied from the nearest converted row) and marked for re-tuning
+- every table on a MAP axis (mixture aim, fuel timing, film, closed-loop limits…) and, when Engine Load Normalised Mode is Inlet Manifold
+  Pressure, every table on Load Normalised (ignition, alternative fuel ignition, cylinder trims, knock)
+- tables whose values are MAP readings, and settings compared with MAP (thresholds converted, hysteresis scaled by the slope ratio, 0 = off left)
+
+Keep the axis sites (values re-read — paste into the existing tables) or move them (exact; type the new sites). Each table copies as
+tab-separated values; Engine Efficiency Main also downloads as an M1 Tune table CSV.
+
 ### Log Viewer
 Plot any log channels (`.ld` or CSV) with preset channel layouts (e.g. fuelling), and see which stretches the VE filters leave out and where the transient
 events are — check an analysis against the raw data. The same viewer is embedded in the analysis tools.
@@ -280,6 +293,7 @@ node tests/test-fp-analysis.js            # DI Fuel Pressure
 node tests/test-small-tools.js            # Idle, Duty Cycle, Charge Cooling
 node tests/test-diagnostics.js            # Diagnostics knock findings
 node tests/test-transmission.js           # TurboLamik Shift Analyzer
+node tests/test-map-rescale.js            # MAP Rescale
 ```
 
 The other `tests/test-*.js` files run in the browser suite only.

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAP Rescale — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul, .help-content ol { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content code { background: #222; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; color: #ff9800; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .help-content .warning { background: rgba(255,152,0,0.1); border-left: 3px solid #ff9800; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to MAP Rescale</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>MAP Rescale — Help</h1>
+    <p>When the Inlet Manifold Pressure Sensor Translation changes, every reading changes — and with it which cell of every MAP-indexed table
+      the ECU uses, and the air mass the fuel model calculates. This page converts the tune so the engine behaves the same at the same sensor
+      voltage under the new translation. Then you re-tune from logs on a correct pressure scale instead of starting over.</p>
+
+    <h2>Why not a flat VE multiplier</h2>
+    <p>A translation is a line: kPa = offset + slope × volts. Changing it changes both, so the ratio between the old and the new reading is
+      different at every pressure (e.g. −32.5/425 → −17/353 kPa: ×1.13 at 100 kPa but ×1.36 at 20 kPa). A single multiplier is right at one
+      pressure only.</p>
+
+    <h2>What it converts</h2>
+    <ul>
+      <li><b>Engine Efficiency</b> on a MAP axis: re-read at the old reading of each site's voltage, then × old ÷ new reading. Air mass is
+        proportional to VE × MAP, so the air mass at every voltage stays the same.</li>
+      <li><b>Tables on a MAP axis</b> (mixture aim, fuel timing, film, closed-loop limits…): re-read along the axis; values unchanged in meaning.</li>
+      <li><b>Tables on Engine Load Normalised</b> (ignition, alternative fuel ignition, cylinder trims, knock…) when Engine Load Normalised Mode is
+        Inlet Manifold Pressure — then Load Normalised % equals the MAP reading in kPa (MoTeC M1 training 49).</li>
+      <li><b>Tables whose values are MAP readings</b> (Inlet Manifold Pressure Estimate, MAP windows) — converted value by value; 0 means off and stays.</li>
+      <li><b>Settings compared with MAP</b> (e.g. Fuel Closed Loop Activate Inlet Manifold Pressure): thresholds converted like a reading,
+        hysteresis and rates scaled by the slope ratio, 0 left alone.</li>
+    </ul>
+    <p>Tables whose MAP axis has a single site don't depend on MAP and are left alone. Ambient Pressure has its own sensor translation and is not changed.</p>
+
+    <h2>Keep or move the sites</h2>
+    <ul>
+      <li><b>Keep the axis sites</b> (default): the tables keep their round-number sites and each value is read from the old table, interpolated
+        between its sites and clamped at its ends as M1 does. Paste the values straight into the existing tables. Between sites the result is
+        an interpolation of the old table, so it is very close to exact but not perfectly so.</li>
+      <li><b>Move the axis sites</b>: every value stays (Engine Efficiency still × old ÷ new) and each pressure site moves to the new reading of
+        its voltage. This is exact, but you type the new sites into M1 Tune, and they are no longer round numbers.</li>
+    </ul>
+    <div class="warning"><b>Held cells (orange).</b> With the sites kept, an Engine Efficiency site whose voltage read below the old table's lowest site
+      has no old value to convert — and readings far below the old table are exactly what a bad translation produces on decel. These cells get the
+      value of the nearest converted row so the table stays continuous; re-tune them from logs.</div>
+
+    <h2>Typical use</h2>
+    <ol>
+      <li>Establish the new translation (sensor data sheet, or two points: key-on engine-off against real barometric pressure, and a vacuum pump or boost gauge).</li>
+      <li>Choose the tune. The old translation is filled in from it — if some of its tables were already converted (e.g. VE rescaled but the other
+        axes not), enter the translation those tables were made for and paste only the tables that still need it.</li>
+      <li>Enter the new translation, or take it from a tune that already has it.</li>
+      <li>Convert, type the new translation into Inlet Manifold Pressure Sensor Translation, paste each table (Engine Efficiency Main can also be
+        downloaded as an M1 Tune table CSV), and change the listed settings.</li>
+      <li>Log a drive and run VE Table Tuning — the converted VE is the starting point, not the answer.</li>
+    </ol>
+    <div class="tip">Paste order: the grids show pressure rows highest first, like an M1 Tune table CSV. Check one row in M1 Tune after pasting.</div>
+  </div>
+</body>
+</html>

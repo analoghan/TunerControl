@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAP Rescale — MoTeC M1</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .tr-inputs input[type="number"] { width: 90px; }
+    .tr-inputs span { color: #888; font-size: 0.85rem; }
+    .mode-row label { min-width: 0; font-weight: 400; color: #ccc; }
+    .mr-grid-wrap { overflow-x: auto; margin-top: 8px; }
+    .mr-grid { border-collapse: collapse; font-size: 0.75rem; }
+    .mr-grid th, .mr-grid td { padding: 3px 6px; border: 1px solid #333; text-align: right; white-space: nowrap; }
+    .mr-grid th { background: #222; color: #b0b0b0; font-weight: 500; }
+    .mr-grid th.moved { color: #ff9800; }
+    .mr-grid td { color: #888; }
+    .mr-grid td.changed { color: #fff; }
+    .mr-grid td.held { color: #ff9800; background: rgba(255,152,0,0.08); }
+    .mr-table { border-top: 1px solid #333; padding-top: 12px; margin-top: 16px; }
+    .mr-table h3 { margin: 0 0 4px; font-size: 1rem; }
+    .mr-table .mr-note { color: #888; font-size: 0.8rem; margin: 0 0 6px; }
+    .mr-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+    .mr-buttons button { padding: 5px 12px; font-size: 0.8rem; color: #fff; background: #222; border: 1px solid #E31837; border-radius: 4px; cursor: pointer; }
+    .mr-buttons button:hover { background: #333; }
+    .event-table td.left, .event-table th.left { text-align: left; }
+    .event-table a { color: #ccc; }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>MAP Rescale</h1>
+    <p class="subtitle">Converts a tune to a new Inlet Manifold Pressure sensor translation so the engine runs the same at the same sensor voltage:
+      every table on a manifold pressure axis (and on Engine Load Normalised when its mode is Inlet Manifold Pressure — ignition, knock), the
+      settings compared with MAP, and Engine Efficiency scaled by old ÷ new reading. A translation change is an offset and a slope, so a flat VE
+      multiplier can't do this.</p>
+
+    <div class="form-section">
+      <div class="file-row">
+        <label for="pkg-input">Tune to convert (.m1pkg):</label>
+        <input type="file" id="pkg-input" accept=".m1pkg">
+      </div>
+      <div class="file-row" id="tune-row" hidden>
+        <label for="tune-select">Or a stored tune:</label>
+        <select id="tune-select" class="tune-select"><option value="">— choose a tune from the M1 Config Viewer —</option></select>
+        <span id="tune-hint" class="tune-hint"></span>
+      </div>
+      <p id="tune-status" class="tune-status">No tune chosen.</p>
+
+      <div class="file-row tr-inputs">
+        <label>Translation its tables were made for:</label>
+        <input type="number" id="old-0" step="0.1"> <span>kPa at 0 V</span>
+        <input type="number" id="old-5" step="0.1"> <span>kPa at 5 V</span>
+        <span id="old-note"></span>
+      </div>
+      <div class="file-row tr-inputs">
+        <label>New translation:</label>
+        <input type="number" id="new-0" step="0.1"> <span>kPa at 0 V</span>
+        <input type="number" id="new-5" step="0.1"> <span>kPa at 5 V</span>
+      </div>
+      <div class="file-row">
+        <label for="new-pkg-input">Or take the new one from a tune:</label>
+        <input type="file" id="new-pkg-input" accept=".m1pkg">
+      </div>
+      <div class="file-row" id="new-tune-row" hidden>
+        <label for="new-tune-select">Or a stored tune:</label>
+        <select id="new-tune-select" class="tune-select"><option value="">— choose a tune from the M1 Config Viewer —</option></select>
+        <span id="new-tune-hint" class="tune-hint"></span>
+      </div>
+      <p id="new-tune-status" class="tune-status" hidden></p>
+
+      <div class="file-row mode-row">
+        <label><input type="radio" name="mode" value="keep" checked> Keep the axis sites — values re-read at each site (paste into the existing tables)</label>
+      </div>
+      <div class="file-row mode-row">
+        <label><input type="radio" name="mode" value="move"> Move the axis sites — values unchanged except Engine Efficiency (exact; type the new sites in)</label>
+      </div>
+
+      <div class="button-row">
+        <button id="analyze-btn" disabled>Convert</button>
+        <a href="help.html" class="help-link-btn">Help</a>
+      </div>
+    </div>
+
+    <div id="error-container" class="error-banner" hidden></div>
+
+    <section id="results-section" class="results-section" hidden>
+      <div class="report-block">
+        <h2>Translation</h2>
+        <div id="translation-content"></div>
+      </div>
+      <div class="report-block">
+        <h2>What changes</h2>
+        <div id="summary-content"></div>
+      </div>
+      <div class="report-block">
+        <h2>Tables</h2>
+        <p class="section-desc">Pressure rows highest first, as in an M1 Tune table CSV. White = changed, orange = held (its voltage read below the
+          old table: copied from the nearest converted row — re-tune these from logs). Copy pastes the shown grid as tab-separated values.</p>
+        <div id="tables-content"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="../lib/xz-decoder.js"></script>
+  <script src="../lib/m1pkg-parser.js"></script>
+  <script src="../m1-config/format.js"></script>
+  <script src="../m1-config/tune-db.js"></script>
+  <script src="../m1-config/tune-api.js"></script>
+  <script src="../m1-config/tune-source.js"></script>
+  <script src="../m1-config/tune-picker.js"></script>
+  <script src="map-rescale.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
