@@ -86,9 +86,14 @@
       </div>
 
       <div class="file-row">
-        <label for="lambda-delay">Lambda Delay (ms):</label>
-        <input type="number" id="lambda-delay" min="0" max="1000" value="0" step="10" style="width: 80px;" />
-        <span class="filename-display">Pair each sample with the lambda reading this much later (sensor/exhaust transport delay)</span>
+        <label for="lambda-delay-mode">Lambda Delay:</label>
+        <select id="lambda-delay-mode">
+          <option value="tune">From the tune (Closed Loop Period)</option>
+          <option value="fixed">Fixed</option>
+        </select>
+        <input type="number" id="lambda-delay" min="0" max="3000" value="300" step="10" style="width: 80px;" /> <span class="filename-display">ms</span>
+        <span class="filename-display">Pair each sample with the lambda reading this much later. From the tune: its Fuel Closed Loop Period at the sample's
+          exhaust mass flow (Engine Load × rpm), ~0.8–1 s at cruise here; the fixed value is used where that can't be worked out.</span>
       </div>
 
       <div class="file-row">

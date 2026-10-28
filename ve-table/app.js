@@ -166,7 +166,10 @@ const tunePicker = tsPicker({
     pkgInput: document.getElementById('pkg-input'), select: document.getElementById('tune-select'), row: document.getElementById('tune-row'),
     hint: document.getElementById('tune-hint'), status: document.getElementById('tune-status'), extract: m1pkgVeTableCsv,
     none: `Choose a tune: the VE table is its ${M1VE_TABLE_NAME}.`, what: 'the VE table',
-    describe: (t) => `${M1VE_TABLE_NAME} (${t.rpmSites} × ${t.mapSites}).`,
+    describe: (t) => `${M1VE_TABLE_NAME} (${t.rpmSites} × ${t.mapSites}).` + (t.clPeriod ? ` Closed Loop Period ` +
+        `${Math.round(t.clPeriod.ms[0])}–${Math.round(t.clPeriod.ms[t.clPeriod.ms.length - 1])} ms over ` +
+        `${Math.round(t.clPeriod.flow[0])}–${Math.round(t.clPeriod.flow[t.clPeriod.flow.length - 1])} g/s exhaust flow (lambda delay).` :
+        ' No Closed Loop Period against exhaust mass flow in this tune: the fixed lambda delay is used.'),
     onError: showError,
     onChange: (t, id) => {
         veTable = t;
@@ -175,6 +178,8 @@ const tunePicker = tsPicker({
         updateProcessButtonState();
     }
 });
+
+function lambdaDelayFixedMs() { return parseFloat(document.getElementById('lambda-delay').value) || 0; }
 
 // ---------------------------------------------------------------------------
 // Worker lifecycle and message dispatch (Task 9.2)
@@ -318,7 +323,8 @@ processBtn.addEventListener('click', async () => {
     const steadyWindowRaw = parseFloat(document.getElementById('steady-window').value);
     const steadyWindowMs = Number.isNaN(steadyWindowRaw) ? 300 : steadyWindowRaw;
     const lambdaDelayMs = parseFloat(document.getElementById('lambda-delay').value) || 0;
-    const payload = { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing, minMapForCorrection, decelFilterEnabled, steadyWindowMs, lambdaDelayMs };
+    const lambdaDelayTable = document.getElementById('lambda-delay-mode').value === 'tune' && veTable && veTable.clPeriod || null;
+    const payload = { veText, hitThreshold, minCoolantTemp, minRunTime, minChangeAmount, scalingFactor, outlierStddev, maxTpsRate, smoothing, minMapForCorrection, decelFilterEnabled, steadyWindowMs, lambdaDelayMs, lambdaDelayTable };
     lastRun = { file: logFile, settings: Object.assign({}, payload, { veText: undefined }), tune: veTuneInfo };
     logPanelReady = null;
     if (isLd) {
@@ -413,6 +419,13 @@ function renderResults(msg) {
         if (filteredByMinMap > 0) parts.push(`${filteredByMinMap.toLocaleString()} by min MAP`);
         if (filteredByOutlier > 0) parts.push(`${filteredByOutlier.toLocaleString()} as outliers`);
         statsText += ` \u00B7 Filtered: ${parts.join(', ')}`;
+    }
+    const d = msg.lambdaDelay;
+    if (d && d.medianMs !== null) {
+        statsText += d.source === 'tune'
+            ? ` \u00B7 Lambda delay from the tune: median ${d.medianMs} ms (10–90 %: ${d.p10Ms}–${d.p90Ms} ms)` +
+              (d.fromTablePct < 100 ? `, fixed ${lambdaDelayFixedMs()} ms for the ${100 - d.fromTablePct} % without Engine Load` : '')
+            : ` \u00B7 Lambda delay ${d.medianMs} ms (fixed)`;
     }
     statsLine.textContent = statsText;
 

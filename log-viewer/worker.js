@@ -37,7 +37,7 @@ function lvAnalyzeVe(settings, veTable) {
     resolveChannels(lvLog.channels.map(function (c) { return c.name; }));   // throws when a required channel is missing
     var hasBank = lvFind(lvLog, CHANNEL_NAMES.LAMBDA_B1) >= 0 || lvFind(lvLog, CHANNEL_NAMES.LAMBDA_B2) >= 0;
     var a = lvBaseArrays(['RPM', 'MAP', 'LAMBDA_B1', 'LAMBDA_B2', 'LAMBDA_AVG', 'LAMBDA_TARGET', 'CL_TRIM_B1', 'CL_TRIM_B2',
-        'COOLANT_TEMP', 'THROTTLE_POS', 'OVERRUN_STATE', 'FUEL_CUT_COUNT']);
+        'COOLANT_TEMP', 'THROTTLE_POS', 'OVERRUN_STATE', 'FUEL_CUT_COUNT', 'ENGINE_LOAD', 'STOICH', 'EXHAUST_FLOW']);
     if (hasBank) a.LAMBDA_AVG = null;   // as resolveChannels: overall lambda only without bank channels
     var time = lvBaseTime(lvLog), n = time.length, samples = new Array(n);
     function v(key, i) { return a[key] ? a[key][i] : NaN; }
@@ -45,7 +45,7 @@ function lvAnalyzeVe(settings, veTable) {
         samples[i] = { time: time[i], rpm: v('RPM', i), map: v('MAP', i), lambdaB1: v('LAMBDA_B1', i), lambdaB2: v('LAMBDA_B2', i),
             lambdaAvg: v('LAMBDA_AVG', i), lambdaTarget: v('LAMBDA_TARGET', i), clTrimB1: v('CL_TRIM_B1', i), clTrimB2: v('CL_TRIM_B2', i),
             coolantTemp: v('COOLANT_TEMP', i), throttlePos: v('THROTTLE_POS', i), overrunState: v('OVERRUN_STATE', i),
-            fuelCutCount: v('FUEL_CUT_COUNT', i) };
+            fuelCutCount: v('FUEL_CUT_COUNT', i), engineLoad: v('ENGINE_LOAD', i), stoich: v('STOICH', i), exhaustFlow: v('EXHAUST_FLOW', i) };
     }
     var reasons = new Uint8Array(n), corrections = new Float32Array(n);
     var table = veTable || { mapBreakpoints: [1000, 0], rpmBreakpoints: [0, 30000], values: [[0, 0], [0, 0]] };

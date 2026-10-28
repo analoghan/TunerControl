@@ -284,10 +284,17 @@
       full-throttle pull sweeps RPM quickly but fuels steadily.</p>
 
     <h2 id="lambda-delay">Lambda Delay</h2>
-    <p>Default: <code>0 ms</code>.</p>
-    <p>Exhaust takes time to reach the sensor, so the lambda logged at a moment reflects fuelling slightly earlier. With a delay
-      set, each sample is paired with the lambda reading that many milliseconds later. Typical values are 50–200 ms (longer at
-      low RPM and with sensors far down the exhaust); the steady-state filter already removes most of the error this causes.</p>
+    <p>Default: <code>From the tune</code> (fixed: <code>300 ms</code>).</p>
+    <p>Exhaust takes time to reach the sensor and the sensor takes time to respond, so the lambda logged at a moment reflects
+      fuelling earlier. Each sample is paired with the lambda reading its delay later, and is used only if MAP and throttle stay
+      steady from the steady-state window before it until that reading, with no fuel cut in between.</p>
+    <p><b>From the tune</b> uses the tune's <code>Fuel Closed Loop Period</code> — the time from a fuel change to the lambda
+      reading it, by exhaust mass flow (MoTeC sets it from aim step tests; ~2 s at low flow to ~0.5 s at high flow as a start) —
+      at each sample's exhaust mass flow: the logged Exhaust Mass Flow, else Engine Load × cylinders × rpm ÷ 120 plus the fuel.
+      The delay is longest at idle and light cruise (about 0.8–1 s on the LT4 tune) and short under load. The result line shows
+      the delays used. Samples without Engine Load in the log fall back to the fixed value.</p>
+    <p>If the tune's Period is a guess rather than measured, the delay is only as good as that guess — a closed-loop step test
+      settles it.</p>
 
     <h2 id="decel">Decel/Overrun Filter</h2>
     <p>Default: <code>Enabled</code>.</p>

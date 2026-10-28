@@ -25,6 +25,8 @@ Analyze MoTeC log data against your current VE table to compute per-cell correct
 **Features:**
 - Accepts CSV log exports or raw `.ld` binary log files
 - Configurable filters: min hit count, coolant temperature, run time, TPS rate of change — with the reason each sample was left out
+- Lambda delay from the tune's Fuel Closed Loop Period at each sample's exhaust mass flow (Engine Load × rpm), or fixed; a sample counts
+  only if MAP and throttle stay steady until its lambda reading, with no fuel cut in between
 - Outlier filtering (configurable σ threshold) with two-pass statistical analysis
 - Partial apply scaling factor for conservative iterative tuning
 - Minimum change amount to ignore noise
@@ -294,6 +296,7 @@ node tests/test-small-tools.js            # Idle, Duty Cycle, Charge Cooling
 node tests/test-diagnostics.js            # Diagnostics knock findings
 node tests/test-transmission.js           # TurboLamik Shift Analyzer
 node tests/test-map-rescale.js            # MAP Rescale
+node tests/test-ve-lambda-delay.js        # VE lambda delay from the tune
 ```
 
 The other `tests/test-*.js` files run in the browser suite only.
