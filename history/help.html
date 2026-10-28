@@ -30,7 +30,9 @@
 
     <h2>Saving a run</h2>
     <p>After an analysis on <a href="../ve-table/index.html">VE Table Tuning</a>, the <a href="../transient-fuel/index.html">Transient Fuel
-      Analyzer</a>, the <a href="../knock/index.html">Knock Analyzer</a> or the <a href="../fuel-pressure/index.html">DI Fuel Pressure</a> tool,
+      Analyzer</a>, the <a href="../knock/index.html">Knock Analyzer</a>, <a href="../fuel-pressure/index.html">DI Fuel Pressure</a>,
+      <a href="../log-health/index.html">Log Health</a>, <a href="../ignition/index.html">Ignition Review</a>,
+      <a href="../cl-period/index.html">Closed-Loop Period</a> or the <a href="../pulls/index.html">Pull Report</a>,
       add an optional note (for example "after VE V56") and click <strong>Save to tuning history</strong>. Runs are only saved when you ask,
       so experiments with different settings don't clutter the history; saving again adds another run.</p>
     <p>Each run keeps the log's name, start time and ECU serial (from the log), the tune the tool used, the settings, and the key results.
@@ -50,7 +52,14 @@
         sensor, its cylinders should rise to the level of the others.</td></tr>
       <tr><td>DI Fuel Pressure</td><td>Share of time within ±2 bar of aim, and — for runs analyzed with a tune — how often pressure overshoots or
         lags a rising aim.</td></tr>
+      <tr><td>Log Health</td><td>The number of failed and "check" findings. A fixed sensor or setting drops out of the list.</td></tr>
+      <tr><td>Ignition</td><td>Knock margin (the loudest cylinder's 99th percentile against Knock Threshold), seconds of steady-load timing
+        ≥ 1° off the tune, and each cylinder's typical knock level — the even cylinders on Knock Input 2 should rise once that input is fixed.</td></tr>
+      <tr><td>Closed-Loop Period</td><td>The measured lambda delay and Fuel Closed Loop Period at each exhaust flow site: after a Period change
+        the two should meet.</td></tr>
+      <tr><td>Pulls</td><td>The leanest lambda against aim, the loudest knock and the largest rail-pressure shortfall in any pull of the run.</td></tr>
     </table>
+    <p>Closed-Loop Period and Pull Report runs can cover several logs: the run lists all their names and sorts by the earliest.</p>
     <div class="tip"><strong>Tip:</strong> Compare like with like. A run from a drive with several boost pulls and one from a cruise will differ
       even with the same tune; the note is a good place to say what the drive was.</div>
   </div>

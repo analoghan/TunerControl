@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="../transient-fuel/styles.css" />
   <link rel="stylesheet" href="../log-viewer/log-panel.css">
   <link rel="stylesheet" href="../lib/print-report.css">
+  <link rel="stylesheet" href="../history/run-save.css">
   <style>
     .lh-counts { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
     .lh-count { padding: 6px 12px; border-radius: 4px; font-weight: 600; font-size: 0.9rem; border: 1px solid #333; }
@@ -78,6 +79,7 @@
           <label><input type="checkbox" id="show-ok" checked> Show passed checks</label>
           <button id="pdf-btn">Export PDF</button>
         </div>
+        <div id="history-save"></div>
         <div id="findings"></div>
       </div>
       <div class="report-block">
@@ -97,6 +99,8 @@
   <script src="../log-viewer/log-chart.js"></script>
   <script src="../log-viewer/log-panel.js"></script>
   <script src="m1pkg-health.js"></script>
+  <script src="../history/run-store.js"></script>
+  <script src="../history/run-builders.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

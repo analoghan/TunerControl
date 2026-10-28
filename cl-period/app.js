@@ -151,6 +151,12 @@ function render() {
         document.body.removeChild(ta);
         setTimeout(function () { btn.textContent = 'Copy Period row (suggested, else current)'; }, 1200);
     };
+    var files = lastFiles, tuneName = lastTuneName, tuneId = tuneName ? tunePicker.currentId() : null;
+    rsSaveControl(document.getElementById('history-save'), function () {
+        return rsLogFactsMany(files).then(function (facts) {
+            return Object.assign({ tool: 'cl-period', tuneId: tuneId, tuneName: tuneName, settings: { logs: files.length } }, facts, rbClPeriod(r));
+        });
+    });
 }
 
 document.getElementById('events').addEventListener('click', function (e) {

@@ -6,6 +6,10 @@
  *   rbTransient(result) Transient Fuel Analyzer result
  *   rbKnock(analysis)   Knock Analyzer worker analysis
  *   rbFuelPressure(analysis)  DI Fuel Pressure worker analysis
+ *   rbLogHealth(result) Log Health lhAnalyze result
+ *   rbIgnition(result)  Ignition Review igAnalyze result
+ *   rbClPeriod(result)  Closed-Loop Period clAnalyze result
+ *   rbPulls(result)     Pull Report puAnalyze result
  * Each returns { summary, data }. Values are rounded so a run stays small.
  */
 
@@ -87,6 +91,84 @@ function rbFuelPressure(a, rail) {
     };
 }
 
+/** Findings that need a look (not ok), compact. */
+function rbFindings(findings) {
+    return (findings || []).filter(function (f) { return f.severity !== 'ok'; }).map(function (f) {
+        return { severity: f.severity, group: f.group, text: f.title };
+    });
+}
+
+function rbLogHealth(r) {
+    var c = r.counts || {};
+    var top = (r.findings || []).filter(function (f) { return f.severity === 'fail' || f.severity === 'warn'; })[0];
+    return {
+        summary: { fail: c.fail || 0, warn: c.warn || 0, info: c.info || 0, runningS: Math.round(r.runningS || 0), top: top ? top.title : null },
+        data: { findings: rbFindings(r.findings) }
+    };
+}
+
+function rbIgnition(r) {
+    var knock = (r.cells || []).filter(function (x) { return x.knockPct !== null && x.knockPct !== undefined; });
+    var dep = r.departures || {}, cyl = r.cylinders || [];
+    return {
+        summary: { fitMedian: r.fit ? rbRound(r.fit.median, 2) : null, fitP90: r.fit ? rbRound(r.fit.p90, 2) : null, normalS: Math.round(r.normalS || 0),
+                   belowS: dep.below ? rbRound(dep.below.seconds, 1) : 0, aboveS: dep.above ? rbRound(dep.above.seconds, 1) : 0,
+                   maxKnockPct: knock.length ? Math.round(Math.max.apply(null, knock.map(function (x) { return x.knockPct; }))) : null,
+                   composition: rbRound(r.composition, 1), trimmedCyls: cyl.filter(function (x) { return x.retard < 0; }).map(function (x) { return x.cylinder; }) },
+        data: {
+            findings: rbFindings(r.findings),
+            cylinders: cyl.map(function (x) { return { cyl: x.cylinder, input: x.input, retard: rbRound(x.retard, 1), knockMedian: rbRound(x.knockMedian, 2) }; }),
+            cells: (r.cells || []).map(function (x) {
+                return { rpm: x.rpm, kpa: x.kpa, s: rbRound(x.seconds, 1), timing: rbRound(x.timing, 1), knockPct: rbRound(x.knockPct, 0) };
+            })
+        }
+    };
+}
+
+function rbClPeriod(r) {
+    var sites = r.sites || [], ev = r.events || [];
+    return {
+        summary: { steps: ev.filter(function (e) { return e.source === 'aim'; }).length, cuts: ev.filter(function (e) { return e.source !== 'aim'; }).length,
+                   changes: sites.filter(function (s) { return s.suggested !== null; }).length,
+                   sites: sites.filter(function (s) { return s.medianMs !== null; }).map(function (s) {
+                       return { flow: s.flow, table: Math.round(s.tableMs), measured: Math.round(s.medianMs), suggested: s.suggested };
+                   }) },
+        data: {
+            findings: rbFindings(r.findings),
+            sites: sites.map(function (s) {
+                return { flow: s.flow, table: Math.round(s.tableMs), n: s.n, measured: s.medianMs !== null ? Math.round(s.medianMs) : null,
+                         suggested: s.suggested, action: s.action };
+            })
+        }
+    };
+}
+
+function rbPulls(r) {
+    var pulls = r.pulls || [], worst = { lean: null, knockPct: null, railUnder: null, lowMin: null };
+    function hi(k, v) { if (v !== null && v !== undefined && isFinite(v) && (worst[k] === null || v > worst[k])) worst[k] = v; }
+    var rows = pulls.map(function (p) {
+        var m = p.metrics || {}, lean = null, kn = null;
+        (m.lambda || []).forEach(function (b) { if (b && b.lean !== null && (lean === null || b.lean > lean)) lean = b.lean; });
+        (m.knock || []).forEach(function (x) { if (x.pctOfThreshold !== null && (kn === null || x.pctOfThreshold > kn)) kn = x.pctOfThreshold; });
+        var under = m.rail && m.rail.worstUnder !== null ? -m.rail.worstUnder : null, low = m.low ? m.low.min : null;
+        hi('lean', lean); hi('knockPct', kn); hi('railUnder', under);
+        if (low !== null && low !== undefined && (worst.lowMin === null || low < worst.lowMin)) worst.lowMin = low;
+        return { rpm: p.rpm, rpmMax: p.rpmMax, mapMax: rbRound(p.mapMax, 0), seconds: rbRound(p.seconds, 1), full: !!p.full, lean: rbRound(lean, 3),
+                 knockPct: rbRound(kn, 0), railUnder: rbRound(under, 0), lowMin: rbRound(low, 0),
+                 flags: (p.flags || []).filter(function (f) { return f.severity !== 'info'; }).map(function (f) { return { severity: f.severity, text: f.text }; }) };
+    });
+    return {
+        summary: { pulls: pulls.length, full: pulls.filter(function (p) { return p.full; }).length,
+                   flagged: rows.filter(function (x) { return x.flags.length; }).length,
+                   rpmMax: pulls.length ? Math.max.apply(null, pulls.map(function (p) { return p.rpmMax; })) : null,
+                   mapMax: pulls.length ? rbRound(Math.max.apply(null, pulls.map(function (p) { return p.mapMax || 0; })), 0) : null,
+                   worstLean: rbRound(worst.lean, 3), worstKnockPct: rbRound(worst.knockPct, 0), worstRailUnder: rbRound(worst.railUnder, 0),
+                   lowMin: rbRound(worst.lowMin, 0) },
+        data: { findings: rbFindings(r.findings), pulls: rows }
+    };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { rbVe: rbVe, rbTransient: rbTransient, rbKnock: rbKnock, rbFuelPressure: rbFuelPressure, rbRound: rbRound };
+    module.exports = { rbVe: rbVe, rbTransient: rbTransient, rbKnock: rbKnock, rbFuelPressure: rbFuelPressure, rbLogHealth: rbLogHealth,
+        rbIgnition: rbIgnition, rbClPeriod: rbClPeriod, rbPulls: rbPulls, rbRound: rbRound };
 }

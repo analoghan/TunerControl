@@ -7,7 +7,11 @@ var HI_TOOLS = {
     've': { label: 'VE Table Tuning', page: '../ve-table/index.html' },
     'transient': { label: 'Transient Fuel', page: '../transient-fuel/index.html' },
     'knock': { label: 'Knock', page: '../knock/index.html' },
-    'fuel-pressure': { label: 'DI Fuel Pressure', page: '../fuel-pressure/index.html' }
+    'fuel-pressure': { label: 'DI Fuel Pressure', page: '../fuel-pressure/index.html' },
+    'log-health': { label: 'Log Health', page: '../log-health/index.html' },
+    'ignition': { label: 'Ignition', page: '../ignition/index.html' },
+    'cl-period': { label: 'Closed-Loop Period', page: '../cl-period/index.html' },
+    'pulls': { label: 'Pulls', page: '../pulls/index.html' }
 };
 var HI_COLORS = ['#ff5a6e', '#4fc3f7', '#ffd54f', '#81c784', '#ce93d8', '#ffb74d', '#90a4ae', '#f48fb1'];
 
@@ -26,6 +30,12 @@ function hiDate(r) {
     var d = new Date(r.logTime || r.created);
     return isNaN(d.getTime()) ? '—' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) + ' ' +
         d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+/** The run's log name for the list; a run over several logs shows the first, the last and the count (all names in Details). */
+function hiLogName(r) {
+    var names = String(r.logName || '').split(', ').filter(Boolean);
+    return names.length > 2 ? names[0] + ' … ' + names[names.length - 1] + ' (' + names.length + ' logs)' : names.join(', ');
 }
 
 /** Short label for a run on a chart axis: the tune's last " - " part (e.g. V55), else the log date. */
@@ -93,7 +103,19 @@ var HI_COLUMNS = {
     'fuel-pressure': [['Within ±2 bar', function (s) { return hiFmt(s.pctWithin, 1, '%'); }],
                       ['Overshoot on rise', function (s) { return hiFmt(s.riseOverShare, 0, '%'); }],
                       ['Max over / under', function (s) { return hiFmt(s.maxOver, 0) + ' / ' + hiFmt(s.maxUnder, 0) + ' bar'; }],
-                      ['P / I gain', function (s) { return s.pGain === null ? '—' : s.pGain + ' / ' + s.iGain; }]]
+                      ['P / I gain', function (s) { return s.pGain === null ? '—' : s.pGain + ' / ' + s.iGain; }]],
+    'log-health': [['Fail / check', function (s) { return s.fail + ' / ' + s.warn; }], ['Running', function (s) { return hiFmt(s.runningS, 0, ' s'); }],
+                   ['First problem', function (s) { return s.top || 'none'; }]],
+    'ignition': [['Fit (median / 90 %)', function (s) { return s.fitMedian === null ? '—' : hiFmt(s.fitMedian, 2, '°') + ' / ' + hiFmt(s.fitP90, 2, '°'); }],
+                 ['Below / above table', function (s) { return hiFmt(s.belowS, 1) + ' / ' + hiFmt(s.aboveS, 1, ' s'); }],
+                 ['Knock margin', function (s) { return s.maxKnockPct === null ? '—' : s.maxKnockPct + '% of threshold'; }],
+                 ['Ethanol', function (s) { return hiFmt(s.composition, 0, '%'); }]],
+    'cl-period': [['Steps / cuts', function (s) { return s.steps + ' / ' + s.cuts; }],
+                  ['Measured vs table', function (s) { return (s.sites || []).map(function (x) { return x.flow + ' g/s ' + x.measured + ' vs ' + x.table + ' ms'; }).join('; ') || '—'; }],
+                  ['Changes suggested', function (s) { return s.changes; }]],
+    'pulls': [['Pulls (full)', function (s) { return s.pulls + ' (' + s.full + ')'; }], ['Up to', function (s) { return s.rpmMax === null ? '—' : s.rpmMax + ' rpm, ' + s.mapMax + ' kPa'; }],
+              ['Worst lean', function (s) { return hiFmt(s.worstLean, 3, ' λ'); }], ['Knock', function (s) { return s.worstKnockPct === null ? '—' : s.worstKnockPct + '% of threshold'; }],
+              ['Rail under aim', function (s) { return hiFmt(s.worstRailUnder, 0, ' bar'); }]]
 };
 
 function hiTrends(runs) {
@@ -120,6 +142,39 @@ function hiTrends(runs) {
             '<p class="hi-note">A healthy sensor always hears some engine noise. Cylinders reading far below the others (for example all of one knock ' +
             'input) point at that sensor or its wiring; after a fix their line should rise to the others.</p>' +
             hiChart([{ label: 'Knock events', values: S(function (s) { return s.events; }) }], labels, 'events', 'Knock events above the threshold');
+    }
+    if (hiTool === 'log-health') {
+        return hiChart([{ label: 'Fail', values: S(function (s) { return s.fail; }), color: '#f44336' },
+                        { label: 'Check', values: S(function (s) { return s.warn; }), color: '#ff9800' }], labels, 'findings', 'Findings that need a look');
+    }
+    if (hiTool === 'ignition') {
+        var icyl = [];
+        for (var ic = 1; ic <= 8; ic++) {
+            icyl.push({ label: 'Cyl ' + ic, values: runs.map(function (r) {
+                var h = r.data && r.data.cylinders ? r.data.cylinders.filter(function (p) { return p.cyl === ic; })[0] : null;
+                return h ? h.knockMedian : null;
+            }) });
+        }
+        return hiChart([{ label: 'Loudest cell', values: S(function (s) { return s.maxKnockPct; }) }], labels, '% of threshold', 'Knock margin (99th percentile, loudest cylinder)') +
+            hiChart([{ label: 'Below the table', values: S(function (s) { return s.belowS; }) },
+                     { label: 'Above the table', values: S(function (s) { return s.aboveS; }) }], labels, 's', 'Steady-load timing ≥ 1° off the tune') +
+            hiChart(icyl, labels, '%', 'Typical knock level per cylinder above 1500 rpm');
+    }
+    if (hiTool === 'cl-period') {
+        var flows = [];
+        runs.forEach(function (r) { ((r.summary || {}).sites || []).forEach(function (x) { if (flows.indexOf(x.flow) < 0) flows.push(x.flow); }); });
+        flows.sort(function (a, b) { return a - b; });
+        var at = function (r, f, k) { var x = ((r.summary || {}).sites || []).filter(function (y) { return y.flow === f; })[0]; return x ? x[k] : null; };
+        return hiChart([].concat.apply([], flows.map(function (f, i) {
+            return [{ label: f + ' g/s measured', values: runs.map(function (r) { return at(r, f, 'measured'); }), color: HI_COLORS[i % HI_COLORS.length] },
+                    { label: f + ' g/s table', values: runs.map(function (r) { return at(r, f, 'table'); }), color: HI_COLORS[(i + 4) % HI_COLORS.length] }];
+        })), labels, 'ms', 'Lambda delay measured vs Fuel Closed Loop Period') +
+            '<p class="hi-note">After a Period change the table line should land on the measured one.</p>';
+    }
+    if (hiTool === 'pulls') {
+        return hiChart([{ label: 'Worst lean vs aim', values: S(function (s) { return s.worstLean; }) }], labels, 'λ', 'Leanest against aim in any pull') +
+            hiChart([{ label: 'Knock', values: S(function (s) { return s.worstKnockPct; }) }], labels, '% of threshold', 'Loudest knock in any pull') +
+            hiChart([{ label: 'Rail under aim', values: S(function (s) { return s.worstRailUnder; }) }], labels, 'bar', 'Rail pressure under aim in any pull');
     }
     return hiChart([{ label: 'Within ±2 bar', values: S(function (s) { return s.pctWithin; }) }], labels, '%', 'Rail pressure on aim') +
         hiChart([{ label: 'Overshoot while the aim rises', values: S(function (s) { return s.riseOverShare; }) },
@@ -180,7 +235,7 @@ function hiRender() {
         '<th>Note</th><th></th></tr></thead><tbody>';
     runs.slice().reverse().forEach(function (r) {
         var s = r.summary || {};
-        html += '<tr data-id="' + hiEsc(r.id) + '"><td><div>' + hiEsc(hiDate(r)) + '</div><small>' + hiEsc(r.logName || '') + '</small></td><td>' +
+        html += '<tr data-id="' + hiEsc(r.id) + '"><td><div>' + hiEsc(hiDate(r)) + '</div><small>' + hiEsc(hiLogName(r)) + '</small></td><td>' +
             hiEsc(r.tuneName || '—') + '</td>' + cols.map(function (c) { return '<td>' + hiEsc(c[1](s)) + '</td>'; }).join('') +
             '<td class="hi-note-cell">' + hiEsc(r.note || '') + '</td><td class="hi-actions"><button type="button" data-act="view">Details</button> ' +
             '<button type="button" data-act="note">Note</button> <button type="button" data-act="delete">Delete</button></td></tr>' +
@@ -193,9 +248,11 @@ function hiRender() {
 
 function hiDetail(run) {
     var d = run.data || {}, parts = [];
-    if (run.settings) parts.push('<p><strong>Settings:</strong> ' + hiEsc(Object.keys(run.settings).filter(function (k) {
+    var settings = run.settings ? Object.keys(run.settings).filter(function (k) {
         return run.settings[k] !== null && run.settings[k] !== undefined && typeof run.settings[k] !== 'object';
-    }).map(function (k) { return k + ' ' + run.settings[k]; }).join(', ')) + '</p>');
+    }) : [];
+    if (settings.length) parts.push('<p><strong>Settings:</strong> ' + hiEsc(settings.map(function (k) { return k + ' ' + run.settings[k]; }).join(', ')) + '</p>');
+    if (run.logName && run.logName.indexOf(', ') >= 0) parts.push('<p><strong>Logs:</strong> ' + hiEsc(run.logName) + '</p>');
     var advice = d.recommendations || d.advice;
     if (Array.isArray(advice) && advice.length && advice[0].text) {
         parts.push('<ul>' + advice.map(function (a) { return '<li class="sev-' + hiEsc(a.severity) + '">' + hiEsc(a.text) + '</li>'; }).join('') + '</ul>');
@@ -209,6 +266,28 @@ function hiDetail(run) {
         parts.push('<p><strong>Timing advice:</strong> ' + d.recommendations.map(function (x) {
             return 'Cyl ' + x.cyl + ': ' + x.events + ' events, worst ' + x.maxRatio + '×, ' + (x.reductionDeg ? '−' + x.reductionDeg + '°' : 'no change');
         }).join('; ') + '</p>');
+    }
+    if (d.findings && d.findings.length) {
+        parts.push('<ul>' + d.findings.map(function (f) {
+            return '<li class="sev-' + hiEsc(f.severity === 'fail' ? 'critical' : f.severity === 'warn' ? 'warning' : f.severity) + '">' + hiEsc(f.group + ': ' + f.text) + '</li>';
+        }).join('') + '</ul>');
+    }
+    if (d.cylinders && d.cylinders.length) {
+        parts.push('<p><strong>Cylinders:</strong> ' + d.cylinders.map(function (x) {
+            return 'Cyl ' + x.cyl + (x.retard ? ' trim ' + x.retard + '°' : '') + (x.knockMedian !== null ? ' knock ' + x.knockMedian + '%' : '') + (x.input ? ' (' + hiEsc(x.input) + ')' : '');
+        }).join(', ') + '</p>');
+    }
+    if (d.sites && d.sites.length) {
+        parts.push('<p><strong>Period by exhaust flow:</strong> ' + d.sites.map(function (x) {
+            return x.flow + ' g/s: table ' + x.table + ' ms' + (x.measured !== null ? ', measured ' + x.measured + ' ms (' + x.n + ')' : '') +
+                (x.suggested !== null ? ' → ' + x.suggested + ' ms' : x.action ? ' (' + hiEsc(x.action) + ')' : '');
+        }).join('; ') + '</p>');
+    }
+    if (d.pulls && d.pulls.length) {
+        parts.push('<p><strong>Pulls:</strong></p><ul>' + d.pulls.map(function (p, i) {
+            return '<li>' + (i + 1) + '. ' + p.rpm[0] + '–' + p.rpmMax + ' rpm, ' + p.mapMax + ' kPa, ' + p.seconds + ' s' + (p.full ? '' : ' (part pedal)') +
+                (p.flags.length ? ': ' + hiEsc(p.flags.map(function (f) { return f.text; }).join('; ')) : ': nothing flagged') + '</li>';
+        }).join('') + '</ul>');
     }
     if (d.zones) {
         parts.push('<p><strong>Tip-ins by destination MAP:</strong> ' + d.zones.map(function (z) {

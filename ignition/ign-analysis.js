@@ -51,7 +51,8 @@ function igAnalyze(log, tune) {
     function add(group, severity, title, detail, times, channels) {
         findings.push({ group: group, severity: severity, title: title, detail: detail || '', times: times || [], channels: channels || [] });
     }
-    var out = { duration: c.n * c.dt, runningS: c.runningS, normalS: 0, composition: null, blendPct: null, findings: findings, states: [], cells: [], cylinders: [] };
+    var out = { duration: c.n * c.dt, runningS: c.runningS, normalS: 0, composition: null, blendPct: null, findings: findings, states: [], cells: [], cylinders: [],
+               fit: null, departures: {} };
     var rpm = c.base('Engine Speed'), ign = c.base('Ignition Timing'), comp = c.base('Ignition Timing Compensation'), state = c.base('Ignition Timing State');
     if (!rpm || !ign) {
         add('Log', 'fail', 'The log has no Engine Speed or Ignition Timing', 'Log Ignition Timing, Ignition Timing Compensation and Ignition Timing State.');
@@ -108,6 +109,7 @@ function igAnalyze(log, tune) {
     var nd = lhPick(diff, normal, 5), med = lhQuantile(nd, 0.5), absP90 = lhQuantile(nd.map(Math.abs), 0.9);
     if (nd.length) {
         var fits = Math.abs(med) < 0.3 && absP90 < 1;
+        out.fit = { median: med, p90: absP90 };
         add('Timing', fits ? 'ok' : 'warn', fits ? 'Ignition Timing follows the tune: median ' + lhFmt(med, 2) + '°, 90 % within ' + lhFmt(absP90, 2) + '°'
             : 'Ignition Timing doesn\'t follow this tune: median ' + lhFmt(med, 2) + '° off, 90 % within ' + lhFmt(absP90, 2) + '°',
             'Logged Ignition Timing against ' + (useAlt ? 'Main blended toward Alternative Fuel Ignition Timing' : 'Ignition Timing Main') +
@@ -131,6 +133,7 @@ function igAnalyze(log, tune) {
             for (var k = Math.round(e[0] / c.dt); k < Math.round(e[1] / c.dt) && k < c.n; k++) if (d[0][k] && Math.abs(diff[k]) > Math.abs(worst)) { worst = diff[k]; at = k; }
         });
         var knockTrim = c.has('Ignition Cylinder 1 Knock Trim');
+        out.departures[d[1]] = { seconds: eps.reduce(function (a, e) { return a + e[1] - e[0]; }, 0), episodes: eps.length, worst: Math.abs(worst) };
         add('Timing', 'warn', 'Timing ' + d[1] + ' the tune by ≥ ' + IG_DEPART_DEG + '°: ' + lhEpisodeText(eps),
             d[2] + 'up to ' + lhFmt(Math.abs(worst)) + '° at ' + lhAt(c.time[at]) + ' (' + Math.round(rpm[at]) + ' rpm, ' + Math.round(load[at]) + ' kPa).' +
             (d[1] === 'below' && !knockTrim ? ' Log Ignition Cylinder 1–8 Knock Trim to tell knock control from the rest.' : ''),

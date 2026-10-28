@@ -58,6 +58,57 @@ describe('Tuning history — run summaries', function () {
     assert.equal(rbFuelPressure({ transientEvents: [] }).summary.riseOverShare, null, 'no tune: no rail control');
   });
 
+  it('Log Health: counts, the first problem, findings that need a look', function () {
+    var r = rbLogHealth({ runningS: 612.4, counts: { fail: 1, warn: 2, info: 3, ok: 9 },
+      findings: [{ group: 'Fuel', severity: 'fail', title: 'Stoich wrong' }, { group: 'Knock', severity: 'warn', title: 'Input 2 low' },
+                 { group: 'Log', severity: 'ok', title: 'fine' }] });
+    assert.equal(r.summary.fail, 1);
+    assert.equal(r.summary.runningS, 612);
+    assert.equal(r.summary.top, 'Stoich wrong');
+    assert.deepEqual(r.data.findings, [{ severity: 'fail', group: 'Fuel', text: 'Stoich wrong' }, { severity: 'warn', group: 'Knock', text: 'Input 2 low' }]);
+  });
+
+  it('Ignition: model fit, departures, knock margin and cylinders', function () {
+    var r = rbIgnition({ normalS: 300.2, composition: 44.71, fit: { median: 0.0234, p90: 0.512 }, departures: { below: { seconds: 2.34, episodes: 3, worst: 2 } },
+      cells: [{ rpm: 2000, kpa: 60, seconds: 4, timing: 30.04, knockPct: 55.2 }, { rpm: 3000, kpa: 120, seconds: 2, timing: 20, knockPct: null }],
+      cylinders: [{ cylinder: 1, input: 'Knock Input 1', retard: -1.5, knockMedian: 1.234 }, { cylinder: 2, input: 'Knock Input 2', retard: 0, knockMedian: 0.1 }],
+      findings: [] });
+    assert.equal(r.summary.fitMedian, 0.02);
+    assert.equal(r.summary.belowS, 2.3);
+    assert.equal(r.summary.aboveS, 0);
+    assert.equal(r.summary.maxKnockPct, 55);
+    assert.deepEqual(r.summary.trimmedCyls, [1]);
+    assert.equal(r.data.cylinders[0].knockMedian, 1.23);
+    assert.equal(rbIgnition({ findings: [] }).summary.fitMedian, null, 'no tune: no fit');
+  });
+
+  it('Closed-loop period: steps, cuts and measured vs table per site', function () {
+    var r = rbClPeriod({ events: [{ source: 'aim' }, { source: 'cut' }, { source: 'cut' }], findings: [],
+      sites: [{ flow: 10, tableMs: 1000, n: 5, medianMs: 227.4, suggested: 300, action: 'shorter' }, { flow: 50, tableMs: 200, n: 0, medianMs: null, suggested: null, action: 'no data' }] });
+    assert.equal(r.summary.steps, 1);
+    assert.equal(r.summary.cuts, 2);
+    assert.equal(r.summary.changes, 1);
+    assert.deepEqual(r.summary.sites, [{ flow: 10, table: 1000, measured: 227, suggested: 300 }]);
+    assert.equal(r.data.sites[1].measured, null);
+  });
+
+  it('Pulls: worst lean, knock, rail and low side across pulls', function () {
+    var p = function (lean, kn, under, low, flags) {
+      return { rpm: [2500, 5000], rpmMax: 5500, mapMax: 140.4, seconds: 4, full: true, flags: flags || [],
+        metrics: { lambda: [{ lean: lean }, null], knock: [{ pctOfThreshold: kn }], rail: { worstUnder: -under }, low: { min: low } } };
+    };
+    var r = rbPulls({ findings: [], pulls: [p(0.047, 55, 21, 470, [{ severity: 'warn', text: 'lean' }, { severity: 'info', text: 'x' }]), p(0.01, 70, 5, 480)] });
+    assert.equal(r.summary.pulls, 2);
+    assert.equal(r.summary.flagged, 1);
+    assert.equal(r.summary.worstLean, 0.047);
+    assert.equal(r.summary.worstKnockPct, 70);
+    assert.equal(r.summary.worstRailUnder, 21);
+    assert.equal(r.summary.lowMin, 470);
+    assert.equal(r.summary.mapMax, 140);
+    assert.deepEqual(r.data.pulls[0].flags, [{ severity: 'warn', text: 'lean' }]);
+    assert.equal(rbPulls({ pulls: [], findings: [] }).summary.worstLean, null);
+  });
+
   it('list entries leave out the detail; runs sort by log time', function () {
     var run = { id: 'a', tool: 've', summary: { x: 1 }, settings: { y: 2 }, data: { z: 3 } };
     assert.deepEqual(rsSummaryOnly(run), { id: 'a', tool: 've', summary: { x: 1 } });

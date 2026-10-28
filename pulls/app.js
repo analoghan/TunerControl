@@ -167,6 +167,12 @@ function render() {
         r.pulls.length + ' pull' + (r.pulls.length === 1 ? '' : 's') + (lastTuneName ? ', knock threshold from ' + esc(lastTuneName) : ', no tune') + '.</p>';
     document.getElementById('findings').innerHTML = findingsHtml(r);
     document.getElementById('pulls').innerHTML = pullsHtml(r, true);
+    var files = lastFiles, tuneName = lastTuneName, tuneId = tuneName ? tunePicker.currentId() : null;
+    rsSaveControl(document.getElementById('history-save'), function () {
+        return rsLogFactsMany(files).then(function (facts) {
+            return Object.assign({ tool: 'pulls', tuneId: tuneId, tuneName: tuneName, settings: { logs: files.length } }, facts, rbPulls(r));
+        });
+    });
 }
 
 document.getElementById('pulls').addEventListener('click', function (e) {

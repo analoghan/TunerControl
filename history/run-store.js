@@ -2,12 +2,14 @@
  * history/run-store.js — Tuning history: saved analysis runs, on the TunerControl server when the page is served by it,
  * otherwise in this browser (IndexedDB "tunercontrol-runs"). Needs m1-config/tune-api.js.
  *
- * A run: { id, tool: 've' | 'transient' | 'knock' | 'fuel-pressure', created, logName, logTime, serial, tuneId, tuneName,
+ * A run: { id, tool: 've' | 'transient' | 'knock' | 'fuel-pressure' | 'log-health' | 'ignition' | 'cl-period' | 'pulls',
+ *          created, logName, logTime, serial, tuneId, tuneName,
  *          note, settings, summary, data }
  *
  *   rsInit()              → Promise<'server' | 'browser' | 'none'>
  *   rsList(tool, full)    → Promise<[run]> oldest log first; full includes settings and data
  *   rsGet(id), rsSave(run), rsSetNote(id, note), rsDelete(id)
+ *   rsLogFacts(file), rsLogFactsMany(files)  log name, time and ECU serial for a run (several logs: names joined, earliest time)
  *   rsSaveControl(el, getRun)  "Save to tuning history" button with a note field; getRun() returns the run (or a Promise)
  */
 
@@ -114,6 +116,15 @@ function rsLogFacts(file) {
     return tsLogInfo(file).then(function (info) {
         return { logName: file.name, logTime: info.time ? info.time.toISOString() : null, serial: info.serial || null };
     }).catch(function () { return base; });
+}
+
+/** Log facts for a run over several logs: names joined, the earliest log time, the first ECU serial. */
+function rsLogFactsMany(files) {
+    return Promise.all((files || []).map(rsLogFacts)).then(function (all) {
+        var times = all.map(function (f) { return f.logTime; }).filter(Boolean).sort();
+        var serial = all.map(function (f) { return f.serial; }).filter(function (v) { return v !== null && v !== undefined; })[0];
+        return { logName: all.map(function (f) { return f.logName; }).join(', ') || null, logTime: times[0] || null, serial: serial === undefined ? null : serial };
+    });
 }
 
 /**

@@ -85,6 +85,12 @@ analyzeBtn.addEventListener('click', function () {
             lastTuneName = tuneHealth ? tuneHealth.tuneName : null;
             logPanelReady = null;
             render();
+            var result = lastResult, tuneName = lastTuneName, tuneId = tuneName ? tunePicker.currentId() : null;
+            rsSaveControl(document.getElementById('history-save'), function () {
+                return rsLogFacts(file).then(function (facts) {
+                    return Object.assign({ tool: 'log-health', tuneId: tuneId, tuneName: tuneName, settings: {} }, facts, rbLogHealth(result));
+                });
+            });
             resultsSection.hidden = false;
         };
         w.onerror = function (err) { w.terminate(); progress.hidden = true; updateButton(); showError('The check failed: ' + (err.message || 'worker error')); };

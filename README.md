@@ -136,7 +136,7 @@ Plot any log channels (`.ld` or CSV) with preset channel layouts (e.g. fuelling)
 events are — check an analysis against the raw data. The same viewer is embedded in the analysis tools.
 
 ### Tuning History
-Saved VE, transient fuel, knock and fuel pressure runs in log order, with the tune each was made on: see whether each tune change moved the
+Saved VE, transient fuel, knock, fuel pressure, Log Health, Ignition Review, Closed-Loop Period and Pull Report runs in log order, with the tune each was made on: see whether each tune change moved the
 results the right way.
 
 ### M1 Config Viewer

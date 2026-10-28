@@ -16,7 +16,7 @@
  *   harness_images connector/splice pictures, id = SHA-256 of the bytes (shared by all revisions)
  *   harness_systems harnesses joined by mating connectors: { harnesses: [ids], manual: [links], rejected: [links],
  *                   canNetworks: [CAN networks, see harness/harness-can.js] }
- *   runs           saved analysis runs (tuning history): tool ('ve' | 'transient' | 'knock' | 'fuel-pressure'), the log, the tune
+ *   runs           saved analysis runs (tuning history): tool ('ve' | 'transient' | 'knock' | 'fuel-pressure' | 'log-health' | 'ignition' | 'cl-period' | 'pulls'), the log, the tune
  *                  that was in the ECU, and the run's settings, summary and detail (JSON); id is a random UUID
  * View
  *   cell_values    cells joined with tune and item names — the easiest table for ad-hoc SQL
@@ -425,7 +425,7 @@ TuneStore.prototype.exportBackup = function () {
 
 // --- Tuning history: saved analysis runs ---------------------------------------------------------------
 
-var RUN_TOOLS = ['ve', 'transient', 'knock', 'fuel-pressure'];
+var RUN_TOOLS = ['ve', 'transient', 'knock', 'fuel-pressure', 'log-health', 'ignition', 'cl-period', 'pulls'];
 
 function runRecord(r, full) {
     var rec = { id: r.id, tool: r.tool, created: r.created, logName: r.log_name, logTime: r.log_time, serial: r.serial,

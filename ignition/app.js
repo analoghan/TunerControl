@@ -160,6 +160,12 @@ function render() {
     document.getElementById('cells').innerHTML = cellsHtml(r);
     document.getElementById('states').innerHTML = statesHtml(r);
     document.getElementById('cylinders').innerHTML = cylindersHtml(r);
+    var file = lastRunFile, tuneName = lastTuneName, tuneId = tuneName ? tunePicker.currentId() : null;
+    rsSaveControl(document.getElementById('history-save'), function () {
+        return rsLogFacts(file).then(function (facts) {
+            return Object.assign({ tool: 'ignition', tuneId: tuneId, tuneName: tuneName, settings: {} }, facts, rbIgnition(r));
+        });
+    });
 }
 
 document.getElementById('findings').addEventListener('click', function (e) {
