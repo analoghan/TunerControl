@@ -19,6 +19,22 @@ The MoTeC M1 tools are built around a supercharged GM Gen V LT4 (M142 ECU + E888
 values can use a tune stored in the M1 Config Viewer (suggested from the log's ECU serial and time) or a `.m1pkg` file, and most can save their
 results to the Tuning History and open the matching stretch of the log in an embedded Log Viewer (**Show in log**).
 
+### Log Health
+Run it first on every new log: looks for readings that can't be right, so sensor faults, wrong sensor setups and substituted values are caught
+before anything is tuned from the log. With the tune that ran the log (suggested from the log's ECU serial and time), diagnostic values get the
+firmware's own names and severities and the fuel model checks run. Findings are Fail / Check / Note / OK, each with what was measured and how
+much of the log supports it, and open in the embedded Log Viewer with their channels and stretches marked; Export PDF prints them.
+- **Log** — holds where the logger stopped (a log can join two key cycles: temperatures jump across it), engine stalls and near-stalls
+- **ECU diagnostics** — every Diagnostic channel's non-OK values, named and graded from the tune's firmware enumerations
+- **Substituted values** — "X Sensor" against "X": the ECU using an estimate or default instead of the reading
+- **Sensors** — stuck sensors; key-on MAP vs ambient vs airbox; MAP never ≤ 0 and agreeing with airbox pressure at part load; ambient pressure
+  plausible; oil pressure; temperatures out of range, jumping, disagreeing at a cold start; gauge pressures below −20 kPa
+- **Lambda** — banks reading free air while fuelling, bank 1 vs bank 2, closed-loop trims at their limits
+- **Fuel model** (with the tune) — stoich against fuel composition and the alternative fuel's properties (E85-like vs ethanol), and where Fuel
+  Mixture Aim comes from: Main, the alternative fuel blend, or a compensation
+- **Fuel supply, throttle, electrical, knock inputs, speed signals** — low-side pressure and droop, throttle following its aim, battery and
+  injector supply voltages, a dead or low knock bank, engine speed jumps, wheel speeds
+
 ### VE Table Tuning
 Analyze MoTeC log data against your current VE table to compute per-cell correction percentages. The table is Engine Efficiency Main, read from the tune (a stored tune or an `.m1pkg`). Produces downloadable CSVs ready to import back into MoTeC M1 Tune.
 
@@ -297,6 +313,7 @@ node tests/test-diagnostics.js            # Diagnostics knock findings
 node tests/test-transmission.js           # TurboLamik Shift Analyzer
 node tests/test-map-rescale.js            # MAP Rescale
 node tests/test-ve-lambda-delay.js        # VE lambda delay from the tune
+node tests/test-log-health.js             # Log Health checks
 ```
 
 The other `tests/test-*.js` files run in the browser suite only.

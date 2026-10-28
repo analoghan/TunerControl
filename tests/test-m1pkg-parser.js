@@ -5,7 +5,7 @@
 
 // Fixtures generated with Python's lzma module (xz-utils compatible).
 var M1PKG_FIXTURES = {
-  tuneConfigXz: '/Td6WFoAAAFpIt42AgAhARYAAAB0L+Wj4AdEAqddAB4Py4cR2M5mkQ+DHsr9ezPUf+m32+OpcTR59tCF07RwirxB9MtEFGD9rvEZGonRGy1A/SRUYNrY1hHFMZJXrtrLL9Ycx6FLUCXRaVWgLp43l+HSLrFvua2FGV3eakBHZOQ9x0cy4Ymx8JmHfZoLdpKnNfEao0PadRodr5KdF2BmGIjkzgXrfFuvve+62ehMyWDyNKBIvfHLkhhqdZt79lPVnhy0bTuSrEI+juxjt/hG/Ps2F/cAxPPP0Ba5tK4Ac2kRCAGh41qSnDNfhJhaA30TvOk5hTU+kOtKQn9ZzspkggPjq3oW3DOlxvVFikm8oO0mPE/DV1BzOxO2svD+NgYcvfZJmXXe+J2N1C8suexWkn+atXwhI90x2CV5nc/iqdloCOx16oMUt/plXckhmjEUHdOsWJMytyfA25dcD0qxbqHzRA+ad9OINk69BXSNyNYAmCQnRfnvQHImd2uCNAUtAplv3Nq5Z1eEwa99OwjvVZUIBWZ5CyxJjBu1LCN2c3yWoFFpx8H76PH+9F4+C+e2Z0/v6giDCc46Qgy42f005H4XPhaUF9q2GVvOlyPGSGm38AWMmeb4YxCaqPyvfWuo9nnsw3EA8Uj2oScDVkttJrHWxV0El9TKoaAh54oxT07fAU+q8W1hZF8eMvndfAlmJA+o7pz3gsyWQVQWEHuvKBJQDENjNGng+4G6Rq0THx83HHeMxq0C8qtp8HeQm57aGW3i9H8GuUceFltd/+4TXb1lxJEP0lYl27zTDw9T5lmmVd/AmaoHXgfUf6LOAs5Q0/9ILHKbM7mz/AwXh76y5GtWYv5jmJMe/MD5U6WsRiyrzcD/h2Ozodw1oZj+WYVRl5gfkfc9huXgn1cL77hydLc8bxsg1JUZWcZEwhuYvOeNlIJovcIAAF2ZcA8AAb8FxQ4AADPJJKs+MA2LAgAAAAABWVo=',
+  tuneConfigXz: '/Td6WFoAAAFpIt42AgAhARYAAAB0L+Wj4AkoAwJdAB4Py4cR2M5mkQ+DHsr9ezPUf+m32+OpcTR59tCF07RwirxB9MtEFGD9rvEZGonRGy1A/SRUYNrY1hHFMZJXrtrLL9Ycx6FLUCXRaVWgLp43l+HSLrFvua2FGV3eakBHZOQ9x0cy4Ymx8JmHfZoLdpKnNfEao0PadRodr5KdF2BmGIjkzgXrfFuvve+62ehMyWDyNKBIvfHLkhhqdZt79lPVnhy0jDls9YcXQGaWqX22iIDIb5kTKD8REGS/BahQT0kWmliPs7KV2smj+bfdfr0t2YAToOp9jjlmtXbbCjrMFkOoGkrMu0w6S9jAUCC54ERBLJlZEHROlf7D9E8bGpJ70XWBJM6xgLC+aA/IT0B6O/vp2q6VPwdf1Qp4xV9kczIUF7Fm4nlWz8IikfHY/efY1BL99kRHX5xxgzyauipr4t3OYq53NMDbTRxtql7StBRw37K/EbDyZhzRaQYDV2OIxAhb8242Ex1dSekiT+0tRj3yzzSP8Xs1rGgz3y0cu3DgO425fVdO8HBVW4pf8y62p32RHHEXiFrvjYDWh/wb4vy2hXh7q8YeOkPgWsXK6+SRxYe6BNkJb/8xfxa5CKqzZCUrdEFRue9DdPdxGxiNURRnejsUug9nu3knukvh1ycI8UBp/FjMYMlIsaq6Ok2OwFvGn1qGhmJ1ontgq/kYFkR7uuw09orNcBwu7T9NdTw0a5C+MELfeepudh4KC/kKKeWBB4w1youpKOgnI+ofg7nLXUEKH7XdmXjLOjwGo7VomM/tqzuFUW6fzMl+U3rQ8u7ddojwAUtVRaq8Oe6zY3mlPKe5ccLxoHhORMi6tGL8yGPWsXewCqWUV/1uQGtY92kvXpNgGDHQn03FFmaOpeTmNhqZ59ZjkaL7hvSk8B+7E6rJgZajtyeLEhr6hfyf5YFUmkYGu/s1mPIl2fhPhTGRi5tDFr8RRyLXNeH8m4l8+Vrha7rDIvgg+exJBD+c1EpSOqUqcGsLUKufccF+qI84Sm1PilM6jXBp3YQ64/L4AAAAfsCIGAABmgapEgAAyTUp3z4wDYsCAAAAAAFZWg==',
   randomXz: '/Td6WFoAAATm1rRGAgAhARYAAAB0L+WjAQEr3ARlqh+tHVra5awbHl8TcHls/RD/Ga9gHQSstB0CK0Z4czry31+utwhZ0e45EMtIlbXMiSkR/wa2Yi7fPPk1/UuUKMoJfESzAl6WX7PqbazULYFuaa/g5odMnATn0jZdLGDJ6vR59oag65Mm5GIS1Q3Ls3cVamo6aLqO23QIRp7zzrMK+NDdaLv4X/ok8tL8GIf7XIe6tDgypZsbPRB893jWf+Jt+BGRKX6TlcsSxVfOWvHUFhjXGbwEW36ZZfGilHHEKqxqqTjEdcetMjgCHwU7LJka/OsV3s9ouuB8vNYelxuaC52+l2PTkvyv36KMlyNFYuvdB2Vw/1iJas/3yu4/HOnkCmjl3pONOJx9vddbCdTn4jNEP0qMxKGQ1ri43GFf0Y4ovlkOqlAbAK4c589tVBe8AAHEAqwCAADMqdU3scRn+wIAAAAABFla',
   textXz: '/Td6WFoAAAD/EtlBAgAhARYAAAB0L+Wj4E6gAwhdACMdSKbrgXHAJOGVtCoTeBCEnGSLqsRJn7z2NujEzlXaaD1gYyoIsQz/Y5hooLNs+7rW2zifAHSXxs1lUxJaOkYTlwaaqkSLsvsRNVfw+Cs00ukjihPSP04BgxJRgcUhZBLSrnOc0gb7o3ydPHRKyi2anWqsCqdqxfg0cL+roPiGaocnBBsjg8nT7l4BItg0RsvJIT0EaD+JSZ0WNh5r3D2vsndbYJd8Y5TpN9q/suE6h9hEK6pXJYgQ8L4MJycP4tRSzcM3w9NDzTD8sU4aVjkxvlbZi4IELgGc+gQNKqORtGcQPhXJNIkGaEyVD6xEcWkC6cFy+ib95KqS+6YDZxufy3lJICr7TC+LJAyaRk1U7Ch8FBYBfHv8EflytAYsBMYpSw+C6xsIJDrVrVgjoFcYFUnM1LMFpGiNSJ4A7gFzgtEkwfRCDtJk7hn+4esfUUiAKCFFIs1wDfK2hxo3Sv1Dcmd0A9u++SdhgM5s/s/B7WOtA3BMxWUF81SerptGatacO7j65tGFdULAz1EbSd2QMilGzgYNzqrtM7RSDMiqlFp90e0o2xbmRPb8N5Sdz9IHshCLBgcCIDX0czSnFHEjFlpwiNxrRJ2AJaXAc5FMQ/2Fdm14NHA6gulOIYrFToFC45U7PXf+Z+55Plnb+JbMbx/Ic8ULbFAhMSjP4P77Pc6O7/mmmv7Re8bC4ikBw6Vwx6qBvmaLhXncdiD4E8PAc/cwGputPgqBdkIjFYLUmh3V7QrZ8CgH2J6kjv4MvHog/Sj9zOUsJWPURBRPdYO0AuQVY1uhflzyyi0VH9jvlgrhOa6lkhudlNlEj7mobKnFBM8U1MIDKhAZSbUH3K2gIQGN7p4k393g0CQbUdg3nfBj9r5W9roQoqkTHsT1YfZ/vnUNbeiedveb7NsaPRN8bUNZRUgQIftCLzR2v8C3pGTuSzZM9HC/8W93aR2OYN1mdY8eSqDLUW+qtLMRik5Mdk6LZ4F+0KYuUD+1Fro5eldmrYWlt2cd561pVtAtjS0SCwY3PrB8AAABnAahnQEAx5O2P6gACvwCAAAAAABZWg==',
   textLen: 20129
@@ -197,6 +197,15 @@ describe('M1 package parser — parseM1Pkg', function () {
 
   it('rejects files that are not M1 packages', function () {
     assert.throws(function () { parseM1Pkg(new Uint8Array(32)); }, 'Not an M1 package');
+  });
+});
+
+describe('M1 package parser — m1pkgChannelEnums', function () {
+  it('names enum channels as logs do, with each value\'s name and lower-case tag', function () {
+    var e = m1pkgChannelEnums(m1tPackage(M1T_V1));
+    assert.deepEqual(Object.keys(e), ['Engine Sensor Diagnostic']);
+    assert.deepEqual(e['Engine Sensor Diagnostic'][2], { name: 'Signal High', tag: 'fault' });
+    assert.deepEqual(e['Engine Sensor Diagnostic'][1], { name: 'OK', tag: null });
   });
 });
 

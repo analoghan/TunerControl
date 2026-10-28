@@ -7,6 +7,7 @@
  *   panel.analyze({ ve, tf, veTable })      → Promise   runs both tools' filters/detection on the log (their settings)
  *   panel.showCell(m, r, label)             → Promise   highlights the samples that count towards VE cell (m, r)
  *   panel.showEvent(time)                               zooms to the transient event starting at `time`
+ *   panel.showChannels([[name, …], …])      → Promise   shows these channels, one array per pane
  */
 
 var LV_SCRIPT_BASE = (function () {
@@ -207,8 +208,13 @@ LogPanel.prototype._saveLayout = function () {
     } catch (e) { /* storage unavailable: the layout just isn't remembered */ }
 };
 
-LogPanel.prototype._applyPreset = function (preset) {
-    var self = this, names = this._layoutNames(preset);
+LogPanel.prototype._applyPreset = function (preset) { return this._applyNames(this._layoutNames(preset)); };
+
+/** Shows these channels, one array of names per pane (names not in the log are left out). */
+LogPanel.prototype.showChannels = function (panes) { return this._applyNames(panes); };
+
+LogPanel.prototype._applyNames = function (names) {
+    var self = this;
     var hasBank = !!(this.byName['exhaust lambda bank 1'] || this.byName['exhaust lambda bank 2']);
     this.panes = names.map(function (pane) {
         return pane.filter(function (n) { return !(hasBank && n === 'Exhaust Lambda'); })

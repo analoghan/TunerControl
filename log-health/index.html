@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Log Health — MoTeC M1</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <link rel="stylesheet" href="../log-viewer/log-panel.css">
+  <link rel="stylesheet" href="../lib/print-report.css">
+  <style>
+    .lh-counts { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    .lh-count { padding: 6px 12px; border-radius: 4px; font-weight: 600; font-size: 0.9rem; border: 1px solid #333; }
+    .lh-count.fail { color: #f44336; border-color: #f44336; }
+    .lh-count.warn { color: #ff9800; border-color: #ff9800; }
+    .lh-count.info { color: #2196f3; border-color: #2196f3; }
+    .lh-count.ok { color: #4caf50; border-color: #4caf50; }
+    .lh-group h3 { margin: 18px 0 6px; font-size: 1rem; color: #ddd; }
+    .lh-finding { padding: 8px 12px; margin-bottom: 6px; border-radius: 4px; border-left: 3px solid; background: #161616; }
+    .lh-finding.fail { border-left-color: #f44336; }
+    .lh-finding.warn { border-left-color: #ff9800; }
+    .lh-finding.info { border-left-color: #2196f3; }
+    .lh-finding.ok { border-left-color: #4caf50; }
+    .lh-title { font-weight: 600; font-size: 0.9rem; }
+    .lh-finding.fail .lh-sev { color: #f44336; } .lh-finding.warn .lh-sev { color: #ff9800; }
+    .lh-finding.info .lh-sev { color: #2196f3; } .lh-finding.ok .lh-sev { color: #4caf50; }
+    .lh-sev { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 6px; }
+    .lh-detail { color: #bbb; font-size: 0.85rem; margin-top: 3px; }
+    .lh-show { margin-top: 5px; padding: 3px 10px; font-size: 0.75rem; color: #fff; background: #222; border: 1px solid #E31837; border-radius: 4px; cursor: pointer; }
+    .lh-show:hover { background: #333; }
+    .lh-options { display: flex; gap: 16px; align-items: center; margin-bottom: 8px; color: #b0b0b0; font-size: 0.85rem; }
+    .lh-options button { padding: 6px 14px; color: #fff; background: #222; border: 1px solid #E31837; border-radius: 4px; cursor: pointer; }
+    #print-report .lh-finding { background: #fff !important; break-inside: avoid; }
+    #print-report .lh-title { color: #111 !important; }
+    #print-report .lh-detail { color: #333 !important; }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="../motec/index.html">&larr; Back to MoTeC M1 Tuning</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Log Health</h1>
+    <p class="subtitle">Checks a log for readings that can't be right before anything is tuned from it: ECU diagnostics by the firmware's own
+      names, values the ECU substituted for a sensor, stuck sensors, MAP / barometric / airbox agreement, temperature plausibility, lambda
+      sensors, fuel properties and mixture aim against the tune, fuel supply, throttle, voltages, knock inputs, speed signals and log gaps.</p>
+
+    <div class="form-section">
+      <div class="file-row">
+        <label for="log-input">MoTeC Log (.ld or .csv):</label>
+        <input type="file" id="log-input" accept=".ld,.csv" />
+      </div>
+      <div class="file-row">
+        <label for="pkg-input">Tune (.m1pkg, optional):</label>
+        <input type="file" id="pkg-input" accept=".m1pkg">
+      </div>
+      <div class="file-row" id="tune-row" hidden>
+        <label for="tune-select">Or a stored tune:</label>
+        <select id="tune-select" class="tune-select"><option value="">— choose a tune from the M1 Config Viewer —</option></select>
+        <span id="tune-hint" class="tune-hint"></span>
+      </div>
+      <p id="tune-status" class="tune-status"></p>
+      <div class="button-row">
+        <button id="analyze-btn" disabled>Check log</button>
+        <a href="help.html" class="help-link-btn">Help</a>
+      </div>
+    </div>
+
+    <div id="error-container" class="error-banner" hidden></div>
+    <p id="progress" class="section-desc" hidden>Checking…</p>
+
+    <section id="results-section" class="results-section" hidden>
+      <div class="report-block">
+        <h2>Findings</h2>
+        <div id="summary"></div>
+        <div class="lh-options">
+          <label><input type="checkbox" id="show-ok" checked> Show passed checks</label>
+          <button id="pdf-btn">Export PDF</button>
+        </div>
+        <div id="findings"></div>
+      </div>
+      <div class="report-block">
+        <h2>Log</h2>
+        <div id="log-panel"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="../lib/xz-decoder.js"></script>
+  <script src="../lib/m1pkg-parser.js"></script>
+  <script src="../lib/print-report.js"></script>
+  <script src="../m1-config/tune-db.js"></script>
+  <script src="../m1-config/tune-api.js"></script>
+  <script src="../m1-config/tune-source.js"></script>
+  <script src="../m1-config/tune-picker.js"></script>
+  <script src="../log-viewer/log-chart.js"></script>
+  <script src="../log-viewer/log-panel.js"></script>
+  <script src="m1pkg-health.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

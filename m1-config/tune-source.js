@@ -30,6 +30,14 @@ function tsLoad(id) {
     return tsBackend === 'server' ? apiLoadPackage(id) : loadTunePackage(id);
 }
 
+/** The original .m1pkg bytes of a stored tune (ArrayBuffer), or null when they weren't kept. */
+function tsLoadFile(id) {
+    if (tsBackend === 'server') {
+        return tuneApi('GET', 'packages/' + encodeURIComponent(id) + '/file', { raw: true }).then(function (r) { return r.arrayBuffer(); });
+    }
+    return loadTuneFile(id).then(function (f) { return f && f.data ? f.data : null; });
+}
+
 /** "11/06/2026", "17:32:21" (day first, as MoTeC writes them) → Date in local time, or null. */
 function tsParseDate(date, time) {
     var d = String(date || '').match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/), t = String(time || '').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);

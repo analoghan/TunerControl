@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Log Health — Help</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <style>
+    .help-content { line-height: 1.7; }
+    .help-content h2 { color: #E31837; margin-top: 28px; margin-bottom: 8px; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .help-content p, .help-content li { color: #ccc; font-size: 0.9rem; }
+    .help-content ul { padding-left: 20px; }
+    .help-content li { margin-bottom: 6px; }
+    .help-content .tip { background: rgba(76,175,80,0.1); border-left: 3px solid #4caf50; padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-container help-content">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to Log Health</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Log Health — Help</h1>
+    <p>Every analysis tool assumes the log's readings are true. A wrong sensor translation, a failing sensor, a value the ECU substituted, or
+      a log that joins two drives produces confident but wrong VE, fuel and timing advice. Log Health looks for readings that can't be right
+      and says what it measured and over how much of the log. Run it first on every new log.</p>
+    <p>Choose the tune that ran the log (it is suggested from the log's ECU serial and time when tunes are stored). With it, diagnostic values get
+      the firmware's own names and severities, and the fuel model checks run.</p>
+
+    <h2>Results</h2>
+    <ul>
+      <li><b>Fail</b> — a reading that can't be physically right, or a fault the firmware tags as one. Fix before tuning from this log.</li>
+      <li><b>Check</b> — implausible or suspicious; look at it in the log.</li>
+      <li><b>Note</b> — worth knowing, not wrong in itself (e.g. fuel cut states, no key-on data).</li>
+      <li><b>OK</b> — checked and plausible, with what was measured.</li>
+    </ul>
+    <p><b>Show in log</b> opens the embedded Log Viewer with the channels behind the finding, the stretches marked and the first one zoomed.</p>
+
+    <h2>What is checked</h2>
+    <ul>
+      <li><b>Log</b> — holds (Engine Speed, logged at 100 Hz, exactly unchanged while running means the logger stopped). If temperatures jump across
+        the hold, the log joins two key cycles with the engine off in between; if the engine was cranking right after, it was restarted. Stalls and
+        near-stalls while logging. Readings around holds and the first seconds after each start are left out of the other checks.</li>
+      <li><b>ECU diagnostics</b> — every Diagnostic channel; any value other than OK / Not in Use, with its time, duration and the firmware's name and
+        severity (fault / warning / information).</li>
+      <li><b>Substituted values</b> — "X Sensor" (the reading) against "X" (the value the ECU uses): a lasting difference means a sensor diagnostic made
+        the ECU fall back to an estimate or default.</li>
+      <li><b>Stuck sensors</b> — sensor channels that never change while the engine runs.</li>
+      <li><b>Pressure sensors</b> — key-on engine-off MAP, airbox and ambient all reading the same plausible barometric pressure; Ambient Pressure
+        in 70–108 kPa; MAP never ≤ 0 (or below 8 kPa) while running; MAP and Airbox Pressure agreeing at part load (the throttle is ahead of the
+        supercharger); oil pressure ~0 with the engine stopped and above 140 kPa on a warm engine above 2000 rpm.</li>
+      <li><b>Temperatures</b> — outside −35…145 °C (open/short circuit), jumps faster than 15 °C/s (intermittent connection), sensors agreeing at a cold
+        start, coolant above 108 °C, inlet air temperature under boost.</li>
+      <li><b>Lambda</b> — a bank reading free air or nothing while fuelling (after sensor warm-up), bank 1 vs bank 2 agreement, closed-loop trims sitting
+        at their limits.</li>
+      <li><b>Fuel model</b> (needs the tune) — logged stoich against the tune's fuel properties and the fuel composition; whether the alternative fuel
+        is set up as pure ethanol or an E85-like blend, and what that means for stoich if the sensor reports ethanol content; where Fuel Mixture Aim
+        comes from (Main, the alternative fuel blend, or a compensation). Composition moving during a drive.</li>
+      <li><b>Fuel supply</b> — low-side pressure below 250 kPa, sagging at high fuel flow, above the tune's warning limit; gauge pressures below
+        −20 kPa; direct injection rail pressure missing.</li>
+      <li><b>Throttle</b> — position more than 5 % off its aim for 0.5 s or more.</li>
+      <li><b>Electrical</b> — battery voltage while running and dips below 12 V, PDM vs ECU battery voltage (wiring drop), injector boost supply.</li>
+      <li><b>Knock inputs</b> — a cylinder with no knock signal, one bank reading several times lower than the other.</li>
+      <li><b>Speed signals</b> — engine speed jumps (lost teeth), wheel speeds disagreeing or dropping to 0 while moving.</li>
+    </ul>
+    <div class="tip">Log 5 s with the key on before starting the engine: that gives the barometric check (MAP, airbox and ambient against each other)
+      and the cold-start temperature comparison.</div>
+  </div>
+</body>
+</html>
