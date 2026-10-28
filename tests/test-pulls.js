@@ -13,7 +13,7 @@ var ROOT = __dirname + '/../';
 var ctx = vm.createContext({ console: console, Math: Math, Float64Array: Float64Array, Float32Array: Float32Array, Uint8Array: Uint8Array,
     Int32Array: Int32Array, Uint32Array: Uint32Array, Int16Array: Int16Array, Uint16Array: Uint16Array, Int8Array: Int8Array,
     ArrayBuffer: ArrayBuffer, DataView: DataView, TextDecoder: TextDecoder, Map: Map, Set: Set, JSON: JSON });
-['lib/ld-parser.js', 've-table/worker.js', 'log-viewer/log-file.js', 'log-health/health-checks.js', 'pulls/pull-analysis.js'].forEach(function (f) {
+['lib/ld-parser.js', 've-table/worker.js', 'log-viewer/log-file.js', 'log-health/health-checks.js', 'di-timing/di-calc.js', 'pulls/pull-analysis.js'].forEach(function (f) {
     vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), ctx, { filename: f });
 });
 
@@ -27,13 +27,14 @@ var TUNE = { tuneName: 'T', threshold: { rpm: [1000, 6000], values: [[20, 30]] }
 function csv(pull) {
     var names = ['Engine Speed', 'Inlet Manifold Pressure', 'Throttle Pedal', 'Fuel Mixture Aim', 'Exhaust Lambda Bank 1', 'Exhaust Lambda Bank 2',
         'Ignition Cylinder 1 Knock Level', 'Ignition Cylinder 2 Knock Level', 'Fuel Pressure Direct Bank 1', 'Fuel Pressure Direct Bank 1 Aim', 'Fuel Pressure',
-        'Engine Oil Pressure', 'ECU Battery Voltage', 'Inlet Air Temperature'];
+        'Engine Oil Pressure', 'ECU Battery Voltage', 'Inlet Air Temperature', 'Fuel Cylinder 1 Primary Output Pulse Angle 1',
+        'Fuel Cylinder 1 Primary Output Pulse Width 1', 'Ignition Timing'];
     var lines = ['Time,' + names.join(','), 's,' + names.map(function () { return ''; }).join(',')];
     for (var i = 0; i < 6000; i++) {
         var t = i / 100, inPull = t >= 40 && t < 44, u = (t - 40) / 4;
-        var o = { rpm: 2000 + 30 * Math.sin(t * 3), map: 50, pedal: 15, aim: 1, l1: 1, l2: 1, k1: 3, k2: 3, rail: 5, railAim: 5, low: 480, oil: 400, batt: 14.2, iat: 40 };
-        if (inPull) Object.assign(o, { rpm: 2500 + 3000 * u, map: 140, pedal: 100, aim: 0.85, l1: 0.85, l2: 0.85, rail: 15, railAim: 15, oil: 450 }, pull ? pull(t, u) : {});
-        lines.push([t.toFixed(2), o.rpm.toFixed(1), o.map, o.pedal, o.aim, o.l1, o.l2, o.k1, o.k2, o.rail, o.railAim, o.low, o.oil, o.batt, o.iat].join(','));
+        var o = { rpm: 2000 + 30 * Math.sin(t * 3), map: 50, pedal: 15, aim: 1, l1: 1, l2: 1, k1: 3, k2: 3, rail: 5, railAim: 5, low: 480, oil: 400, batt: 14.2, iat: 40, soi: 300, pw: 1, spark: 25 };
+        if (inPull) Object.assign(o, { rpm: 2500 + 3000 * u, map: 140, pedal: 100, aim: 0.85, l1: 0.85, l2: 0.85, rail: 15, railAim: 15, oil: 450, soi: 310, pw: 3, spark: 15 }, pull ? pull(t, u) : {});
+        lines.push([t.toFixed(2), o.rpm.toFixed(1), o.map, o.pedal, o.aim, o.l1, o.l2, o.k1, o.k2, o.rail, o.railAim, o.low, o.oil, o.batt, o.iat, o.soi, o.pw, o.spark].join(','));
     }
     return lines.join('\n');
 }
@@ -84,6 +85,20 @@ test('the worst case of a flag across pulls is quoted, with how many pulls had i
     var r = run([a, b]);
     var f = r.findings.filter(function (x) { return x.group === 'Across pulls'; })[0];
     assert.ok(/0\.045 λ leaner/.test(f.title) && /in 2 of 2 pulls/.test(f.title), f.title);
+});
+
+test('injection: start before the exhaust closes and at the start limit, end too close to the spark', function () {
+    var tune = Object.assign({ injection: { startLimit: 340, primaryLimit: 20 } }, TUNE);
+    var r = run([csv(function () { return { soi: 340, pw: 9.5, spark: 20 }; })], tune);
+    var p = r.pulls[0], inj = p.metrics.injection;
+    near(inj.evc, 334, 0.5, 'EVC from the default cam at 0° advance');
+    near(inj.eoiMin, 340 - 9.5 * 5500 * 0.006, 2);
+    assert.ok(flags(p, /before the exhaust valve closes/).length, JSON.stringify(p.flags));
+    assert.ok(flags(p, /reached Injection Start Limit \(340/).length);
+    assert.ok(flags(p, /before the spark/).length);
+    var clean = run([csv()]).pulls[0];
+    near(clean.metrics.injection.eoiMin, 310 - 3 * 5500 * 0.006, 2, 'clean pull');
+    assert.strictEqual(clean.flags.length, 0, JSON.stringify(clean.flags));
 });
 
 var failed = 0;

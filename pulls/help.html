@@ -36,6 +36,12 @@
       <li><b>Timing</b> — minimum and median Ignition Timing; Ignition Timing State other than Normal is noted.</li>
       <li><b>Fuel supply</b> — rail pressure under aim (held 0.2 s) beyond the larger of 10 bar and 10 % of the aim, with the pump control reached;
         low-side pressure below 250 kPa (fail) or dropping 50 kPa from the second before the pull; Fuel Pump 2 state; injector duty ≥ 85 %.</li>
+      <li><b>Injection</b> — the start of injection (Fuel Cylinder 1 Primary Output Pulse Angle 1) and its end (start minus the pulse's crank
+        degrees, from the pulse width and rpm). Flagged: an end under 10° before the spark (5° = fail), an end after Fuel Timing Primary Limit Main
+        (the pulse is cut short), and a start before the exhaust valve closes. The exhaust closing uses the DI Injection Timing page's default cam
+        (229/244° at 0.050", 118 LSA, 114 ICL; seat to seat = +52°), moved by the logged inlet cam advance — those cam figures are not confirmed
+        for this engine. Noted: the start reaching Injection Start Limit (the M1 wanted an earlier start) or the end running into the compression
+        stroke. With the angle logged at 1 Hz a pull has only a few start readings.</li>
       <li><b>Temperatures</b> — inlet air at 60 °C or more is flagged (heat-soaked charge); charge, coolant and oil temperature are listed.</li>
       <li><b>Oil pressure</b> — checked against 10 psi (69 kPa) per 1000 rpm, held 0.2 s.</li>
       <li><b>Electrical, limits, cuts</b> — battery under 12.5 V, Throttle Limit or Engine Speed Limit State active, Ignition Cut, a change in Fuel Output
@@ -44,7 +50,7 @@
     <p><b>Across pulls</b> lists each kind of flag once, with its worst case and how many pulls had it. <b>Show</b> opens a pull's flags, all its numbers
       and the log around it.</p>
     <div class="tip">For a pull worth tuning from: warm engine, 3rd gear, from about 2500 rpm to the shift point, pedal to the floor, on a closed road
-      or a dyno. Log lambda, MAP, pedal and rail pressure fast (50 Hz), injector duty at 10–20 Hz and the knock trims at 20 Hz.</div>
+      or a dyno. Log lambda, MAP, pedal and rail pressure fast (50 Hz), injector duty and Pulse Angle at 10–20 Hz and the knock trims at 20 Hz.</div>
   </div>
 </body>
 </html>

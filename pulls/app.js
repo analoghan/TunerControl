@@ -23,9 +23,16 @@ function fmt(v, d) { return v === null || v === undefined || isNaN(v) ? '—' : 
 function clock(t) { var m = Math.floor(t / 60), s = t - m * 60; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1); }
 function updateButton() { analyzeBtn.disabled = !logFiles.length; }
 
+/** Knock Threshold (m1pkg-knock.js) plus the injection limits (m1pkg-di.js) from a tune. */
+function puTuneExtract(pkg) {
+    var t = m1pkgKnock(pkg), di = m1pkgDi(pkg);
+    t.injection = { startLimit: di.startLimit, primaryLimit: di.primaryLimit };
+    return t;
+}
+
 var tunePicker = tsPicker({
     pkgInput: document.getElementById('pkg-input'), select: document.getElementById('tune-select'), row: document.getElementById('tune-row'),
-    hint: document.getElementById('tune-hint'), status: document.getElementById('tune-status'), extract: m1pkgKnock, what: 'the knock threshold',
+    hint: document.getElementById('tune-hint'), status: document.getElementById('tune-status'), extract: puTuneExtract, what: 'the knock threshold and injection limits',
     none: 'No tune chosen: knock levels are shown without the threshold. Choose the tune that ran the logs to judge knock.',
     describe: function (t) {
         return t.threshold ? 'Knock Threshold ' + t.threshold.values[0].map(function (v) { return Math.round(v); }).join(' / ') + ' % over ' +
@@ -44,7 +51,7 @@ logInput.addEventListener('change', function () {
 });
 
 function createWorker() {
-    var urls = ['../lib/ld-parser.js', '../ve-table/worker.js', '../log-viewer/log-file.js', '../log-health/health-checks.js', 'pull-analysis.js', 'worker.js']
+    var urls = ['../lib/ld-parser.js', '../ve-table/worker.js', '../log-viewer/log-file.js', '../log-health/health-checks.js', '../di-timing/di-calc.js', 'pull-analysis.js', 'worker.js']
         .map(function (u) { return JSON.stringify(new URL(u, window.location.href).href); });
     var blob = new Blob(['importScripts(' + urls.join(',') + ');'], { type: 'application/javascript' });
     var url = URL.createObjectURL(blob), w = new Worker(url);
@@ -74,7 +81,7 @@ analyzeBtn.addEventListener('click', function () {
             resultsSection.hidden = false;
         };
         w.onerror = function (err) { w.terminate(); progress.hidden = true; updateButton(); showError('The analysis failed: ' + (err.message || 'worker error')); };
-        var tune = tuneKnock ? { tuneName: tuneKnock.tuneName, threshold: tuneKnock.threshold } : null;
+        var tune = tuneKnock ? { tuneName: tuneKnock.tuneName, threshold: tuneKnock.threshold, injection: tuneKnock.injection } : null;
         w.postMessage({ type: 'analyze', logs: datas.map(function (d, i) { return { data: d, name: files[i].name }; }), tune: tune },
             datas.filter(function (d) { return typeof d !== 'string'; }));
     }).catch(function (err) { progress.hidden = true; updateButton(); showError(err.message); });
@@ -137,6 +144,13 @@ function detailHtml(p) {
     it('Throttle position max', m.throttleMax !== undefined ? fmt(m.throttleMax) + ' %' : null);
     if (m.timing) it('Ignition timing', fmt(m.timing.min, 1) + '° min, ' + fmt(m.timing.median, 1) + '° median');
     if (m.knock && m.knock.length) it('Knock (peak, % of threshold)', m.knock.map(function (x) { return x.cylinder + ': ' + (x.pctOfThreshold !== null ? Math.round(x.pctOfThreshold) + '%' : fmt(x.peak, 1)); }).join(', '));
+    if (m.injection) {
+        var inj = m.injection;
+        it('Injection start', fmt(inj.soiMin) + '–' + fmt(inj.soiMax) + ' dBTDC (exhaust closes ≈ ' + fmt(inj.evc) + ' at ' + fmt(inj.camAdvance, 1) + '° cam' +
+            (inj.startLimit !== null ? ', Injection Start Limit ' + fmt(inj.startLimit) : '') + ')');
+        it('Injection end (latest)', fmt(inj.eoiMin) + ' dBTDC' + (inj.eoiRpm ? ' at ' + inj.eoiRpm + ' rpm' : '') +
+            (inj.sparkGap !== null ? ', ' + fmt(inj.sparkGap) + '° before the spark' : '') + (inj.primaryLimit !== null ? '; Limit Main ' + fmt(inj.primaryLimit) : ''));
+    }
     if (m.knockTrim) it('Knock trim (min)', m.knockTrim.map(function (x) { return x.cylinder + ': ' + fmt(x.min, 1) + '°'; }).join(', '));
     if (m.iat) it('Inlet air', fmt(m.iat.start) + ' → ' + fmt(m.iat.end) + ' °C (max ' + fmt(m.iat.max) + ')');
     it('Charge temperature max', m.chargeMax !== undefined ? fmt(m.chargeMax) + ' °C' : null);

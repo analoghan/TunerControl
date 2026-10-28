@@ -5,7 +5,9 @@
  *
  *   puAnalyze(logs, tune) → { pulls, findings }
  *     logs: [lvOpenLog() result] (log-viewer/log-file.js); uses the Log Health helpers (log-health/health-checks.js)
- *     tune: { tuneName, threshold } | null — threshold = m1pkgKnock().threshold (Knock Threshold by rpm)
+ *     tune: { tuneName, threshold, injection } | null — threshold = m1pkgKnock().threshold (Knock Threshold by rpm),
+ *           injection = { startLimit, primaryLimit } (dBTDC, from m1pkgDi)
+ *     Needs di-timing/di-calc.js for the injection check (start against the exhaust valve closing, end against the spark).
  *   pull = { file, t0, t1, seconds, full (pedal ≥ 85 %), gear, rpm: [start, end], pedal, mapMax, metrics: {…}, flags: [{ severity, text }] }
  *   finding = { group, severity, title, detail, times, channels } (as Log Health; times only for single-log runs)
  *
@@ -20,6 +22,9 @@ var PU_RAIL_UNDER_BAR = 10, PU_RAIL_UNDER_PCT = 10;
 var PU_LOW_KPA = 250, PU_LOW_DROP = 50;
 var PU_DUTY = 85, PU_IAT_HOT = 60, PU_VOLTS = 12.5;
 var PU_OIL_PER_1000 = 69;   // kPa per 1000 rpm (the "10 psi per 1000 rpm" rule)
+// Cam for the exhaust valve closing: the DI Injection Timing page's defaults (LT4 figures, not confirmed against this engine's cam
+// card). The LT4's phaser moves both lobes, so the logged Inlet Camshaft Bank 1 Position advance moves the exhaust closing too.
+var PU_CAM = { intakeDur: 229, exhaustDur: 244, basis: '050', lsa: 118, icl: 114, phaserMovesExhaust: true };
 
 function puInterp(xs, ys, x) {
     if (xs.length === 1 || !(x > xs[0])) return ys[0];
@@ -67,7 +72,8 @@ function puLogPulls(log, file, tune) {
         railCtl: g('Fuel Pressure Direct Bank 1 Control'), low: g('Fuel Pressure'), pump2: g('Fuel Pump 2 State'), duty: g('Fuel Injector Primary Duty Cycle'),
         pw: g('Fuel Cylinder 1 Primary Output Pulse Width 1'), flow: g('Fuel Flow'), batt: g('ECU Battery Voltage'), injV: g('ECU Injector Supply Voltage'),
         oilP: g('Engine Oil Pressure'), oilT: g('Engine Oil Temperature'), thrLim: g('Throttle Limit State'), spdLim: g('Engine Speed Limit State'),
-        ignCut: g('Ignition Cut'), cutCount: g('Fuel Output Cut Count'), overrun: g('Engine Overrun State')
+        ignCut: g('Ignition Cut'), cutCount: g('Fuel Output Cut Count'), overrun: g('Engine Overrun State'),
+        soi: g('Fuel Cylinder 1 Primary Output Pulse Angle 1'), cam: g('Inlet Camshaft Bank 1 Position')
     };
     var knock = [], ktrim = [];
     for (var cy = 1; cy <= 8; cy++) { knock.push(g('Ignition Cylinder ' + cy + ' Knock Level')); ktrim.push(g('Ignition Cylinder ' + cy + ' Knock Trim')); }
@@ -186,6 +192,37 @@ function puLogPulls(log, file, tune) {
         }
         if (ch.oilT) m.oilTempMax = puMax(puSlice(ch.oilT, k0, k1));
 
+        // Injection: the start (logged angle) against the exhaust valve closing and Injection Start Limit, the end (start − pulse
+        // crank degrees) against the spark, intake BDC and Fuel Timing Primary Limit Main
+        if (ch.soi && ch.pw && typeof diValveEvents === 'function') {
+            var soiMax = null, soiMin = null, eoiMin = null, gapMin = null, eoiAt = null;
+            for (k = k0; k < k1; k++) {
+                var soi = ch.soi[k], pwk = ch.pw[k];
+                if (!(soi > 0) || !(pwk > 0)) continue;
+                var eoi = soi - diCrankDeg(pwk, rpm[k]);
+                if (soiMax === null || soi > soiMax) soiMax = soi;
+                if (soiMin === null || soi < soiMin) soiMin = soi;
+                if (eoiMin === null || eoi < eoiMin) { eoiMin = eoi; eoiAt = k; }
+                if (ch.ign && !isNaN(ch.ign[k]) && (gapMin === null || eoi - ch.ign[k] < gapMin)) gapMin = eoi - ch.ign[k];
+            }
+            if (soiMax !== null) {
+                var adv = ch.cam ? lhQuantile(puSlice(ch.cam, k0, k1), 0.5) || 0 : 0;
+                var evc = diValveEvents(Object.assign({ phaser: adv }, PU_CAM)).at006.dBTDC.evc, inj = (tune && tune.injection) || {};
+                m.injection = { soiMax: soiMax, soiMin: soiMin, eoiMin: eoiMin, sparkGap: gapMin, evc: evc, camAdvance: adv,
+                    startLimit: inj.startLimit !== undefined ? inj.startLimit : null, primaryLimit: inj.primaryLimit !== undefined ? inj.primaryLimit : null,
+                    eoiRpm: eoiAt !== null ? Math.round(rpm[eoiAt]) : null };
+                if (gapMin !== null && gapMin < DI_SPARK_CLEARANCE) flag(gapMin < 5 ? 'fail' : 'warn', 'Injection ends ' + gapMin.toFixed(0) + '° before the spark (under ' +
+                    DI_SPARK_CLEARANCE + '°): start injection earlier or shorten the pulse (rail pressure)', -gapMin);
+                if (m.injection.primaryLimit !== null && eoiMin < m.injection.primaryLimit) flag('warn', 'Injection would end at ' + eoiMin.toFixed(0) +
+                    ' dBTDC, after Fuel Timing Primary Limit Main (' + m.injection.primaryLimit + '): the pulse is cut short', m.injection.primaryLimit - eoiMin);
+                if (soiMax > evc) flag('warn', 'Injection starts at ' + soiMax.toFixed(0) + ' dBTDC, ' + (soiMax - evc).toFixed(0) + '° before the exhaust valve closes (≈ ' +
+                    evc.toFixed(0) + ' dBTDC; stock-cam figures, unconfirmed): fuel can go out the exhaust', soiMax - evc);
+                if (m.injection.startLimit !== null && soiMax >= m.injection.startLimit - 0.5) flag('info', 'Start of injection reached Injection Start Limit (' +
+                    m.injection.startLimit + ' dBTDC): the M1 wanted an earlier start for this pulse');
+                else if (eoiMin < DI_BDC) flag('info', 'Injection runs ' + (DI_BDC - eoiMin).toFixed(0) + '° into the compression stroke (ends at ' + eoiMin.toFixed(0) + ' dBTDC)');
+            }
+        }
+
         // Limits and cuts
         [[ch.thrLim, 'Throttle Limit State'], [ch.spdLim, 'Engine Speed Limit State']].forEach(function (x) {
             if (!x[0]) return;
@@ -202,6 +239,7 @@ function puLogPulls(log, file, tune) {
         pulls.push(pull);
     });
     return { pulls: pulls, missing: false, lambdaHz: (c.native('Exhaust Lambda Bank 1') || {}).freq || null, dutyHz: (c.native('Fuel Injector Primary Duty Cycle') || {}).freq || null,
+             soiHz: (c.native('Fuel Cylinder 1 Primary Output Pulse Angle 1') || {}).freq || null,
              knockTrims: ktrim.some(Boolean) };
 }
 
@@ -248,6 +286,9 @@ function puAnalyze(logs, tune) {
     if (!per.some(function (p) { return p.knockTrims; })) add('Log', 'info', 'Knock trims are not logged', 'Log Ignition Cylinder 1–8 Knock Trim (20 Hz) to see retard per cylinder in each pull.');
     var slowDuty = per.filter(function (p) { return p.dutyHz && p.dutyHz < 5; });
     if (slowDuty.length) add('Log', 'info', 'Injector duty is logged at ' + slowDuty[0].dutyHz + ' Hz', 'A few-second pull gets only a few duty samples: log Fuel Injector Primary Duty Cycle at 10–20 Hz.');
+    var slowSoi = per.filter(function (p) { return p.soiHz && p.soiHz < 5; });
+    if (slowSoi.length) add('Log', 'info', 'Injection angle is logged at ' + slowSoi[0].soiHz + ' Hz', 'A pull gets a few start-of-injection readings; the end of injection ' +
+        'uses them held. Log Fuel Cylinder 1 Primary Output Pulse Angle 1 at 10 Hz (same as the pulse width).');
     var slowLam = per.filter(function (p) { return p.lambdaHz && p.lambdaHz < 20; });
     if (slowLam.length) add('Log', 'info', 'Lambda is logged at ' + slowLam[0].lambdaHz + ' Hz', 'Fine for whole-pull numbers; 50 Hz shows short lean spikes and the tip-in.');
     return { pulls: pulls, findings: findings };

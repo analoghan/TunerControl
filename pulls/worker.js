@@ -1,8 +1,8 @@
 /**
  * pulls/worker.js — Pull Report worker. Loaded after lib/ld-parser.js, ve-table/worker.js (splitCsvLine for CSV logs),
- * log-viewer/log-file.js, log-health/health-checks.js (log helpers) and pull-analysis.js; replaces the VE worker's handler.
+ * log-viewer/log-file.js, log-health/health-checks.js (log helpers), di-timing/di-calc.js and pull-analysis.js; replaces the VE worker's handler.
  *
- *   { type: 'analyze', logs: [{ data: ArrayBuffer | string, name }], tune: { tuneName, threshold } | null }
+ *   { type: 'analyze', logs: [{ data: ArrayBuffer | string, name }], tune: { tuneName, threshold, injection } | null }
  *     → { type: 'result', result: puAnalyze() } | { type: 'error', message }
  */
 
