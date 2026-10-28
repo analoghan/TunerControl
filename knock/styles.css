@@ -532,3 +532,10 @@ h1 {
 .knock-table.clickable tbody tr { cursor: pointer; }
 .knock-table.clickable tbody tr:hover td { background: #1f1f1f; }
 #log-panel { margin-top: 12px; }
+
+/* Threshold & gain calibration */
+.calibration-head { font-size: 0.95rem; margin: 16px 0 6px; color: #ddd; }
+.calibration-note { padding: 8px 12px; margin: 0 0 8px; border-left: 3px solid #ff9800; background: rgba(255,152,0,0.08); color: #ffb74d; font-size: 0.85rem; }
+.knock-table td.calibration-why { text-align: left; color: #999; font-size: 0.78rem; }
+.copy-btn { margin-top: 10px; padding: 6px 14px; color: #fff; background: #222; border: 1px solid #E31837; border-radius: 4px; cursor: pointer; font-size: 0.82rem; }
+.copy-btn:hover { background: #333; }

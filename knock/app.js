@@ -140,8 +140,17 @@ function knockSettings() {
         threshold: useTune ? tuneKnock.threshold : fixed,
         thresholdLabel: useTune ? 'the tune\'s Knock Threshold (' + fmtThresholdTable(tuneKnock.threshold) + ')' : 'the fixed ' + fixed + '% threshold',
         ignitionAxes: tuneKnock ? tuneKnock.ignitionAxes : null,
-        inputs: tuneKnock ? tuneKnock.inputs : null
+        inputs: tuneKnock ? tuneKnock.inputs : null,
+        gains: tuneKnock ? tuneKnock.gains : null,
+        frequencyOk: knockFrequencyOk()
     };
+}
+
+/** false when the tune's Knock Frequency A is more than 25 % from both bore-based orders; null when it can't be judged. */
+function knockFrequencyOk() {
+    var f = knockFrequencies(parseFloat(boreInput.value)), fa = tuneKnock && tuneKnock.frequencies ? tuneKnock.frequencies[0] : null;
+    if (!f || !(fa > 0)) return null;
+    return Math.min(Math.abs(fa / f.first - 1), Math.abs(fa / f.second - 1)) <= 0.25;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,8 +215,9 @@ function handleFileSelect(event) {
  */
 function createKnockWorker() {
     var ldUrl = new URL('../lib/ld-parser.js', window.location.href).href;   // .ld reader, used by the worker
+    var calUrl = new URL('knock-calibration.js', window.location.href).href;
     var workerUrl = new URL('worker.js', window.location.href).href;
-    var blob = new Blob(['importScripts("' + ldUrl + '", "' + workerUrl + '");'], { type: 'application/javascript' });
+    var blob = new Blob(['importScripts("' + ldUrl + '", "' + calUrl + '", "' + workerUrl + '");'], { type: 'application/javascript' });
     return new Worker(URL.createObjectURL(blob));
 }
 
@@ -433,6 +443,7 @@ function renderReport(analysis) {
     renderCylinderDistribution(analysis.cylinderDistribution);
 
     renderSensorHealth(analysis.sensorHealth);
+    renderCalibration(analysis.calibration);
     if (typeof rsSaveControl === 'function' && lastRunInfo) {
         var run = lastRunInfo;
         rsSaveControl(document.getElementById('history-save'), function () {
@@ -768,6 +779,46 @@ function renderSensorHealth(health) {
             (weakCyl[p.cylinderIndex] ? 'Reads far below the others' : '') + '</td></tr>';
     });
     content.innerHTML = html + '</tbody></table>';
+}
+
+function renderCalibration(cal) {
+    var content = document.getElementById('calibration-content');
+    clearElement(content);
+    if (!cal || !cal.threshold.length) { renderUnavailable(content, cal && cal.notes.length ? cal.notes.join(' ') : 'No knock level data.'); return; }
+    var esc = function (s) { return String(s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); };
+    var html = cal.notes.map(function (n) { return '<p class="calibration-note">' + esc(n) + '</p>'; }).join('');
+    html += '<p class="section-note">' + Math.round(cal.samples.seconds) + ' s of quiet running used, ' + cal.samples.loadSeconds.toFixed(1) + ' s of it at ≥ ' +
+        cal.settings.loadKpa + ' kPa.</p>';
+    html += '<h3 class="calibration-head">Knock Cylinder Gain</h3><table class="knock-table"><thead><tr><th>Cylinder</th><th>Knock input</th><th>Gain now</th>' +
+        '<th>Median level &gt; 2000 rpm</th><th>Suggested</th></tr></thead><tbody>';
+    cal.gains.forEach(function (g) {
+        html += '<tr><td>Cyl ' + g.cylinder + '</td><td>' + esc(g.input || '—') + '</td><td>' + (g.current !== null ? g.current + ' %/V' : '—') + '</td><td>' +
+            (isNaN(g.median) ? '—' : g.median.toFixed(2) + '%') + '</td><td>' + (g.change === null ? 'keep' : (g.suggested !== null ? '<b>' + g.suggested + ' %/V</b> ' : '') +
+            '(' + (g.change > 0 ? '+' : '') + Math.round(g.change * 100) + ' %)') + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    html += '<h3 class="calibration-head">Knock Threshold</h3><table class="knock-table"><thead><tr><th>Engine speed</th><th>Threshold now</th>' +
+        '<th>Data (at load)</th><th>Noise (loudest cyl)</th><th>Suggested</th><th></th></tr></thead><tbody>';
+    cal.threshold.forEach(function (t) {
+        html += '<tr><td>' + t.rpm + ' rpm</td><td>' + (t.current !== null ? t.current.toFixed(1) + '%' : '—') + '</td><td>' + t.seconds.toFixed(1) + ' s (' +
+            t.loadSeconds.toFixed(1) + ' s)</td><td>' + (t.noise !== null && !isNaN(t.noise) ? t.noise.toFixed(2) + '% (' + t.loudest + ')' : '—') + '</td><td>' +
+            (t.suggested !== null ? '<b>' + t.suggested.toFixed(1) + '%</b> ' + t.action : t.action) + '</td><td class="calibration-why">' + esc(t.note) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    var any = cal.threshold.some(function (t) { return t.suggested !== null; });
+    if (any) html += '<button id="copy-threshold" class="copy-btn">Copy threshold row (suggested, else current)</button>' +
+        '<p class="section-note">Lower a threshold in steps and watch for knock trim on the next drive; a big drop makes knock control far more sensitive.</p>';
+    content.innerHTML = html;
+    var btn = document.getElementById('copy-threshold');
+    if (btn) btn.onclick = function () {
+        var text = cal.threshold.map(function (t) { return (t.suggested !== null ? t.suggested : t.current !== null ? t.current : '').toString(); }).join('\t');
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); btn.textContent = 'Copied'; } catch (e) { btn.textContent = 'Copy failed'; }
+        document.body.removeChild(ta);
+        setTimeout(function () { btn.textContent = 'Copy threshold row (suggested, else current)'; }, 1200);
+    };
 }
 
 function renderKnockEvents(events, total) {

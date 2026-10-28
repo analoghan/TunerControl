@@ -206,6 +206,22 @@
       and real knock on those cylinders may go undetected. Fix this before relying on knock control.</p>
 
     <!-- Report Sections -->
+    <h2 id="calibration">Threshold &amp; Gain Calibration</h2>
+    <p>Follows MoTeC's spark and knock training (M1 training 52), in its order:</p>
+    <ol>
+      <li><b>Frequency first.</b> Knock levels — and so gains and threshold — only hold for the Knock Frequency they were logged at. When frequency A is
+        more than 25 % from both bore-based orders (set the bore above), the section shows the measured levels but suggests nothing.</li>
+      <li><b>Even out the cylinders</b> on each knock input with Knock Cylinder N Gain (% per volt; the level scales with it): each cylinder's median level
+        above 2000 rpm against its input's median, ignoring differences within ±15 %. A whole knock input reading several times quieter than the other
+        is a sensor, wiring, mounting or frequency problem — gains for it are not suggested.</li>
+      <li><b>Threshold</b> at each engine speed site of Knock Threshold: the loudest cylinder's 99.5th-percentile level (with the suggested gains) × 1.25.
+        Lowering needs at least 10 s at ≥ 90 kPa at that speed; raising from part-load data needs 5 s and is withheld when one cylinder reads 2.5×
+        the next on its input (that may be real knock).</li>
+    </ol>
+    <p>Only quiet samples count: engine warm and above 1000 rpm, no overrun cut, no knock retard (log Ignition Cylinder N Knock Trim), and nothing within
+      0.5 s of a level above the current threshold. MoTeC calibrates with ignition timing pulled back to about half so nothing knocks; levels logged
+      with normal timing can include light knock, so lower a threshold in steps and watch knock trim on the next drive.</p>
+
     <h2 id="reports">Report Sections</h2>
 
     <h3>Diagnostic Summary</h3>

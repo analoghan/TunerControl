@@ -99,6 +99,16 @@
         <div id="sensor-health-content" class="report-content"></div>
       </div>
 
+      <div id="report-calibration" class="report-block">
+        <h2>Threshold &amp; Gain Calibration</h2>
+        <p class="section-note">MoTeC's method (M1 training 52): with no knock, even out the cylinders on each knock input with Knock Cylinder Gain
+          (the level scales with it), then set Knock Threshold at each engine speed about 25 % above the loudest cylinder's no-knock level
+          (99.5th percentile). Frequency comes first — levels only hold for the frequency they were logged at. Samples near any level above the current
+          threshold, in overrun cut, cold, or with knock retard are left out. MoTeC calibrates with timing pulled back to about half so nothing
+          knocks; levels from normal timing may include light knock.</p>
+        <div id="calibration-content" class="report-content"></div>
+      </div>
+
       <div id="report-events" class="report-block">
         <h2>Knock Events</h2>
         <p class="section-note">Each stretch where a cylinder's knock level went above the threshold. Click one to see it in the log.</p>

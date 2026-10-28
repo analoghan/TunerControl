@@ -6,6 +6,7 @@
  *   threshold: { rpm: [..], load: [..] | null, values: [[% per rpm site] per load site] } | null   (Knock.Threshold)
  *   ignitionAxes: { rpm: [..], load: [..], loadInput } | null    (Ignition.Timing.Main sites, to bin knock like the table)
  *   inputs: ['Knock Input 1', …] per cylinder (index 0 = cylinder 1) | null
+ *   gains: [Knock Cylinder N Gain, %/V] per cylinder | null
  *   trimLimit, trimGain: first site, as stored (the tune shows both in degrees) | null
  *   frequencies: [A, B, C, D] Hz | null      mode: Knock Mode label, e.g. 'Enable A B C D' | null
  *   notes: [string]
@@ -28,7 +29,7 @@ function m1knSites(a, scale) {
 }
 
 function m1pkgKnock(pkg) {
-    var out = { tuneName: pkg.tuneName, threshold: null, ignitionAxes: null, inputs: null, trimLimit: null, trimGain: null, notes: [] };
+    var out = { tuneName: pkg.tuneName, threshold: null, ignitionAxes: null, inputs: null, gains: null, trimLimit: null, trimGain: null, notes: [] };
 
     var th = m1knItem(pkg, 'Knock.Threshold');
     if (th && th.kind === 'Table') {
@@ -72,6 +73,12 @@ function m1pkgKnock(pkg) {
         if (!it) return null;
         return it.values ? it.values[0] : typeof it.value === 'number' ? it.value : null;
     }
+    var gains = [];
+    for (c = 1; c <= 8; c++) {
+        var g = m1knItem(pkg, 'Knock.Cylinder ' + c + '.Gain.Value');
+        gains.push(g && typeof g.value === 'number' ? Math.round(g.value * 1000) / 10 : null);
+    }
+    if (gains.some(function (v) { return v !== null; })) out.gains = gains;
     out.trimLimit = first('Knock.Trim.Limit');
     out.trimGain = first('Knock.Trim.Gain');
     out.frequencies = ['A', 'B', 'C', 'D'].map(function (k) { return first('Knock.Frequency ' + k); });

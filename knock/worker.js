@@ -1435,6 +1435,8 @@ function runAnalysisPipeline(settings) {
     // Step 2: Classify knock events
     var events = classifyKnockEvents(cachedData, resolved, threshold);
     var health = computeKnockSensorHealth(cachedData, resolved, settings.inputs || null);
+    var calibration = typeof knockCalibrate === 'function' ? knockCalibrate(cachedData, resolved, { threshold: threshold, gains: settings.gains || null,
+        inputs: settings.inputs || null, frequencyOk: settings.frequencyOk }) : null;
 
     self.postMessage({ type: 'progress', phase: 'Computing cylinder distribution', percent: 25 });
 
@@ -1529,6 +1531,7 @@ function runAnalysisPipeline(settings) {
             knockRpmLoadGrid: knockRpmLoadGrid,
             diagnostics: diagnostics,
             sensorHealth: health,
+            calibration: calibration,
             events: events.slice(0, 2000),
             totalEvents: events.length,
             threshold: threshold,

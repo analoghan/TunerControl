@@ -65,7 +65,9 @@ the lean spike, and skips events that overlap a fuel cut (overrun cut or injecto
 
 ### Knock Analyzer
 Knock events per stretch (not per sample) against the tune's own **Knock Threshold** table, per cylinder, with an RPM × load grid, operating
-condition correlation and timing recommendations. Includes a knock sensor check (one sensor reading far lower than the other), the LT4's
+condition correlation and timing recommendations. Threshold & gain calibration (MoTeC training method): per-cylinder Knock Gain to even out each knock input, and Knock Threshold per engine speed
+from the loudest cylinder's no-knock level × 1.25 — withheld until the knock frequency is near a bore-based order, and only where the log has enough
+data at load. Includes a knock sensor check (one sensor reading far lower than the other), the LT4's
 knock frequencies (first and second order from bore size) and the M1 knock control setup. Events open in the log.
 
 ### DI Fuel Pressure Deep Dive
@@ -307,6 +309,7 @@ node tests/test-worker-pipeline.js        # VE parsing and analysis
 node tests/run-channel-resolver-tests.js  # VE channel names
 node tests/run-property10.js              # VE correction property test
 node tests/test-knock-analysis.js         # Knock Analyzer
+node tests/test-knock-calibration.js      # Knock threshold and gain calibration
 node tests/test-knock-channel-resolution.js
 node tests/test-cylinder-distribution.js
 node tests/test-timing-correlation.js
