@@ -324,7 +324,14 @@ part of the repository.
 2. Open `http://localhost:8080/tests/index.html` in a browser.
 3. The test harness runs all unit and property-based tests and displays a pass/fail summary.
 
-Node tests (server API, analysis workers and the smaller tools) — each script prints its own pass/fail count:
+Node tests (server API, analysis workers and the smaller tools) — run them all with one command, or a few by name:
+
+```bash
+node tests/run-all.js                     # every Node test script, one line each and a total
+node tests/run-all.js knock pulls         # only scripts whose name contains "knock" or "pulls"
+```
+
+Or run a script on its own — each prints its own pass/fail count:
 
 ```bash
 node tests/run-server-tests.js            # server API and database (in-memory SQLite)

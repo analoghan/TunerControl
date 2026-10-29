@@ -7,17 +7,9 @@
   <link rel="stylesheet" href="../transient-fuel/styles.css" />
   <link rel="stylesheet" href="../log-viewer/log-panel.css">
   <link rel="stylesheet" href="../lib/print-report.css">
+  <link rel="stylesheet" href="../lib/findings.css">
   <link rel="stylesheet" href="../history/run-save.css">
   <style>
-    .lh-group h3 { margin: 18px 0 6px; font-size: 1rem; color: #ddd; }
-    .lh-finding { padding: 8px 12px; margin-bottom: 6px; border-radius: 4px; border-left: 3px solid; background: #161616; }
-    .lh-finding.fail { border-left-color: #f44336; } .lh-finding.warn { border-left-color: #ff9800; }
-    .lh-finding.info { border-left-color: #2196f3; } .lh-finding.ok { border-left-color: #4caf50; }
-    .lh-title { font-weight: 600; font-size: 0.9rem; }
-    .lh-sev { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 6px; }
-    .lh-finding.fail .lh-sev { color: #f44336; } .lh-finding.warn .lh-sev { color: #ff9800; }
-    .lh-finding.info .lh-sev { color: #2196f3; } .lh-finding.ok .lh-sev { color: #4caf50; }
-    .lh-detail { color: #bbb; font-size: 0.85rem; margin-top: 3px; }
     .cl-btn { margin-top: 5px; padding: 3px 10px; font-size: 0.75rem; color: #fff; background: #222; border: 1px solid #E31837; border-radius: 4px; cursor: pointer; }
     .cl-btn:hover { background: #333; }
     .cl-table { border-collapse: collapse; font-size: 0.8rem; margin: 6px 0 4px; }
@@ -27,8 +19,6 @@
     .cl-table td.shorter, .cl-table td.longer { color: #ff9800; font-weight: 600; }
     .cl-scroll { overflow-x: auto; }
     .cl-legend { font-size: 0.8rem; color: #999; margin-top: 4px; }
-    #print-report .lh-finding { background: #fff !important; break-inside: avoid; }
-    #print-report .lh-title { color: #111 !important; } #print-report .lh-detail { color: #333 !important; }
     #print-report .cl-table th { background: #eee !important; color: #111 !important; }
     #print-report .cl-table td { color: #111 !important; }
   </style>
