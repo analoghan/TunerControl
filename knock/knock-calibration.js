@@ -190,7 +190,7 @@ function knockCalibrate(data, channels, opts) {
         'the frequency the levels were logged at. Choose the frequency first (log with A–D swept across the orders), then recalibrate.');
     if (out.weakGroup) out.notes.push(out.weakGroup.input + ' reads ' + out.weakGroup.ratio.toFixed(1) + '× lower than the other input: no gain changes ' +
         'are suggested for its cylinders — check that sensor, its wiring and mounting torque, and the frequency, before raising gains to match.');
-    if (!trims.length) out.notes.push('Ignition Cylinder Knock Trim isn\'t logged, so retard can\'t be excluded — log it.');
+    if (!trims.length) out.notes.push('Ignition Cylinder 1–8 Trim Knock isn\'t logged, so retard can\'t be excluded — log it.');
     return out;
 }
 

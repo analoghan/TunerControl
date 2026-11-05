@@ -76,7 +76,7 @@ function puLogPulls(log, file, tune) {
         soi: g('Fuel Cylinder 1 Primary Output Pulse Angle 1'), cam: g('Inlet Camshaft Bank 1 Position')
     };
     var knock = [], ktrim = [];
-    for (var cy = 1; cy <= 8; cy++) { knock.push(g('Ignition Cylinder ' + cy + ' Knock Level')); ktrim.push(g('Ignition Cylinder ' + cy + ' Knock Trim')); }
+    for (var cy = 1; cy <= 8; cy++) { knock.push(g('Ignition Cylinder ' + cy + ' Knock Level')); ktrim.push(g('Ignition Cylinder ' + cy + ' Trim Knock') || g('Ignition Cylinder ' + cy + ' Knock Trim')); }
     var lagN = Math.round(PU_LAMBDA_DELAY_S / c.dt), holdN = Math.max(1, Math.round(0.2 / c.dt)), preN = Math.round(1 / c.dt);
 
     eps.forEach(function (e) {
@@ -129,11 +129,15 @@ function puLogPulls(log, file, tune) {
         var kMax = Math.max.apply(null, m.knock.map(function (x) { return x.pctOfThreshold || 0; }).concat([0]));
         if (over.length) flag('fail', 'Knock above the threshold on cylinder ' + over.map(function (x) { return x.cylinder + ' (' + Math.round(x.pctOfThreshold) + ' %)'; }).join(', '), kMax);
         else if (close.length) flag('warn', 'Knock level near the threshold on cylinder ' + close.map(function (x) { return x.cylinder + ' (' + Math.round(x.pctOfThreshold) + ' %)'; }).join(', '), kMax);
-        var trims = ktrim.map(function (kt, i) { return kt ? { cylinder: i + 1, min: puMin(puSlice(kt, k0, k1)) } : null; }).filter(Boolean);
+        // Knock trim is logged as retard (dRTD, counts up from 0); take the size either way round.
+        var trims = ktrim.map(function (kt, i) {
+            return kt ? { cylinder: i + 1, max: puMax(puSlice(kt, k0, k1).map(Math.abs)) } : null;
+        }).filter(Boolean);
         if (trims.length) {
             m.knockTrim = trims;
-            var pulled = trims.filter(function (x) { return x.min < -0.1; });
-            if (pulled.length) flag('fail', 'Knock control pulled timing: ' + pulled.map(function (x) { return 'cyl ' + x.cylinder + ' ' + x.min.toFixed(1) + '°'; }).join(', '));
+            var pulled = trims.filter(function (x) { return x.max > 0.1; });
+            var tMax = Math.max.apply(null, pulled.map(function (x) { return x.max; }).concat([0]));
+            if (pulled.length) flag('fail', 'Knock control pulled timing: ' + pulled.map(function (x) { return 'cyl ' + x.cylinder + ' ' + x.max.toFixed(1) + '°'; }).join(', '), tMax);
         }
 
         // Timing and states
@@ -283,7 +287,7 @@ function puAnalyze(logs, tune) {
     if (!Object.keys(kinds).length) add('Across pulls', 'ok', 'Nothing flagged in any pull', 'Lambda within ' + PU_LEAN + ' λ of aim, knock under 80 % of the threshold, rail and ' +
         'low-side pressure held, duty under ' + PU_DUTY + ' %, no limits or cuts.');
 
-    if (!per.some(function (p) { return p.knockTrims; })) add('Log', 'info', 'Knock trims are not logged', 'Log Ignition Cylinder 1–8 Knock Trim (20 Hz) to see retard per cylinder in each pull.');
+    if (!per.some(function (p) { return p.knockTrims; })) add('Log', 'info', 'Knock trims are not logged', 'Log Ignition Cylinder 1–8 Trim Knock (20 Hz) to see retard per cylinder in each pull.');
     var slowDuty = per.filter(function (p) { return p.dutyHz && p.dutyHz < 5; });
     if (slowDuty.length) add('Log', 'info', 'Injector duty is logged at ' + slowDuty[0].dutyHz + ' Hz', 'A few-second pull gets only a few duty samples: log Fuel Injector Primary Duty Cycle at 10–20 Hz.');
     var slowSoi = per.filter(function (p) { return p.soiHz && p.soiHz < 5; });

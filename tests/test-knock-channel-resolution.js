@@ -211,5 +211,11 @@ check('alternative ign_timing_comp name resolves correctly', function() {
     if (result.resolved.ign_timing_comp !== 1) throw new Error('ign_timing_comp expected 1, got ' + result.resolved.ign_timing_comp);
 });
 
+check('knock trim resolves from the logged M1 name (Trim Knock) and the older Knock Trim name', function() {
+    const result = resolveChannels(['Time', 'Ignition Cylinder 1 Knock Level', 'Ignition Cylinder 5 Trim Knock', 'Ignition Cylinder 6 Knock Trim']);
+    if (result.resolved.knock_trim_5 !== 2) throw new Error('knock_trim_5 expected 2, got ' + result.resolved.knock_trim_5);
+    if (result.resolved.knock_trim_6 !== 3) throw new Error('knock_trim_6 expected 3, got ' + result.resolved.knock_trim_6);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed > 0 ? 1 : 0);

@@ -119,12 +119,13 @@ function igAnalyze(log, tune) {
             [], [['Ignition Timing'], ['Ignition Timing Compensation']]);
     }
 
+    var hasKnockTrim = c.has('Ignition Cylinder 1 Trim Knock') || c.has('Ignition Cylinder 1 Knock Trim');
     // Departures: Normal state at a steady load, ≥ 1° off for ≥ 0.3 s — knock control, a limit, or something not modelled
     var w = Math.round(0.2 / c.dt);
     function steady(k) { var a = load[Math.max(0, k - w)], b = load[Math.min(c.n - 1, k + w)]; return Math.abs(b - a) < IG_STEADY_KPA && Math.abs(load[k] - a) < IG_STEADY_KPA; }
     var below = lhMask(c, function (k) { return normal[k] && diff[k] <= -IG_DEPART_DEG && steady(k); });
     var above = lhMask(c, function (k) { return normal[k] && diff[k] >= IG_DEPART_DEG && steady(k); });
-    [[below, 'below', 'Knock control (Ignition Cylinder N Knock Trim), a torque reduction or a limit pulls timing the table doesn\'t; '],
+    [[below, 'below', 'Knock control (Ignition Cylinder N Trim Knock), a torque reduction or a limit pulls timing the table doesn\'t; '],
      [above, 'above', 'Something adds timing the table and compensation don\'t explain; ']].forEach(function (d) {
         var eps = lhEpisodes(c, d[0], IG_DEPART_S, 0.2);
         if (!eps.length) return;
@@ -132,15 +133,15 @@ function igAnalyze(log, tune) {
         eps.forEach(function (e) {
             for (var k = Math.round(e[0] / c.dt); k < Math.round(e[1] / c.dt) && k < c.n; k++) if (d[0][k] && Math.abs(diff[k]) > Math.abs(worst)) { worst = diff[k]; at = k; }
         });
-        var knockTrim = c.has('Ignition Cylinder 1 Knock Trim');
+        var knockTrim = hasKnockTrim;
         out.departures[d[1]] = { seconds: eps.reduce(function (a, e) { return a + e[1] - e[0]; }, 0), episodes: eps.length, worst: Math.abs(worst) };
         add('Timing', 'warn', 'Timing ' + d[1] + ' the tune by ≥ ' + IG_DEPART_DEG + '°: ' + lhEpisodeText(eps),
             d[2] + 'up to ' + lhFmt(Math.abs(worst)) + '° at ' + lhAt(c.time[at]) + ' (' + Math.round(rpm[at]) + ' rpm, ' + Math.round(load[at]) + ' kPa).' +
-            (d[1] === 'below' && !knockTrim ? ' Log Ignition Cylinder 1–8 Knock Trim to tell knock control from the rest.' : ''),
+            (d[1] === 'below' && !knockTrim ? ' Log Ignition Cylinder 1–8 Trim Knock to tell knock control from the rest.' : ''),
             eps, [['Ignition Timing'], ['Ignition Timing Compensation', 'Ignition Timing State']]);
     });
-    if (!c.has('Ignition Cylinder 1 Knock Trim')) add('Log', 'info', 'Knock trims are not logged',
-        'Log Ignition Cylinder 1–8 Knock Trim (20 Hz) so retard from knock control shows per cylinder.');
+    if (!hasKnockTrim) add('Log', 'info', 'Knock trims are not logged',
+        'Log Ignition Cylinder 1–8 Trim Knock (20 Hz) so retard from knock control shows per cylinder.');
 
     // --- Compensation ------------------------------------------------------------------------------------------------
     var boost = lhMask(c, function (k) { return normal[k] && load[k] >= IG_BOOST_KPA; }), cruise = lhMask(c, function (k) { return normal[k] && load[k] < 80; });

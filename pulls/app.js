@@ -151,7 +151,7 @@ function detailHtml(p) {
         it('Injection end (latest)', fmt(inj.eoiMin) + ' dBTDC' + (inj.eoiRpm ? ' at ' + inj.eoiRpm + ' rpm' : '') +
             (inj.sparkGap !== null ? ', ' + fmt(inj.sparkGap) + '° before the spark' : '') + (inj.primaryLimit !== null ? '; Limit Main ' + fmt(inj.primaryLimit) : ''));
     }
-    if (m.knockTrim) it('Knock trim (min)', m.knockTrim.map(function (x) { return x.cylinder + ': ' + fmt(x.min, 1) + '°'; }).join(', '));
+    if (m.knockTrim) it('Knock retard (max)', m.knockTrim.map(function (x) { return x.cylinder + ': ' + fmt(x.max, 1) + '°'; }).join(', '));
     if (m.iat) it('Inlet air', fmt(m.iat.start) + ' → ' + fmt(m.iat.end) + ' °C (max ' + fmt(m.iat.max) + ')');
     it('Charge temperature max', m.chargeMax !== undefined ? fmt(m.chargeMax) + ' °C' : null);
     it('Coolant max', m.coolantMax !== undefined ? fmt(m.coolantMax, 1) + ' °C' : null);

@@ -44,6 +44,10 @@ function csv(seconds, row) {
     }
     return lines.join('\n');
 }
+/** Adds a column to a MoTeC CSV made by csv(): name, then fn(t) per data row. */
+function withColumn(text, name, fn) {
+    return text.split('\n').map(function (l, i) { return l + ',' + (i === 0 ? name : i === 1 ? '' : fn(parseFloat(l))); }).join('\n');
+}
 function run(text, tune) { ctx.text = text; ctx.tune = tune === undefined ? TUNE : tune; return vm.runInContext('igAnalyze(lvOpenLog(text, "x.csv"), tune)', ctx); }
 function find(r, re) { return r.findings.filter(function (f) { return re.test(f.title); }); }
 
@@ -86,6 +90,13 @@ test('states are counted; cells carry timing and knock margin', function () {
     var cell = r.cells.filter(function (x) { return x.rpm === 1000 || x.rpm === 6000; })[0];
     assert.ok(cell && cell.seconds > 30, JSON.stringify(r.cells));
     assert.ok(find(r, /Knock level reaches/).length, 'a 21 % level against 24 % (the threshold at 3000 rpm) is ≥ 80 %');
+});
+
+test('knock trims count as logged under the M1 name Ignition Cylinder N Trim Knock', function () {
+    var r = run(csv(30));
+    assert.ok(find(r, /Knock trims are not logged/).length, 'note without the channel');
+    r = run(withColumn(csv(30), 'Ignition Cylinder 1 Trim Knock', function () { return 0; }));
+    assert.strictEqual(find(r, /Knock trims are not logged/).length, 0);
 });
 
 test('tune reader: dBTDC = −stored, Main Switch slice, 1-D compensation, zero tables skipped', function () {

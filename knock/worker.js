@@ -116,14 +116,14 @@ const CHANNEL_MAP = {
     coolant_temp:   ['Coolant Temperature'],
     overrun:        ['Engine Overrun State'],
     load_norm:      ['Engine Load Normalised', 'Engine Load Normalized'],
-    knock_trim_1:   ['Ignition Cylinder 1 Knock Trim'],
-    knock_trim_2:   ['Ignition Cylinder 2 Knock Trim'],
-    knock_trim_3:   ['Ignition Cylinder 3 Knock Trim'],
-    knock_trim_4:   ['Ignition Cylinder 4 Knock Trim'],
-    knock_trim_5:   ['Ignition Cylinder 5 Knock Trim'],
-    knock_trim_6:   ['Ignition Cylinder 6 Knock Trim'],
-    knock_trim_7:   ['Ignition Cylinder 7 Knock Trim'],
-    knock_trim_8:   ['Ignition Cylinder 8 Knock Trim']
+    knock_trim_1:   ['Ignition Cylinder 1 Trim Knock', 'Ignition Cylinder 1 Knock Trim'],
+    knock_trim_2:   ['Ignition Cylinder 2 Trim Knock', 'Ignition Cylinder 2 Knock Trim'],
+    knock_trim_3:   ['Ignition Cylinder 3 Trim Knock', 'Ignition Cylinder 3 Knock Trim'],
+    knock_trim_4:   ['Ignition Cylinder 4 Trim Knock', 'Ignition Cylinder 4 Knock Trim'],
+    knock_trim_5:   ['Ignition Cylinder 5 Trim Knock', 'Ignition Cylinder 5 Knock Trim'],
+    knock_trim_6:   ['Ignition Cylinder 6 Trim Knock', 'Ignition Cylinder 6 Knock Trim'],
+    knock_trim_7:   ['Ignition Cylinder 7 Trim Knock', 'Ignition Cylinder 7 Knock Trim'],
+    knock_trim_8:   ['Ignition Cylinder 8 Trim Knock', 'Ignition Cylinder 8 Knock Trim']
 };
 
 /**

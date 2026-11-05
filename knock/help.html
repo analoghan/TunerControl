@@ -170,7 +170,7 @@
       <li><strong>Engine Speed</strong> — RPM for binning and correlation</li>
       <li><strong>Inlet Manifold Pressure</strong> — MAP (kPa) for load binning</li>
       <li><strong>Ignition Timing</strong> — actual timing at the moment of knock</li>
-      <li><strong>Ignition Cylinder N Knock Trim</strong> (1–8) — the knock retard the ECU applied to each cylinder. Log these to see
+      <li><strong>Ignition Cylinder N Trim Knock</strong> (1–8) — the knock retard the ECU applied to each cylinder. Log these to see
         how the knock control responded.</li>
       <li><strong>Ignition Timing Compensation</strong> — the sum of every timing compensation (temperatures and others, not only knock);
         shown when the knock trims are not logged</li>
@@ -218,7 +218,7 @@
         Lowering needs at least 10 s at ≥ 90 kPa at that speed; raising from part-load data needs 5 s and is withheld when one cylinder reads 2.5×
         the next on its input (that may be real knock).</li>
     </ol>
-    <p>Only quiet samples count: engine warm and above 1000 rpm, no overrun cut, no knock retard (log Ignition Cylinder N Knock Trim), and nothing within
+    <p>Only quiet samples count: engine warm and above 1000 rpm, no overrun cut, no knock retard (log Ignition Cylinder N Trim Knock), and nothing within
       0.5 s of a level above the current threshold. MoTeC calibrates with ignition timing pulled back to about half so nothing knocks; levels logged
       with normal timing can include light knock, so lower a threshold in steps and watch knock trim on the next drive.</p>
 

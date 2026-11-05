@@ -42,6 +42,10 @@ function run(texts, tune) {
     ctx.texts = texts; ctx.tune = tune === undefined ? TUNE : tune;
     return vm.runInContext('puAnalyze(texts.map(function (x) { return lvOpenLog(x, "x.csv"); }), tune)', ctx);
 }
+/** Adds a column to a MoTeC CSV made by csv(): name, then fn(t) per data row. */
+function withColumn(text, name, fn) {
+    return text.split('\n').map(function (l, i) { return l + ',' + (i === 0 ? name : i === 1 ? '' : fn(parseFloat(l))); }).join('\n');
+}
 function flags(p, re) { return p.flags.filter(function (f) { return re.test(f.text); }); }
 
 test('a clean full-throttle pull is found and nothing is flagged', function () {
@@ -99,6 +103,14 @@ test('injection: start before the exhaust closes and at the start limit, end too
     var clean = run([csv()]).pulls[0];
     near(clean.metrics.injection.eoiMin, 310 - 3 * 5500 * 0.006, 2, 'clean pull');
     assert.strictEqual(clean.flags.length, 0, JSON.stringify(clean.flags));
+});
+
+test('knock trim logged as retard (Ignition Cylinder N Trim Knock, counts up) is flagged per pull', function () {
+    var text = withColumn(csv(), 'Ignition Cylinder 5 Trim Knock', function (t) { return t >= 41 && t < 42 ? 6.5 : 0; });
+    var r = run([text]), p = r.pulls[0];
+    var f = flags(p, /Knock control pulled timing/)[0];
+    assert.ok(f && /cyl 5 6\.5°/.test(f.text), JSON.stringify(p.flags));
+    assert.ok(!r.findings.some(function (x) { return /Knock trims are not logged/.test(x.title); }));
 });
 
 var failed = 0;
