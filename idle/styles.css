@@ -499,3 +499,14 @@ h1 {
 .ff-cells { border-collapse: collapse; font-size: 0.85rem; margin: 10px 0; }
 .ff-cells th, .ff-cells td { border-bottom: 1px solid #2a2a2a; padding: 4px 12px 4px 0; text-align: left; color: #ccc; }
 .ff-cells td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Pull-aways and feed forward by coolant (review-ui.js) */
+#ir-section { margin-top: 20px; }
+.ir-legend { color: #999; font-size: 0.8rem; margin: 4px 0 8px; }
+.ir-scroll { overflow-x: auto; }
+.ir-table th { color: #999; font-weight: 600; white-space: nowrap; }
+.ir-table td { white-space: nowrap; }
+.ir-table td small { color: #888; }
+.ir-table tr.ir-dip td { background: rgba(255, 152, 0, 0.10); }
+.ir-table tr.ir-bad td { background: rgba(244, 67, 54, 0.15); }
+.ir-table .lh-show { margin-top: 0; }

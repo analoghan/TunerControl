@@ -42,6 +42,11 @@
       <li><b>Log</b> — holds (Engine Speed, logged at 100 Hz, exactly unchanged while running means the logger stopped). If temperatures jump across
         the hold, the log joins two key cycles with the engine off in between; if the engine was cranking right after, it was restarted. Stalls and
         near-stalls while logging. Readings around holds and the first seconds after each start are left out of the other checks.</li>
+      <li><b>Starting</b> — each crank attempt (engine turning from standstill, or at cranking speed right after a logging gap): whether it
+        reached Engine Run Threshold (400 rpm without the tune), how long it stayed above it, and whether it ran or died; attempts less than
+        60 s apart are one start. Low-side Fuel Pressure falling below 70 % of its running value while cranking (with the tune's Fuel Pump
+        Prime and Hold), rail pressure not building, and the diagnostic warnings and faults during the start (needs the tune for their names).
+        Stops and near-stalls inside a start are reported here, not under Log.</li>
       <li><b>ECU diagnostics</b> — every Diagnostic channel; any value other than OK / Not in Use, with its time, duration and the firmware's name and
         severity (fault / warning / information).</li>
       <li><b>Substituted values</b> — "X Sensor" (the reading) against "X" (the value the ECU uses): a lasting difference means a sensor diagnostic made

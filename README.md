@@ -354,6 +354,7 @@ node tests/test-transmission.js           # TurboLamik Shift Analyzer
 node tests/test-map-rescale.js            # MAP Rescale
 node tests/test-ve-lambda-delay.js        # VE lambda delay from the tune
 node tests/test-log-health.js             # Log Health checks
+node tests/test-idle-review.js            # Idle pull-aways, feed forward by coolant, Log Health starts
 ```
 
 The other `tests/test-*.js` files run in the browser suite only.

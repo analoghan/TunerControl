@@ -10,6 +10,7 @@
  *   fuelPressureWarnMax: kPa | null
  *   banks: [bank of cylinder 1…n]       (Engine Cylinder N Bank)
  *   map: { at0, at5 } | null            Inlet Manifold Pressure Sensor Translation (kPa at 0 V and 5 V)
+ *   start: { runThreshold: rpm, pumpPrime: s, pumpHold: s }   (Engine Run Threshold, Fuel Pump Prime / Hold; null when missing)
  * }
  * Plain data, so it can be posted to the worker.
  */
@@ -86,6 +87,10 @@ function m1pkgHealth(pkg) {
         var a = t.axes[0], slope = (t.values[1] - t.values[0]) / 1000 / (a.values[1] - a.values[0]), off = t.values[0] / 1000 - slope * a.values[0];
         out.map = { at0: off, at5: off + 5 * slope };
     } else out.map = null;
+
+    // Starting: Engine Run Threshold (deg/s → rpm), lift pump prime / hold after the engine stops (s).
+    var rt = m1hNum(pkg, 'Engine.Run Threshold');
+    out.start = { runThreshold: rt !== null ? rt / 6 : null, pumpPrime: m1hNum(pkg, 'Fuel.Pump.Prime'), pumpHold: m1hNum(pkg, 'Fuel.Pump.Hold') };
     return out;
 }
 

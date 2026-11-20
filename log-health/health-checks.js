@@ -142,7 +142,7 @@ function lhAnalyze(log, opts) {
         findings.push({ group: group, severity: severity, title: title, detail: detail || '', times: (times || []).slice(0, 50),
                         channels: channels || [] });
     }
-    var checks = [lhCheckLogIntegrity, lhCheckDiagnostics, lhCheckSubstitutes, lhCheckStuck, lhCheckPressures, lhCheckTemperatures, lhCheckLambda,
+    var checks = [lhCheckStarts, lhCheckLogIntegrity, lhCheckDiagnostics, lhCheckSubstitutes, lhCheckStuck, lhCheckPressures, lhCheckTemperatures, lhCheckLambda,
                   lhCheckFuelModel, lhCheckFuelSupply, lhCheckThrottle, lhCheckElectrical, lhCheckKnockInputs, lhCheckSpeeds, lhCheckEcu];
     checks.forEach(function (fn) {
         try { fn(c, add, opts); } catch (e) { add('Checks', 'info', fn.name.replace(/^lhCheck/, '') + ' check could not run', e.message); }
@@ -178,6 +178,8 @@ function lhCheckLogIntegrity(c, add) {
     var rpm = c.base('Engine Speed');
     stops.forEach(function (st) {
         if (st[0] <= LH_SKIP_S + 0.1 || st[1] >= c.time[c.n - 1] || c.nearHold(st[0], 1)) return;
+        // Inside a start (an attempt dying, the dip after catching): reported under Starting.
+        if ((c.startSpans || []).some(function (sp) { return st[0] < sp[1] && st[1] > sp[0]; })) return;
         var low = Infinity;
         for (var k = Math.floor(st[0] / c.dt); k < Math.min(c.n, Math.ceil(st[1] / c.dt)); k++) if (rpm[k] < low) low = rpm[k];
         var stalled = low < 50;
@@ -188,6 +190,136 @@ function lhCheckLogIntegrity(c, add) {
                   '(lean on the way down?) around it.',
             [[st[0] - 5, st[1] + 5]], [['Engine Speed', 'Idle Aim'], ['Inlet Manifold Pressure'], ['Exhaust Lambda Bank 1', 'Exhaust Lambda Bank 2', 'Fuel Mixture Aim'], ['Throttle Pedal']]);
     });
+}
+
+/**
+ * Starts: each crank attempt (engine turning from standstill, or from cranking speed right after a logging gap), whether it
+ * crossed Engine Run Threshold, ran, or died; low-side and rail pressure while cranking; diagnostics that fired during it.
+ * Attempts less than 60 s apart without the engine running in between are one start.
+ */
+function lhCheckStarts(c, add, opts) {
+    var rpm = c.base('Engine Speed');
+    if (!rpm) return;
+    var st = opts.tune && opts.tune.start || {}, thr = st.runThreshold || null, catchRpm = thr || 400;
+    var attempts = [], k = c.start;
+    function startsAt(k) {
+        if (rpm[k] < 50) return false;
+        if (k === c.start) return rpm[k] < 400;     // the log begins while cranking
+        if (rpm[k - 1] < 50) return true;
+        // Just after a logging gap at cranking speed: the engine was switched off and restarted while the logger was paused.
+        return rpm[k] < 400 && rpm[k - 1] >= 400 && c.holds.some(function (h) { return c.time[k] >= h[1] && c.time[k] - h[1] < 0.3; });
+    }
+    while (k < c.n) {
+        if (!startsAt(k)) { k++; continue; }
+        var a = k, peak = 0, cross = -1, ran = false, died = false, runFrom = -1;
+        for (; k < c.n; k++) {
+            if (rpm[k] > peak) peak = rpm[k];
+            if (cross < 0 && rpm[k] >= catchRpm) cross = k;
+            if (rpm[k] > 400) { if (runFrom < 0) runFrom = k; if (c.time[k] - c.time[runFrom] >= 10) { ran = true; break; } } else runFrom = -1;
+            if (rpm[k] < 50) { died = true; break; }
+        }
+        var z = Math.min(k, c.n - 1), crankEnd = cross >= 0 ? cross : z;
+        var att = { t0: c.time[a], t1: c.time[z], peak: peak, cross: cross >= 0 ? c.time[cross] - c.time[a] : null, ran: ran || (!died && k >= c.n - 1 && cross >= 0),
+                    died: died, crankS: c.time[crankEnd] - c.time[a], hoverLo: null, aboveS: 0 };
+        if (cross >= 0) {     // after crossing: the lowest engine speed in the next 5 s (if it ran), the time spent above the threshold (if it died)
+            var lo = Infinity, above = 0, until = ran ? Math.min(z, cross + Math.round(5 / c.dt)) : z;
+            for (var j = cross; j <= until; j++) { if (rpm[j] >= 50 && rpm[j] < lo) lo = rpm[j]; if (rpm[j] >= catchRpm) above += c.dt; }
+            att.hoverLo = lo; att.aboveS = above;
+        }
+        // A blip within 1 s of the last attempt dying that never gets past cranking speed is the engine rocking as it stops.
+        var prev = attempts[attempts.length - 1];
+        if (!(prev && prev.died && att.t0 - prev.t1 < 1 && att.peak < 250 && !att.ran)) attempts.push(att);
+        if (ran) { while (k < c.n && rpm[k] >= 50) k++; }     // skip the running stretch
+        k++;
+    }
+    if (!attempts.length) return;
+    // Group into starts.
+    var starts = [], cur = null;
+    attempts.forEach(function (at) {
+        if (!cur || cur.done || at.t0 - cur.attempts[cur.attempts.length - 1].t1 > 60) { cur = { attempts: [], done: false }; starts.push(cur); }
+        cur.attempts.push(at);
+        if (at.ran) cur.done = true;
+    });
+    c.startSpans = starts.map(function (s) { var l = s.attempts[s.attempts.length - 1]; return [s.attempts[0].t0, l.ran ? l.t0 + (l.cross || 0) + 5 : l.t1 + 1]; });
+    var fp = c.base('Fuel Pressure'), rail = c.base('Fuel Pressure Direct Bank 1'), ect = c.base('Coolant Temperature');
+    var fpRun = fp ? lhQuantile(lhPick(fp, c.settled, 10), 0.5) : NaN;
+    starts.forEach(function (s) {
+        var first = s.attempts[0], last = s.attempts[s.attempts.length - 1], n = s.attempts.length;
+        var diedAfterCatch = s.attempts.filter(function (at) { return at.died && at.cross !== null; });
+        var lines = s.attempts.map(function (at, i) {
+            var t = 'attempt ' + (i + 1) + ' at ' + lhAt(at.t0) + ': ';
+            if (at.cross === null) return t + 'cranked ' + lhS(at.t1 - at.t0) + ', up to ' + lhFmt(at.peak, 0) + ' rpm, never reached ' + lhFmt(catchRpm, 0) + ' rpm' +
+                (at.peak >= 300 ? ' (it fired but didn\'t pick up)' : '');
+            t += 'reached ' + lhFmt(catchRpm, 0) + ' rpm after ' + lhS(at.cross) + (at.peak > catchRpm + 50 ? ', up to ' + lhFmt(at.peak, 0) + ' rpm' : '');
+            if (at.died) return t + ', stayed above it for ' + lhS(at.aboveS) + ', then fell back and died ' + lhS(at.t1 - at.t0) + ' after cranking began';
+            return t + (at.hoverLo < catchRpm ? ', dipped to ' + lhFmt(at.hoverLo, 0) + ' rpm in the next 5 s' : '') + ' and ran';
+        });
+        var detail = (ect ? 'Coolant ' + lhFmt(ect[lhIdx(c, first.t0)], 0) + ' °C. ' : '') + lines.join('; ') + '. ';
+        if (thr) detail += 'Engine Run Threshold is ' + lhFmt(thr, 0) + ' rpm: below it the ECU uses its crank fuelling and timing, above it run fuelling with the post-start compensations. ';
+        if (diedAfterCatch.length) detail += (thr ? 'An attempt that passed the Run Threshold and then died had run fuelling' : 'An attempt that passed ' +
+            lhFmt(catchRpm, 0) + ' rpm and then died (choose the tune to use its Engine Run Threshold) probably had run fuelling') + ': look at Engine Post Start Fuel Volume Compensation and ' +
+            'Engine Post Start Idle Mass Flow Feed Forward at this coolant temperature, and at the low-side pressure below. ';
+        // Low-side and rail pressure while cranking.
+        var times = [], lowFp = false;
+        if (fp && !isNaN(fpRun)) {
+            var minFp = Infinity, at0 = Infinity;
+            s.attempts.forEach(function (at) {
+                for (var j = lhIdx(c, at.t0); j <= lhIdx(c, at.t0 + Math.max(at.crankS, 0.5)); j++) if (fp[j] < minFp) minFp = fp[j];
+                times.push([at.t0, at.t0 + Math.max(at.crankS, 0.5)]);
+            });
+            var before = fp[Math.max(0, lhIdx(c, first.t0) - 1)];
+            if (minFp < 0.7 * fpRun) {
+                detail += 'Low-side Fuel Pressure fell to ' + lhFmt(minFp, 0) + ' kPa while cranking (' + lhFmt(before, 0) + ' kPa just before, ' + lhFmt(fpRun, 0) +
+                    ' kPa running): the lift pump stopped or couldn\'t keep up, so the high-pressure pump was starved' +
+                    (st.pumpPrime !== null && st.pumpPrime !== undefined ? ' — Fuel Pump Prime is ' + lhFmt(st.pumpPrime, 0) + ' s and Hold ' + lhFmt(st.pumpHold, 0) +
+                        ' s; if the pump stops between attempts, lengthen them' : '') + '. ';
+                lowFp = true;
+            } else detail += 'Low-side Fuel Pressure held while cranking (lowest ' + lhFmt(minFp, 0) + ' kPa, ' + lhFmt(fpRun, 0) + ' kPa running). ';
+        }
+        var railMax = Infinity;
+        if (rail) {
+            railMax = 0;
+            s.attempts.forEach(function (at) { for (var j = lhIdx(c, at.t0); j <= lhIdx(c, at.t0 + Math.max(at.crankS, 0.5)); j++) if (rail[j] > railMax) railMax = rail[j]; });
+            if (railMax < 3) detail += 'Rail pressure only reached ' + lhFmt(railMax, 1) + ' MPa while cranking — the high-pressure pump didn\'t build pressure. ';
+        }
+        var diag = opts.enums ? lhDiagnosticsBetween(c, opts.enums, first.t0 - 0.5, last.t1 + 3) : [];
+        if (!opts.enums) detail += 'Choose the tune to list the diagnostic warnings and faults during the start. ';
+        if (diag.length) detail += 'Warnings and faults during the start: ' + diag.join('; ') + '.' + (diag.some(function (d) { return /^Engine Speed Reference/.test(d); }) &&
+            s.attempts.some(function (at) { return at.died; }) ? ' Engine Speed Reference codes are common while an engine stops turning (it can kick back); check whether they line up with an attempt dying.' : '');
+        var sev = diedAfterCatch.length || lowFp || n >= 3 || railMax < 3 ? 'warn' : n === 2 ? 'info' : 'ok';
+        var title = 'Start at ' + lhAt(first.t0) + ': ' + (last.ran ? (n === 1 ? 'ran on the first attempt' : 'ran on attempt ' + n) +
+            ' (' + lhS(last.t0 + (last.cross || 0) - first.t0) + ' after cranking began)' : 'didn\'t run (' + n + ' attempt' + (n > 1 ? 's' : '') + ')');
+        add('Starting', sev, title, detail, times.length ? times : [[first.t0, last.t1]],
+            [['Engine Speed'], ['Fuel Pressure'], ['Fuel Pressure Direct Bank 1', 'Fuel Pressure Direct Bank 1 Aim'], ['Ignition Timing State', 'Engine State']]);
+    });
+}
+
+function lhIdx(c, t) { return Math.max(0, Math.min(c.n - 1, Math.round(t / c.dt))); }
+
+/** Warning / fault diagnostic values between t0 and t1 (every non-OK value without the tune): ['Channel: Name 0.4 s at 0:08.0', …]. */
+function lhDiagnosticsBetween(c, enums, t0, t1) {
+    var out = [];
+    c.log.channels.forEach(function (ch) {
+        if (!/diag|diagnos/i.test(ch.name) && !/ D$/.test(ch.name)) return;
+        if (ch.unit && ch.unit.trim()) return;
+        var nat = c.native(ch.name), en = lhEnumFor(enums, ch.name), secs = {}, first = {};
+        var full = null;     // the full name of a cut-short log name (the shortest enum name it starts)
+        if (en && !enums[ch.name]) Object.keys(enums).forEach(function (n) {
+            if (n.toLowerCase().indexOf(ch.name.toLowerCase()) === 0 && (!full || n.length < full.length)) full = n;
+        });
+        for (var k = Math.max(0, Math.floor(t0 * nat.freq)); k < Math.min(nat.v.length, Math.ceil(t1 * nat.freq)); k++) {
+            var v = Math.round(nat.v[k]);
+            if (isNaN(v)) continue;
+            var show = en ? !!(en[v] && (en[v].tag === 'warning' || en[v].tag === 'fault')) || !en[v] && v !== 0 && v !== 1 : v !== 0 && v !== 1;
+            if (!show) continue;
+            secs[v] = (secs[v] || 0) + 1 / nat.freq;
+            if (!(v in first)) first[v] = k / nat.freq;
+        }
+        Object.keys(secs).forEach(function (v) {
+            out.push((full || ch.name) + ': ' + (en && en[v] ? en[v].name : 'code ' + v) + ' ' + lhS(secs[v]) + ' at ' + lhAt(first[v]));
+        });
+    });
+    return out;
 }
 
 /** Enum of a logged channel (from the tune's firmware), matched by name; a cut-short log name matches the shortest full name. */

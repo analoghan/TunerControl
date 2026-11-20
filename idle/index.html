@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Idle Behavior Analyzer — TunerControl</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="../lib/findings.css">
+  <link rel="stylesheet" href="../log-viewer/log-panel.css">
 </head>
 <body>
   <div class="app-container">
@@ -82,6 +84,27 @@
       </div>
     </section>
 
+    <!-- Pull-aways and feed forward by coolant temperature (review-ui.js) -->
+    <section id="ir-section" class="report-section" hidden>
+      <p id="ir-status" class="ir-legend"></p>
+      <div class="report-block">
+        <h2>Pull-aways from a Stop</h2>
+        <p class="ir-legend">Clutch take-ups from standstill: whether the pedal opened the throttle past the idle opening, and how far engine speed fell.</p>
+        <div id="ir-pullaway-findings"></div>
+        <div id="ir-pullaways" class="ir-scroll"></div>
+      </div>
+      <div class="report-block">
+        <h2>Feed Forward by Coolant Temperature</h2>
+        <p class="ir-legend">What the idle controller added to or took from Idle Mass Flow Feed Forward during steady idle, per Feed Forward Main coolant row.</p>
+        <div id="ir-ff-findings"></div>
+        <div id="ir-ff" class="ir-scroll"></div>
+      </div>
+      <div class="report-block" hidden>
+        <h2>Log</h2>
+        <div id="ir-log-panel"></div>
+      </div>
+    </section>
+
     <!-- Charts Section -->
     <section id="charts-section" class="charts-section" aria-label="Analysis charts" hidden>
       <h2>Charts</h2>
@@ -119,8 +142,11 @@
   <script src="../m1-config/tune-api.js"></script>
   <script src="../m1-config/tune-source.js"></script>
   <script src="../m1-config/tune-picker.js"></script>
+  <script src="../log-viewer/log-chart.js"></script>
+  <script src="../log-viewer/log-panel.js"></script>
   <script src="m1pkg-idle.js"></script>
   <script src="charts.js"></script>
+  <script src="review-ui.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

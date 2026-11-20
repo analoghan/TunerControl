@@ -17,7 +17,7 @@ var storedBytes = null;
 var lastResult = null, lastRunFile = null, lastTuneName = null;
 var logPanel = null, logPanelReady = null;
 
-var LH_GROUP_ORDER = ['Log', 'ECU diagnostics', 'Substituted values', 'Stuck sensors', 'Pressure sensors', 'Temperatures', 'Lambda', 'Fuel model',
+var LH_GROUP_ORDER = ['Log', 'Starting', 'ECU diagnostics', 'Substituted values', 'Stuck sensors', 'Pressure sensors', 'Temperatures', 'Lambda', 'Fuel model',
                       'Fuel supply', 'Throttle', 'Electrical', 'Knock inputs', 'Speed signals', 'ECU', 'Checks'];
 var LH_SEV_LABEL = { fail: 'Fail', warn: 'Check', info: 'Note', ok: 'OK' };
 

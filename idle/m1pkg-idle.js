@@ -8,6 +8,10 @@
  *   feedForward: { aim: [rpm], coolant: [°C], values: [[% per aim site] per coolant site] } | null   (Feed Forward Main,
  *                at the first Ambient Pressure site)
  *   aimMain: { coolant: [°C], values: [rpm] } | null                  (Idle Aim Main, first Idle Aim Switch site)
+ *   throttleAimMax: %                  (Idle Actuator Throttle Aim Maximum: idle mass flow 100 % = this throttle opening)
+ *   pedalThreshold: %                  (Idle Activate Throttle Pedal Threshold)
+ *   pedalTranslation: { sensor: [%], rpm: [rpm] | null, yInput, rows: [[% per sensor site] per rpm site] } | null
+ *                                      (Throttle Pedal Translation, first Translation Switch slice; output = logged Throttle Pedal)
  *   notes: [string]
  * }
  * Package values are SI: engine speed deg/s (÷ 6 → rpm), ratios (× 100 → %), pressure Pa. Tables: values[x + y × x.maxSites].
@@ -28,7 +32,8 @@ function m1idNum(item, scale) {
 }
 
 function m1pkgIdle(pkg) {
-    var out = { tuneName: pkg.tuneName || '', integralMin: null, integralMax: null, pGain: null, feedForward: null, aimMain: null, notes: [] };
+    var out = { tuneName: pkg.tuneName || '', integralMin: null, integralMax: null, pGain: null, feedForward: null, aimMain: null,
+                throttleAimMax: null, pedalThreshold: null, pedalTranslation: null, notes: [] };
     out.integralMin = m1idNum(m1idItem(pkg, 'Idle.Mass Flow.Integral.Minimum'), 100);
     out.integralMax = m1idNum(m1idItem(pkg, 'Idle.Mass Flow.Integral.Maximum'), 100);
     // ratio per deg/s → % per rpm (1 rpm = 6 deg/s)
@@ -51,6 +56,26 @@ function m1pkgIdle(pkg) {
             };
         } else {
             out.notes.push('Idle Mass Flow Feed Forward Main is not set up against Idle Aim, so its cells can\'t be matched to the log.');
+        }
+    }
+    // Pull-away: idle throttle = feed forward × Throttle Aim Maximum; the pedal takes over above it (Throttle.Pedal.Translation output).
+    out.throttleAimMax = m1idNum(m1idItem(pkg, 'Idle.Actuator.Throttle Aim.Maximum'), 100);
+    out.pedalThreshold = m1idNum(m1idItem(pkg, 'Idle.Activate.Throttle Pedal.Threshold'), 100);
+    var tr = m1idItem(pkg, 'Throttle.Pedal.Translation');
+    if (tr && tr.values) {
+        var tx = m1idAxis(tr, 'X'), ty = m1idAxis(tr, 'Y');
+        if (tx && tx.sites > 0) {
+            var nr = ty && ty.sites > 0 ? ty.sites : 1, rows = [];
+            for (var r = 0; r < nr; r++) {
+                var vals = [];
+                for (var c = 0; c < tx.sites; c++) vals.push(Math.round(tr.values[c + r * tx.maxSites] * 1000) / 10);
+                rows.push(vals);
+            }
+            out.pedalTranslation = {
+                sensor: tx.values.slice(0, tx.sites).map(function (v) { return Math.round(v * 1000) / 10; }),
+                rpm: ty && ty.sites > 0 && ty.unit === 'deg/s' ? ty.values.slice(0, nr).map(function (v) { return Math.round(v / 6); }) : null,
+                yInput: ty ? ty.input || null : null, rows: rows   // first Throttle Pedal Translation Switch slice
+            };
         }
     }
     var aim = m1idItem(pkg, 'Idle.Aim.Main');

@@ -65,6 +65,7 @@ function handleFileSelect(event) {
         worker = null;
     }
     progressSection.hidden = true;
+    document.getElementById('ir-section').hidden = true;
 
     if (!file) {
         selectedFile = null;
@@ -121,6 +122,7 @@ function handleAnalyzeClick() {
     }
 
     var isLD = selectedFile.name.toLowerCase().endsWith('.ld');
+    irRun(selectedFile, tuneIdle);     // pull-aways and feed forward by coolant (review-ui.js), in its own worker
 
     var reader = new FileReader();
     reader.onload = function() {
