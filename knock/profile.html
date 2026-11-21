@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Knock Noise Profile — MoTeC M1</title>
+  <link rel="stylesheet" href="../transient-fuel/styles.css" />
+  <link rel="stylesheet" href="../log-viewer/log-panel.css">
+  <link rel="stylesheet" href="../lib/print-report.css">
+  <link rel="stylesheet" href="../lib/findings.css">
+  <style>
+    .kp-btn { padding: 3px 10px; font-size: 0.75rem; color: #fff; background: #222; border: 1px solid #E31837; border-radius: 4px; cursor: pointer; }
+    .kp-btn:hover { background: #333; }
+    .kp-scroll { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
+    .kp-table { border-collapse: collapse; font-size: 0.78rem; margin: 6px 0 4px; }
+    .kp-table th, .kp-table td { border: 1px solid #2c2c2c; padding: 3px 8px; text-align: right; white-space: nowrap; }
+    .kp-table th { color: #999; font-weight: 600; background: #161616; position: sticky; top: 0; }
+    .kp-table td.hump { outline: 2px solid #ff9800; outline-offset: -2px; font-weight: 600; }
+    .kp-table td.empty { color: #555; }
+    .kp-controls { display: flex; gap: 10px; align-items: center; font-size: 0.85rem; color: #bbb; margin: 6px 0; }
+    .kp-legend { font-size: 0.8rem; color: #999; margin-top: 4px; }
+    #print-report .kp-table th { background: #eee !important; color: #111 !important; position: static; }
+    #print-report .kp-table td { color: #111 !important; }
+    #print-report .kp-scroll { max-height: none; }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <nav class="top-nav">
+      <a href="index.html">&larr; Back to the Knock Analyzer</a>
+      <img src="../TunerControlLogo.png" alt="TunerControl" class="nav-logo">
+    </nav>
+
+    <h1>Knock Noise Profile</h1>
+    <p class="subtitle">Knock level per cylinder by engine speed and load, pooled over one or more logs, and the cylinders that are much louder than the
+      others in one engine-speed band. Each of those is checked for what tells mechanical noise from knock: there at light load, the same in every load
+      band and gear, and unchanged when the timing changes between logs. Load the logs from before and after a timing test together to judge it.</p>
+
+    <div class="form-section">
+      <div class="file-row">
+        <label for="log-input">MoTeC Logs (.ld or .csv, one or more):</label>
+        <input type="file" id="log-input" accept=".ld,.csv" multiple />
+      </div>
+      <div class="file-row">
+        <label for="pkg-input">Tune (.m1pkg, optional):</label>
+        <input type="file" id="pkg-input" accept=".m1pkg">
+      </div>
+      <div class="file-row" id="tune-row" hidden>
+        <label for="tune-select">Or a stored tune:</label>
+        <select id="tune-select" class="tune-select"><option value="">— choose a tune from the M1 Config Viewer —</option></select>
+        <span id="tune-hint" class="tune-hint"></span>
+      </div>
+      <p id="tune-status" class="tune-status"></p>
+      <div class="button-row">
+        <button id="analyze-btn" disabled>Build profile</button>
+        <a href="help.html#noise-profile" class="help-link-btn">Help</a>
+      </div>
+    </div>
+
+    <div id="error-container" class="error-banner" hidden></div>
+    <p id="progress" class="section-desc" hidden>Building the profile…</p>
+
+    <section id="results-section" class="results-section" hidden>
+      <div class="report-block">
+        <h2>Findings</h2>
+        <div id="summary"></div>
+        <button id="pdf-btn" class="kp-btn">Export PDF</button>
+        <div id="findings"></div>
+      </div>
+      <div class="report-block">
+        <h2>Profile</h2>
+        <div class="kp-controls"><label for="band-select">Load:</label><select id="band-select" class="tune-select"></select></div>
+        <div id="profile"></div>
+      </div>
+      <div class="report-block" id="log-block" hidden>
+        <h2 id="log-title">Log</h2>
+        <div id="log-panel"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="../lib/xz-decoder.js"></script>
+  <script src="../lib/m1pkg-parser.js"></script>
+  <script src="../lib/print-report.js"></script>
+  <script src="../m1-config/tune-db.js"></script>
+  <script src="../m1-config/tune-api.js"></script>
+  <script src="../m1-config/tune-source.js"></script>
+  <script src="../m1-config/tune-picker.js"></script>
+  <script src="../log-viewer/log-chart.js"></script>
+  <script src="../log-viewer/log-panel.js"></script>
+  <script src="m1pkg-knock.js"></script>
+  <script src="profile-app.js"></script>
+</body>
+</html>

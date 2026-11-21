@@ -76,6 +76,11 @@ from the loudest cylinder's no-knock level × 1.25 — withheld until the knock 
 data at load. Includes a knock sensor check (one sensor reading far lower than the other), the LT4's
 knock frequencies (first and second order from bore size) and the M1 knock control setup. Events open in the log.
 
+**Knock Noise Profile** (`knock/profile.html`): one or more logs pooled into each cylinder's knock level per 100 rpm band and MAP band. Finds
+cylinder-specific humps and checks each for noise vs knock — still there at light load, the same across load bands and gears (follows engine speed),
+and whether it fell when the timing changed between logs (load the before and after logs of a timing test together). Threshold or window changes are
+offered only when a hump nears the threshold.
+
 ### Ignition Review
 Rebuilds the logged Ignition Timing in the Normal state from the tune — Ignition Timing Main blended toward Alternative Fuel Ignition Timing by fuel
 composition, at engine speed × Load Normalised (MAP in MAP load mode), plus Ignition Timing Compensation — and lists stretches where timing leaves
@@ -268,7 +273,7 @@ plus the files named here:
 
 ve-table/                   — VE Table Tuning (m1pkg-ve.js reads Engine Efficiency Main from a tune)
 transient-fuel/             — Transient Fuel Analyzer (film-correct.js = table corrections, m1pkg-film.js)
-knock/                      — Knock Analyzer (charts.js, knock-freq.js + frequency-calc.html, m1pkg-knock.js)
+knock/                      — Knock Analyzer (charts.js, knock-freq.js + frequency-calc.html, m1pkg-knock.js); Knock Noise Profile (profile.html, knock-profile.js)
 pulls/                      — Pull Report (pull-analysis.js = puAnalyze over one or more logs)
 cl-period/                  — Closed-Loop Period (cl-analysis.js = clAnalyze over one or more logs, m1pkg-cl.js)
 ignition/                   — Ignition Review (ign-analysis.js = igAnalyze, m1pkg-ignition.js; uses the Log Health log helpers)
@@ -355,6 +360,7 @@ node tests/test-map-rescale.js            # MAP Rescale
 node tests/test-ve-lambda-delay.js        # VE lambda delay from the tune
 node tests/test-log-health.js             # Log Health checks
 node tests/test-idle-review.js            # Idle pull-aways, feed forward by coolant, Log Health starts
+node tests/test-knock-profile.js          # Knock Noise Profile: humps, noise vs knock, timing test between logs
 ```
 
 The other `tests/test-*.js` files run in the browser suite only.

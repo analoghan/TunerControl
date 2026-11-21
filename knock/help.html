@@ -139,6 +139,7 @@
         <li><a href="#threshold">Knock Threshold</a></li>
         <li><a href="#reports">Report Sections</a></li>
         <li><a href="#rpm-load-grid">RPM × Load Grid</a></li>
+        <li><a href="#noise-profile">Knock Noise Profile</a></li>
         <li><a href="#charts">Charts</a></li>
         <li><a href="#lt4-setup">GM LT4 Knock Setup</a></li>
         <li><a href="#motec-config">MoTeC M1 Configuration</a></li>
@@ -271,6 +272,24 @@
     </div>
 
     <!-- Charts -->
+    <h2 id="noise-profile">Knock Noise Profile (several logs)</h2>
+    <p>A separate page (<a href="profile.html">Noise Profile</a>) that pools one or more logs and tabulates each cylinder's knock level per 100 rpm band
+      (95th percentile, warm running only, a cell needs 1 s), for all loads and per MAP band (under 60, 60–95, 95–140, 140 kPa and over). With the tune
+      the levels are % of Knock Threshold; the cylinder gains are listed, because levels are after the gain.</p>
+    <h3>Humps</h3>
+    <p>A hump is a cylinder at least 1.8× the other cylinders' median in a band and 1.4× its own level 400–800 rpm either side. Each hump is checked for
+      what separates mechanical noise from knock:</p>
+    <ul>
+      <li><b>Light load</b> — still 1.5× the others under 60 kPa, where knock is unlikely.</li>
+      <li><b>Follows engine speed</b> — 1.5× the others in two or more load bands or gears. Knock grows with load; a noise tied to an engine event
+        (valvetrain, accessory, a resonance, a loose bracket or heat shield near the sensor) stays at the same engine speed whatever the load or gear.</li>
+      <li><b>Timing</b> — the two logs (2 s or more each) furthest apart in timing at the hump: knock falls with 2–3° less timing, noise doesn't. The logged
+        timing is engine-wide, so a cylinder trim test (load the before and after logs together) is the cleaner version.</li>
+    </ul>
+    <p>"Most likely noise" needs the hump to follow engine speed and either show at light load or not fall with less timing; a level that fell with timing
+      is treated as possible knock. Raising Knock Threshold or narrowing the knock window is only offered when the hump reaches 80 % of the threshold or
+      knock control retarded that cylinder — the threshold is shared by all cylinders, so the others lose that margin.</p>
+
     <h2 id="charts">Charts</h2>
     <ul>
       <li><strong>Per-Cylinder Knock Count</strong> — bar chart for quick visual comparison between cylinders</li>
