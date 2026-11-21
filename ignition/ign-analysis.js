@@ -199,6 +199,23 @@ function igAnalyze(log, tune) {
             'Alternative Fuel Ignition Timing Blend' + (full !== null ? ' reaches 100 % at ' + lhFmt(full, 0) + ' % composition' : '') +
             '. Where this log ran, Alternative − Main = ' + (dP.length ? lhFmt(lhQuantile(dP, 0.5)) + '° median at part load' : '') +
             (dB.length ? (dP.length ? ', ' : '') + lhFmt(lhQuantile(dB, 0.5)) + '° under boost' : '') + '.', [], [['Ignition Timing'], ['Fuel Composition']]);
+        // At a full blend the Main table drops out entirely: edits to it change nothing on this fuel (a V90 change was lost this way).
+        var bMin = Infinity, bMax = -Infinity, fMin = Infinity, fMax = -Infinity;
+        for (k = c.start; k < c.n; k += 5) {
+            if (!normal[k]) continue;
+            bMin = Math.min(bMin, blendV[k]); bMax = Math.max(bMax, blendV[k]); fMin = Math.min(fMin, fc[k]); fMax = Math.max(fMax, fc[k]);
+        }
+        if (bMin >= 0.995) {
+            add('Flex fuel', 'warn', 'Ignition Timing Main has no effect in this log: the timing is 100 % Alternative Fuel Ignition Timing',
+                'Fuel Composition stayed at ' + lhFmt(fMin) + (fMax - fMin >= 0.5 ? '–' + lhFmt(fMax) : '') + ' %' + (full !== null ? ', at or above the ' + lhFmt(full, 0) +
+                ' % where Alternative Fuel Ignition Timing Blend reaches 100 %' : '') + ', so the Normal-state timing comes only from Alternative Fuel Ignition Timing ' +
+                '(plus compensations and cylinder trims). Make timing changes for this fuel in the Alternative table; a change to Main only matters at lower ' +
+                'ethanol content. To keep both in step, make the same change in both tables.', [], [['Ignition Timing'], ['Fuel Composition']]);
+        } else if (bMax <= 0.005) {
+            add('Flex fuel', 'info', 'Alternative Fuel Ignition Timing has no effect in this log: the timing is 100 % Main',
+                'Fuel Composition stayed at ' + lhFmt(fMin) + (fMax - fMin >= 0.5 ? '–' + lhFmt(fMax) : '') + ' %, where Alternative Fuel Ignition Timing Blend is 0 %. ' +
+                'Make timing changes for this fuel in Ignition Timing Main.', [], [['Ignition Timing'], ['Fuel Composition']]);
+        }
         // Over the whole boost region of the tables (≥ 2000 rpm), not just where this log went: rows where Alternative runs less advance
         var less = [], same = [];
         tune.main.axes[1].values.forEach(function (y, j) {

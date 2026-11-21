@@ -43,7 +43,8 @@
       <li><b>Compensation</b> — how much the compensations took at cruise and under boost (≥ 100 kPa), whether the tune's tables explain the logged value,
         and what inlet air temperature took out under boost.</li>
       <li><b>Flex fuel</b> — the blend at the logged composition, Alternative − Main where the log ran, and boost rows where the Alternative Fuel table runs
-        less advance than Main. Ethanol cools the charge and resists knock: MoTeC training 67 starts ethanol on the petrol timing, verifies fuelling,
+        less advance than Main. When the composition stays where the blend is 100 % for the whole log, a warning says Ignition Timing Main has no
+        effect (changes for that fuel belong in Alternative Fuel Ignition Timing); at 0 % blend, a note says the same of the Alternative table. Ethanol cools the charge and resists knock: MoTeC training 67 starts ethanol on the petrol timing, verifies fuelling,
         then typically finds 6–8° more at the same boost, with the knock sensors watching.</li>
       <li><b>Cylinder trims</b> — Ignition Cylinder N Trim Main against the knock input each cylinder is on (Knock Cylinder N Resource). Trims only on one
         input's cylinders while the other input reads several times lower is flagged: those cylinders may need the same and their sensor can't show it.</li>

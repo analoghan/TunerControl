@@ -48,13 +48,15 @@
         Prime and Hold), rail pressure not building, and the diagnostic warnings and faults during the start (needs the tune for their names).
         Stops and near-stalls inside a start are reported here, not under Log.</li>
       <li><b>ECU diagnostics</b> — every Diagnostic channel; any value other than OK / Not in Use, with its time, duration and the firmware's name and
-        severity (fault / warning / information).</li>
+        severity (fault / warning / information). Trigger and cam sync codes (Engine Speed Reference, Camshaft Position) and coil charge codes that
+        appear only while cranking or with the engine already below 400 rpm are shown as notes: the ECU loses sync as the engine stops turning.
+        Any that appear with the engine running keep the firmware's severity.</li>
       <li><b>Substituted values</b> — "X Sensor" (the reading) against "X" (the value the ECU uses): a lasting difference means a sensor diagnostic made
         the ECU fall back to an estimate or default.</li>
       <li><b>Stuck sensors</b> — sensor channels that never change while the engine runs.</li>
       <li><b>Pressure sensors</b> — key-on engine-off MAP, airbox and ambient all reading the same plausible barometric pressure; Ambient Pressure
         in 70–108 kPa; MAP never ≤ 0 (or below 8 kPa) while running; MAP and Airbox Pressure agreeing at part load (the throttle is ahead of the
-        supercharger); oil pressure ~0 with the engine stopped and above 140 kPa on a warm engine above 2000 rpm.</li>
+        supercharger); oil pressure ~0 with the engine stopped (at least 10 s after it last turned, so the pressure has bled down) and above 140 kPa on a warm engine above 2000 rpm.</li>
       <li><b>Temperatures</b> — outside −35…145 °C (open/short circuit), jumps faster than 15 °C/s (intermittent connection), sensors agreeing at a cold
         start, coolant above 108 °C, inlet air temperature under boost.</li>
       <li><b>Lambda</b> — a bank reading free air or nothing while fuelling (after sensor warm-up), bank 1 vs bank 2 agreement, closed-loop trims sitting

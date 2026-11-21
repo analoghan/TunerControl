@@ -57,6 +57,12 @@ test('timing that follows the tune is fully accounted for; composition above the
     assert.ok(f && f.severity === 'ok', JSON.stringify(r.findings.map(function (x) { return x.title; })));
     near(r.blendPct, 100, 1e-6);
     assert.strictEqual(find(r, /below the tune|above the tune/).length, 0);
+    // 45 % composition is past the 40 % where the blend reaches 100 %: Main does nothing in this log.
+    var w = find(r, /Ignition Timing Main has no effect/)[0];
+    assert.ok(w && w.severity === 'warn' && /stayed at 45\.0 %/.test(w.detail) && /reaches 100 %/.test(w.detail), JSON.stringify(w));
+    // Composition crossing below the full blend: Main still counts, no warning.
+    var part = run(csv(60, function (t) { return { comp: t < 30 ? 45 : 30 }; }));
+    assert.strictEqual(find(part, /has no effect/).length, 0);
 });
 
 test('a steady stretch below the tune is listed; a jump during a fast load change is not', function () {

@@ -333,6 +333,17 @@ function lhEnumFor(enums, name) {
     return best && name.length >= 24 ? enums[best] : null;
 }
 
+var LH_SLOW_TURN_DIAG = /Engine Speed Reference|Camshaft.*Position|Synchronisation|Ignition Output Diag/i;
+
+/** True when the engine was below 400 rpm in the 0.3 s up to t, or t is inside a start (lhCheckStarts): cranking or running down. */
+function lhTurningSlowly(c, t) {
+    if ((c.startSpans || []).some(function (sp) { return t >= sp[0] && t <= sp[1]; })) return true;
+    var rpm = c.base('Engine Speed');
+    if (!rpm) return false;
+    for (var k = lhIdx(c, t - 0.3); k <= lhIdx(c, t); k++) if (rpm[k] < 400) return true;
+    return false;
+}
+
 /** M1 diagnostic channels: every value other than OK / Not in Use, with its name and severity from the firmware. */
 function lhCheckDiagnostics(c, add, opts) {
     var ok = [], notInUse = [];
@@ -364,10 +375,25 @@ function lhCheckDiagnostics(c, add, opts) {
             var e = en && en[v], tag = e && e.tag, label = e ? e.name : 'code ' + v + (en ? '' : ' (choose the tune for the name)');
             var sev = tag === 'fault' ? 'fail' : tag === 'warning' ? 'warn' : tag === 'information' ? 'info' : e ? 'info' : 'warn';
             if (/Engine Overrun|Fuel Cut|Cut Request|Engine Speed Limit|Disabled/i.test(label) && sev !== 'fail') sev = 'info';
-            var secs = counts[v] / nat.freq, list = eps[v] || [];
+            var secs = counts[v] / nat.freq, list = eps[v] || [], note = '';
+            // Trigger / cam sync and coil charge codes appear while the engine cranks or runs down (the ECU loses sync as it stops
+            // turning, battery voltage sags while cranking). Only codes that appear with the engine already turning slowly are that.
+            if (LH_SLOW_TURN_DIAG.test(ch.name)) {
+                var slow = list.filter(function (ep) { return lhTurningSlowly(c, ep[0]); });
+                if (slow.length === list.length) {
+                    if (sev !== 'info') { sev = 'info'; note = ' All while cranking or with the engine stopping (below 400 rpm when it appeared): ' +
+                        (/Ignition Output/i.test(ch.name) ? 'at cranking speed and voltage the coil charge time runs to its limit' :
+                            'the ECU loses sync as the engine stops turning and finds it again while cranking') +
+                        ', so this is expected unless a start struggled (see Starting).'; }
+                } else if (slow.length) {
+                    note = ' ' + slow.length + ' of them while cranking or stopping (expected); ' + (list.length - slow.length) + ' with the engine running, first at ' +
+                        lhAt(list.filter(function (ep) { return slow.indexOf(ep) < 0; })[0][0]) + '.';
+                    list = list.filter(function (ep) { return slow.indexOf(ep) < 0; }).concat(slow);
+                }
+            }
             add('ECU diagnostics', sev, ch.name + ': ' + label,
                 lhS(secs) + ' in ' + list.length + ' stretch' + (list.length > 1 ? 'es' : '') + ', first at ' + lhAt(firstAt[v]) +
-                (tag ? ' (firmware: ' + tag + ')' : '') + '.', list, [[ch.name], ['Engine Speed']]);
+                (tag ? ' (firmware: ' + tag + ')' : '') + '.' + note, list, [[ch.name], ['Engine Speed']]);
         });
     });
     add('ECU diagnostics', 'ok', ok.length + ' diagnostic channels read OK throughout',
@@ -474,10 +500,18 @@ function lhCheckPressures(c, add) {
     }
     var oil = c.base('Engine Oil Pressure'), rpm = c.base('Engine Speed'), ct = c.base('Coolant Temperature');
     if (oil && rpm) {
-        if (koeo.length) {
-            var po = lhQuantile(lhPick(oil, c.stopped), 0.5);
-            if (po > 30) add(g, 'warn', 'Engine Oil Pressure reads ' + lhFmt(po, 0) + ' kPa with the engine stopped', 'A gauge sensor reads ~0 with the engine off: offset error.',
-                koeo.slice(0, 3), [['Engine Oil Pressure'], ['Engine Speed']]);
+        // Oil pressure takes several seconds to bleed down after the engine stops (between crank attempts, after a stall), so judge
+        // the offset only where the engine hasn't turned above 400 rpm for 10 s.
+        var lastTurn = -Infinity, settled = new Uint8Array(c.n);
+        for (var k2 = 0; k2 < c.n; k2++) {
+            if (rpm[k2] > 400) lastTurn = k2 * c.dt;
+            settled[k2] = c.stopped[k2] && k2 * c.dt - lastTurn >= 10 ? 1 : 0;
+        }
+        var still = lhEpisodes(c, settled, 1.0);
+        if (still.length) {
+            var po = lhQuantile(lhPick(oil, settled), 0.5);
+            if (po > 30) add(g, 'warn', 'Engine Oil Pressure reads ' + lhFmt(po, 0) + ' kPa with the engine stopped', lhS(lhTotal(still)) + ' stopped, at least 10 s after ' +
+                'the engine last turned. A gauge sensor reads ~0 with the engine off: offset error.', still.slice(0, 3), [['Engine Oil Pressure'], ['Engine Speed']]);
         }
         var lowOil = lhEpisodes(c, lhMask(c, function (k) { return c.running[k] && rpm[k] > 2000 && (!ct || ct[k] > 60) && oil[k] < 140; }), 0.5);
         if (lowOil.length) add(g, 'fail', 'Low oil pressure above 2000 rpm', lhEpisodeText(lowOil) + ' below 140 kPa (20 psi) on a warm engine. Check the gauge reading before driving.',

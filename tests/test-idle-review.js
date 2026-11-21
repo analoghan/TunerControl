@@ -1,6 +1,6 @@
 /**
  * test-idle-review.js — Idle page pull-aways and feed forward by coolant (idle/idle-review.js), the pedal settings read by
- * m1pkg-idle.js, and the Log Health start review (lhCheckStarts), on synthetic 100 Hz CSV logs.
+ * m1pkg-idle.js, and the Log Health start review (lhCheckStarts), cranking-only sync codes and the oil pressure offset check, on synthetic 100 Hz CSV logs.
  * Run: node tests/test-idle-review.js
  */
 
@@ -133,6 +133,38 @@ test('Log Health starts: an attempt that catches and dies, low-side pressure fal
     assert.ok(/Low-side Fuel Pressure fell to 18\d kPa while cranking/.test(s[0].detail) && /Fuel Pump Prime is 5 s and Hold 1 s/.test(s[0].detail), s[0].detail);
     // The dying attempt is part of the start, not a separate stall.
     assert.strictEqual(r.findings.filter(function (f) { return /Engine stopped at|nearly stalled/.test(f.title); }).length, 0);
+});
+
+function health(text) { ctx.L = open(text); ctx.O = {}; return JSON.parse(JSON.stringify(vm.runInContext('lhAnalyze(L, O)', ctx))).findings; }
+
+test('Log Health: a sync code while cranking is a note, the same code while running keeps its severity', function () {
+    var base = { 'Engine Speed': 0, 'Engine Speed Reference Diagnostic': 1, 'Coolant Temperature': 70, 'Inlet Manifold Pressure': 100 };
+    function log(codeAt) {
+        return csv(40, base, function (t) {
+            var r = t < 3 ? {} : t < 4 ? { 'Engine Speed': 200 } : { 'Engine Speed': 900, 'Inlet Manifold Pressure': 35 };
+            if (t >= codeAt && t < codeAt + 0.5) r['Engine Speed Reference Diagnostic'] = 5;
+            return r;
+        });
+    }
+    var crank = health(log(3.2)).filter(function (f) { return /Engine Speed Reference Diagnostic: code 5/.test(f.title); })[0];
+    assert.ok(crank && crank.severity === 'info' && /All while cranking/.test(crank.detail), JSON.stringify(crank));
+    var run = health(log(30)).filter(function (f) { return /Engine Speed Reference Diagnostic: code 5/.test(f.title); })[0];
+    assert.ok(run && run.severity === 'warn' && !/cranking/.test(run.detail), JSON.stringify(run));
+});
+
+test('Log Health: oil pressure bleeding down after the engine stops is not an offset; a reading 10 s later is', function () {
+    var base = { 'Engine Speed': 0, 'Engine Oil Pressure': 5, 'Coolant Temperature': 70, 'Inlet Manifold Pressure': 100 };
+    function log(oilAfter) {
+        return csv(60, base, function (t) {
+            if (t < 2) return {};
+            if (t < 20) return { 'Engine Speed': 900, 'Engine Oil Pressure': 300, 'Inlet Manifold Pressure': 35 };
+            return { 'Engine Oil Pressure': t < 30 ? 300 * Math.exp(-(t - 20) / 2) : oilAfter };   // stopped: bleeds down, then settles
+        });
+    }
+    function oilWarn(f) { return /Engine Oil Pressure reads/.test(f.title); }
+    assert.strictEqual(health(log(4)).filter(oilWarn).length, 0);
+    var w = health(log(120)).filter(oilWarn)[0];
+    assert.ok(w && /reads 120 kPa/.test(w.title) && /10 s after/.test(w.detail), JSON.stringify(w));
 });
 
 var failed = 0;
