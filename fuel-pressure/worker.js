@@ -3,63 +3,7 @@
  * Performs all heavy CSV/.ld parsing and fuel pressure analysis off the main thread.
  */
 
-// MoTeC .ld logs are read by parseLdFile in lib/ld-parser.js, which the page loads before this worker.
-
-// ---------------------------------------------------------------------------
-// CSV Parsing Functions
-// ---------------------------------------------------------------------------
-
-function detectHeaderRow(lines) {
-    var MAX_SCAN = 25;
-    for (var i = 0; i < Math.min(MAX_SCAN, lines.length); i++) {
-        var firstField = lines[i].split(',')[0].trim().replace(/^"|"$/g, '');
-        if (firstField === 'Time') {
-            return i;
-        }
-    }
-    throw new Error('Could not find "Time" header row in first 25 lines. Please ensure this is a MoTeC M1 CSV export.');
-}
-
-function findDataStart(lines, headerRowIdx) {
-    for (var j = headerRowIdx + 1; j < Math.min(headerRowIdx + 6, lines.length); j++) {
-        var firstField = lines[j].split(',')[0].trim().replace(/^"|"$/g, '');
-        if (firstField !== '' && !isNaN(parseFloat(firstField))) {
-            return j;
-        }
-    }
-    return headerRowIdx + 2;
-}
-
-function parseDataRows(lines, dataStart, numCols, progressCallback) {
-    var totalRows = lines.length - dataStart;
-    var data = [];
-    var lastProgress = 0;
-
-    for (var i = dataStart; i < lines.length; i++) {
-        var line = lines[i].trim();
-        if (line === '') continue;
-
-        var fields = line.split(',');
-        var row = new Array(numCols);
-        for (var c = 0; c < numCols; c++) {
-            if (c < fields.length) {
-                row[c] = parseFloat(fields[c].trim().replace(/^"|"$/g, ''));
-            } else {
-                row[c] = NaN;
-            }
-        }
-        data.push(row);
-
-        var rowsProcessed = i - dataStart + 1;
-        if (rowsProcessed - lastProgress >= 1000 || i === lines.length - 1) {
-            lastProgress = rowsProcessed;
-            if (progressCallback) {
-                progressCallback(rowsProcessed, totalRows);
-            }
-        }
-    }
-    return data;
-}
+// MoTeC .ld logs and CSV exports are read by parseLdFile / parseCsvLog in lib/ld-parser.js, which the page loads before this worker.
 
 // ---------------------------------------------------------------------------
 // Channel Resolution
@@ -1117,32 +1061,15 @@ if (typeof self !== 'undefined') self.onmessage = function(event) {
             // CSV text input
             self.postMessage({ type: 'progress', phase: 'Parsing CSV...', percent: 5 });
 
-            var lines = msg.logText.split(/\r?\n/);
-            var headerRowIdx = detectHeaderRow(lines);
-            var headerLine = lines[headerRowIdx];
-            var columnNames = headerLine.split(',').map(function(s) {
-                return s.trim().replace(/^"|"$/g, '');
-            });
-
-            var unitsRow = (lines[headerRowIdx + 1] || '').split(',').map(function (s) { return s.trim().replace(/^"|"$/g, ''); });
-            var dataStart = findDataStart(lines, headerRowIdx);
-            var numCols = columnNames.length;
-
-            var data = parseDataRows(lines, dataStart, numCols, function(processed, total) {
+            var csv = parseCsvLog(msg.logText, function(processed, total) {
                 var pct = 5 + Math.round((processed / total) * 10);
                 self.postMessage({ type: 'progress', phase: 'Parsing rows...', percent: pct });
             });
+            var columnNames = csv.columnNames, data = csv.data, unitsRow = csv.units, sampleRate = csv.maxFreq;
 
             if (data.length < 2) {
                 self.postMessage({ type: 'error', message: 'Not enough data rows to analyze.' });
                 return;
-            }
-
-            // Determine sample rate from time column
-            var sampleRate = 1.0;
-            if (data.length > 1) {
-                var dt = data[1][0] - data[0][0];
-                if (dt > 0) sampleRate = 1.0 / dt;
             }
 
             runAnalysis(columnNames, data, sampleRate, unitsRow, msg.rail);

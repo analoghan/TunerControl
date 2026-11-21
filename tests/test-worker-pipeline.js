@@ -35,6 +35,7 @@ const context = {
 };
 
 const sandbox = vm.createContext(context);
+vm.runInContext(fs.readFileSync(__dirname + '/../lib/ld-parser.js', 'utf8'), sandbox);   // .ld and CSV reader, loaded first as on the page
 vm.runInContext(code, sandbox);
 
 let passed = 0;
@@ -183,6 +184,7 @@ const context2 = {
     Error: Error
 };
 const sandbox2 = vm.createContext(context2);
+vm.runInContext(fs.readFileSync(__dirname + '/../lib/ld-parser.js', 'utf8'), sandbox2);
 vm.runInContext(code, sandbox2);
 
 sandbox2.self.onmessage({ data: { type: 'reanalyze', threshold: 5 } });
@@ -235,6 +237,7 @@ const context3 = {
     Error: Error
 };
 const sandbox3 = vm.createContext(context3);
+vm.runInContext(fs.readFileSync(__dirname + '/../lib/ld-parser.js', 'utf8'), sandbox3);
 vm.runInContext(code, sandbox3);
 
 // CSV with only 2 knock channels

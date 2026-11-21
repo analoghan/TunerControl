@@ -46,29 +46,11 @@ analyzeBtn.addEventListener('click', function() {
 });
 
 function analyzeDutyCycle(data, isLd) {
-    var parsed = isLd ? parseLdFile(data, null) : parseCsv(data);
+    var parsed = isLd ? parseLdFile(data, null) : parseCsvLog(data);
     return dcAnalyze(parsed.columnNames, isLd ? parsed.data : parsed.data, {
         warn: parseFloat(document.getElementById('warn-threshold').value) || 80,
         crit: parseFloat(document.getElementById('critical-threshold').value) || 90
     });
-}
-
-function parseCsv(text) {
-    text = text.replace(/\0/g, '').replace(/^\uFEFF/, '');
-    var lines = text.split(/\r?\n/);
-    var headerIdx = -1;
-    for (var i = 0; i < Math.min(50, lines.length); i++) {
-        if (lines[i].split(',')[0].trim().replace(/^"|"$/g, '') === 'Time') { headerIdx = i; break; }
-    }
-    if (headerIdx === -1) throw new Error('Could not find Time header.');
-    var columnNames = lines[headerIdx].split(',').map(function(s) { return s.trim().replace(/^"|"$/g, ''); });
-    var data = [];
-    for (var i = headerIdx + 2; i < lines.length; i++) {
-        var line = lines[i].trim();
-        if (!line) continue;
-        data.push(line.split(',').map(function(f) { return parseFloat(f.trim().replace(/^"|"$/g, '')); }));
-    }
-    return { columnNames: columnNames, data: data };
 }
 
 // ---------------------------------------------------------------------------

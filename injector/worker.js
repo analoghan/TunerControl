@@ -64,91 +64,7 @@ const CHANNEL_MAP = {
     fuel_vol:         ["Fuel Volume Primary", "Fuel Volume"],
 };
 
-// MoTeC .ld logs are read by parseLdFile in lib/ld-parser.js, which the page loads before this worker.
-
-// ---------------------------------------------------------------------------
-// CSV Parsing Functions
-// ---------------------------------------------------------------------------
-
-/**
- * Scans the first 25 lines to locate the header row whose first field is "Time".
- *
- * @param {string[]} lines - Array of raw CSV lines
- * @returns {number} 0-based row index of the header row
- * @throws {Error} If "Time" header not found within first 25 lines
- */
-function detectHeaderRow(lines) {
-    const MAX_SCAN = 25;
-    for (let i = 0; i < Math.min(MAX_SCAN, lines.length); i++) {
-        const firstField = lines[i].split(',')[0].trim().replace(/^"|"$/g, '');
-        if (firstField === 'Time') {
-            return i;
-        }
-    }
-    throw new Error('Could not find "Time" header row in first 25 lines. Please ensure this is a MoTeC M1 CSV export.');
-}
-
-/**
- * Finds the first numeric data row after the header row.
- * Skips the units row and any blank rows.
- *
- * @param {string[]} lines - Array of CSV lines
- * @param {number} headerRowIdx - Index of the header row
- * @returns {number} Index of the first data row
- */
-function findDataStart(lines, headerRowIdx) {
-    for (let j = headerRowIdx + 1; j < Math.min(headerRowIdx + 6, lines.length); j++) {
-        const firstField = lines[j].split(',')[0].trim().replace(/^"|"$/g, '');
-        if (firstField !== '' && !isNaN(parseFloat(firstField))) {
-            return j;
-        }
-    }
-    return headerRowIdx + 2; // fallback: assume units row + 1 blank
-}
-
-/**
- * Parses all data rows into numeric arrays.
- * Non-numeric values become NaN. Posts progress every ~1000 rows.
- *
- * @param {string[]} lines - Array of CSV lines
- * @param {number} dataStart - Index of the first data row
- * @param {number} numCols - Number of columns expected
- * @param {function} progressCallback - Called with (rowsProcessed, totalRows)
- * @returns {number[][]} Array of numeric row arrays
- */
-function parseDataRows(lines, dataStart, numCols, progressCallback) {
-    const totalRows = lines.length - dataStart;
-    const data = [];
-    let lastProgress = 0;
-
-    for (let i = dataStart; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line === '') continue;
-
-        const fields = line.split(',');
-        const row = new Array(numCols);
-        for (let c = 0; c < numCols; c++) {
-            if (c < fields.length) {
-                const val = parseFloat(fields[c].trim().replace(/^"|"$/g, ''));
-                row[c] = val; // NaN if not numeric
-            } else {
-                row[c] = NaN;
-            }
-        }
-        data.push(row);
-
-        // Post progress every 1000 rows
-        const rowsProcessed = i - dataStart + 1;
-        if (rowsProcessed - lastProgress >= 1000 || i === lines.length - 1) {
-            lastProgress = rowsProcessed;
-            if (progressCallback) {
-                progressCallback(rowsProcessed, totalRows);
-            }
-        }
-    }
-
-    return data;
-}
+// MoTeC .ld logs and CSV exports are read by parseLdFile / parseCsvLog in lib/ld-parser.js, which the page loads before this worker.
 
 // ---------------------------------------------------------------------------
 // Statistics Helper Functions
@@ -1200,23 +1116,10 @@ self.onmessage = function (event) {
 
     // --- CSV parsing path (original) ---
     try {
-        var logText = event.data.logText;
-        const lines = logText.split(/\r?\n/);
-
-        // Step 1: Detect header row
-        const headerRowIdx = detectHeaderRow(lines);
-        const columnNames = lines[headerRowIdx].split(',').map(function (s) {
-            return s.trim().replace(/^"|"$/g, '');
-        });
-        const numCols = columnNames.length;
-
-        // Step 2: Find data start
-        const dataStart = findDataStart(lines, headerRowIdx);
-
-        // Step 3: Parse data rows with progress reporting
-        const data = parseDataRows(lines, dataStart, numCols, function (rowsProcessed, totalRows) {
+        const csv = parseCsvLog(event.data.logText, function (rowsProcessed, totalRows) {
             self.postMessage({ type: 'progress', rowsProcessed: rowsProcessed, totalRows: totalRows });
         });
+        const columnNames = csv.columnNames, data = csv.data;
 
         if (data.length === 0) {
             self.postMessage({ type: 'error', message: 'No data rows found after header.' });

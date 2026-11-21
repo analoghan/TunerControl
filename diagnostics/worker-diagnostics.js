@@ -56,53 +56,6 @@ function resolveChannels(columnNames) {
 }
 
 // ---------------------------------------------------------------------------
-// CSV / LD Parsing (simplified — reuses patterns from other workers)
-// ---------------------------------------------------------------------------
-
-function splitCsvLine(line) {
-    return line.split(',').map(function(f) {
-        var t = f.trim();
-        if (t.startsWith('"') && t.endsWith('"')) return t.slice(1, -1);
-        return t;
-    });
-}
-
-function parseLogCsv(text, onProgress) {
-    var lines = text.split('\n').map(function(l) { return l.replace(/\r$/, ''); });
-    var headerIdx = -1;
-    for (var i = 0; i < Math.min(25, lines.length); i++) {
-        var f = splitCsvLine(lines[i]);
-        if (f[0] && f[0].trim() === 'Time') { headerIdx = i; break; }
-    }
-    if (headerIdx === -1) throw new Error('Time header not found in first 25 rows');
-
-    var columnNames = splitCsvLine(lines[headerIdx]);
-    var dataStart = headerIdx + 2;
-    while (dataStart < lines.length) {
-        var ff = splitCsvLine(lines[dataStart]);
-        if (ff[0] && ff[0].trim() !== '' && !isNaN(parseFloat(ff[0]))) break;
-        dataStart++;
-    }
-
-    var numCols = columnNames.length;
-    var data = [];
-    for (var i = dataStart; i < lines.length; i++) {
-        var line = lines[i].trim();
-        if (line === '') continue;
-        var fields = splitCsvLine(line);
-        var row = new Array(numCols);
-        for (var c = 0; c < numCols; c++) {
-            row[c] = c < fields.length ? parseFloat(fields[c]) : NaN;
-        }
-        data.push(row);
-        if (data.length % 10000 === 0 && onProgress) {
-            onProgress(i - dataStart, lines.length - dataStart);
-        }
-    }
-    return { columnNames: columnNames, data: data };
-}
-
-// ---------------------------------------------------------------------------
 // Cross-Domain Analysis
 // ---------------------------------------------------------------------------
 
@@ -352,7 +305,7 @@ self.onmessage = function(event) {
             data = result.data;
         } else {
             self.postMessage({ type: 'progress', phase: 'Parsing CSV...', percent: 5 });
-            var result = parseLogCsv(msg.logText, function(done, total) {
+            var result = parseCsvLog(msg.logText, function(done, total) {
                 self.postMessage({ type: 'progress', phase: 'Parsing rows...', percent: 5 + Math.round(done / total * 30) });
             });
             columnNames = result.columnNames;

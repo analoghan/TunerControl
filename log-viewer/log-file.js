@@ -1,7 +1,7 @@
 /**
  * log-viewer/log-file.js — Reads MoTeC logs channel by channel for the Log Viewer.
- * Works in a worker and in Node; uses ldReadChannels and decodeFloat16 from lib/ld-parser.js and splitCsvLine from
- * ve-table/worker.js, so channel names match the analysis tools.
+ * Works in a worker and in Node; uses ldReadChannels, decodeFloat16 and parseCsvLog from lib/ld-parser.js, so channel names
+ * match the analysis tools.
  *
  *   lvOpenLog(data, name)  data: ArrayBuffer (.ld) or string (.csv)
  *     → { kind, channels: [{ name, unit, freq, n }], duration, baseFreq }
@@ -23,34 +23,17 @@ function lvOpenLd(buffer) {
 }
 
 function lvOpenCsv(text) {
-    var lines = text.replace(/\0/g, '').split('\n');
-    var header = -1;
-    for (var i = 0; i < Math.min(25, lines.length); i++) {
-        var f0 = splitCsvLine(lines[i].replace(/\r$/, ''))[0];
-        if (f0 !== undefined && f0.trim() === 'Time') { header = i; break; }
+    var p = parseCsvLog(text), n = p.data.length, time = new Float64Array(n), cols = [];
+    for (var c = 1; c < p.columnNames.length; c++) cols.push(new Float64Array(n));
+    for (var r = 0; r < n; r++) {
+        var row = p.data[r];
+        time[r] = row[0];
+        for (c = 1; c < row.length; c++) cols[c - 1][r] = row[c];
     }
-    if (header < 0) throw new Error('"Time" header row not found — this does not look like a MoTeC CSV export.');
-    var names = splitCsvLine(lines[header].replace(/\r$/, '')).map(function (s) { return s.trim(); });
-    var units = splitCsvLine((lines[header + 1] || '').replace(/\r$/, '')).map(function (s) { return s.trim(); });
-    var rows = [];
-    for (i = header + 2; i < lines.length; i++) {
-        var line = lines[i].replace(/\r$/, '');
-        if (!line.replace(/[,"\s]/g, '')) continue;
-        rows.push(line);
-    }
-    var cols = names.map(function () { return new Float64Array(rows.length); });
-    var time = new Float64Array(rows.length);
-    rows.forEach(function (line, r) {
-        var f = splitCsvLine(line);
-        time[r] = parseFloat(f[0]);
-        for (var c = 1; c < names.length; c++) cols[c][r] = f[c] === undefined || f[c].trim() === '' ? NaN : parseFloat(f[c]);
-    });
-    var dt = rows.length > 1 ? (time[rows.length - 1] - time[0]) / (rows.length - 1) : 0.01;
+    var dt = n > 1 ? (time[n - 1] - time[0]) / (n - 1) : 0.01;
     var freq = dt > 0 ? Math.round(1 / dt) : 100;
-    var channels = [];
-    for (var c = 1; c < names.length; c++) channels.push({ name: names[c], unit: units[c] || '', freq: freq, n: rows.length, data: cols[c] });
-    return { kind: 'csv', time: time, channels: channels, baseFreq: freq, baseN: rows.length,
-             duration: rows.length ? time[rows.length - 1] - time[0] : 0 };
+    var channels = cols.map(function (data, i) { return { name: p.columnNames[i + 1], unit: p.units[i + 1] || '', freq: freq, n: n, data: data }; });
+    return { kind: 'csv', time: time, channels: channels, baseFreq: freq, baseN: n, duration: n ? time[n - 1] - time[0] : 0 };
 }
 
 function lvOpenLog(data, name) {

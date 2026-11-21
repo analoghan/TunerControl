@@ -302,7 +302,7 @@ transmission/               — TurboLamik 8HP Shift Analyzer: shift-analysis.js
 calculators/                — Unit conversions (index.html) and the lambda/AFR fuel chart (lambda-fuel.html)
 
 lib/                        — Vendored libraries (Chart.js, zoom plugin, Hammer.js) and shared code:
-                              ld-parser.js (the .ld reader every tool uses), m1pkg-parser.js + xz-decoder.js, xlsx.js, print-report.js/.css (PDF export),
+                              ld-parser.js (the .ld and MoTeC CSV log reader every tool uses), m1pkg-parser.js + xz-decoder.js, xlsx.js, print-report.js/.css (PDF export),
                               backup.js
 
 server/                     — Optional Node server: static files + SQLite API (server.js lists the API, db.js the

@@ -63,32 +63,6 @@ function analyzeChargeCooling(data, isLd) {
     return ccAnalyze(parsed.columnNames, parsed.data, { currentGain: parseFloat(document.getElementById('current-gain').value) });
 }
 
-function parseCsvLog(text) {
-    text = text.replace(/\0/g, '').replace(/^\uFEFF/, '');
-    var lines = text.split(/\r?\n/);
-    var headerIdx = -1;
-    for (var i = 0; i < Math.min(50, lines.length); i++) {
-        var firstField = lines[i].split(',')[0].trim().replace(/^"|"$/g, '');
-        if (firstField === 'Time') { headerIdx = i; break; }
-    }
-    if (headerIdx === -1) throw new Error('Could not find "Time" header in CSV.');
-
-    var columnNames = lines[headerIdx].split(',').map(function(s) { return s.trim().replace(/^"|"$/g, ''); });
-    var dataStart = headerIdx + 2;
-    var data = [];
-    for (var i = dataStart; i < lines.length; i++) {
-        var line = lines[i].trim();
-        if (line === '') continue;
-        var fields = line.split(',');
-        var row = [];
-        for (var f = 0; f < fields.length; f++) {
-            row.push(parseFloat(fields[f].trim().replace(/^"|"$/g, '')));
-        }
-        data.push(row);
-    }
-    return { columnNames: columnNames, data: data };
-}
-
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
