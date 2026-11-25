@@ -101,7 +101,12 @@ describe('Transient Fuel — recommendations', function () {
   });
 
   it('flags rich-only tip-ins as too much film', function () {
-    assert.ok(/Fuel Film Primary too high at 80-100 kPa/.test(texts(generateRecommendations([tipIn(0, 8), tipIn(1, 7)], TC))));
+    assert.ok(/Fuel Film Primary too high at 80-100 kPa/.test(texts(generateRecommendations([tipIn(0, 8), tipIn(1, 7), tipIn(0, 9)], TC))));
+  });
+
+  it('gives no table advice for a zone with fewer than 3 tip-ins', function () {
+    var t = texts(generateRecommendations([tipIn(0, 8), tipIn(1, 7), tipIn(9, 0, 50), tipIn(8, 0, 50)], TC));
+    assert.ok(!/Fuel Film Primary too (high|low)/.test(t), t);
   });
 
   it('treats lean-then-rich as timing and only shortens the Increase constants', function () {
@@ -113,10 +118,12 @@ describe('Transient Fuel — recommendations', function () {
 
   it('points tip-out problems at the Decrease constants', function () {
     var ins = [tipIn(1, 1), tipIn(1, 1), tipIn(1, 1), tipIn(1, 1)];
-    var rich = texts(generateRecommendations(ins.concat([tipOut(8), tipOut(9)]), TC));
-    assert.ok(/Rich on tip-out/.test(rich) && /Slow Decrease: 1s → 0.70s/.test(rich));
-    var lean = texts(generateRecommendations(ins.concat([tipOut(0, 8), tipOut(0, 9)]), TC));
+    var rich = texts(generateRecommendations(ins.concat([tipOut(8), tipOut(9), tipOut(8)]), TC));
+    assert.ok(/Rich on tip-out: 8.3% on average \(3 tip-outs above idle\)/.test(rich) && /Slow Decrease: 1s → 0.70s/.test(rich), rich);
+    var lean = texts(generateRecommendations(ins.concat([tipOut(0, 8), tipOut(0, 9), tipOut(0, 8)]), TC));
     assert.ok(/Lean after tip-out/.test(lean) && /Slow Decrease: 1s → 1.30s/.test(lean));
+    var two = texts(generateRecommendations(ins.concat([tipOut(8), tipOut(9)]), TC));
+    assert.ok(!/Rich on tip-out/.test(two), 'two tip-outs are too few');
   });
 
   it('reports a good calibration when nothing stands out', function () {
@@ -126,8 +133,9 @@ describe('Transient Fuel — recommendations', function () {
 
 describe('Transient Fuel — table corrections', function () {
   var table = { breakpoints: [30, 60, 90], values: [20, 100, 160] };
+  // Each event three times: a site needs 3 tip-ins before its value is changed.
   function run(scale, offset, events) {
-    return computeFuelFilmCorrections({ ffTable: table, tipIns: events }, { ffScale: scale, ffOffset: offset });
+    return computeFuelFilmCorrections({ ffTable: table, tipIns: events.concat(events, events) }, { ffScale: scale, ffOffset: offset });
   }
 
   it('converts the film change back to table units using the scale', function () {
@@ -145,6 +153,12 @@ describe('Transient Fuel — table corrections', function () {
     // At 1% scale the 160-unit cell is only 1.6 ul of film: the step it asks for exceeds +50%.
     var capped = run(1, 0, [{ mapTo: 90, leanSpike: 25 }]);
     assert.equal(capped.corrected[2], 240, '+50% cap');
+  });
+
+  it('changes no site with fewer than 3 tip-ins', function () {
+    var r = computeFuelFilmCorrections({ ffTable: table, tipIns: [{ mapTo: 90, leanSpike: 10 }, { mapTo: 90, leanSpike: 10 }] }, { ffScale: 26, ffOffset: 30 });
+    assert.deepEqual(r.corrected, [20, 100, 160]);
+    assert.equal(r.eventCounts[2], 2);
   });
 
   it('leaves out lean spikes that follow a rich dip', function () {
@@ -200,5 +214,66 @@ describe('Transient Fuel — fuel cuts, near idle, closed loop and tune checks',
     assert.ok(recs.some(function (x) { return /Slow Decrease \(0.1 s\) is shorter than Fast Decrease/.test(x.text); }));
     var sug = recs.filter(function (x) { return /Suggested time constants/.test(x.text); })[0];
     assert.ok(!sug || sug.text.indexOf('Slow Increase') === -1, 'Slow Increase is already below 0.5 s');
+  });
+});
+
+describe('Transient Fuel — lifts (gear shifts) and blips', function () {
+  // 100 Hz, MAP held at 10 Hz like a real log: steady 55 kPa, lift to 22 kPa from t = 3 s (over 0.3 s), reopen at t = 3.8 s to 60 kPa.
+  // Lambda (vs aim 1.0): 10 % rich from 3.3 s to 4.0 s (the lift), 15 % lean from 4.1 s to 4.4 s (the reopening).
+  function shiftLog(liftEnd, lam) {
+    var out = [];
+    for (var i = 0; i < 1000; i++) {
+      var t = i * 0.01, h = Math.floor(t * 10) / 10, map;
+      map = h < 3 ? 55 : h < 3.3 ? 55 - (h - 3) / 0.3 * 33 : h < liftEnd ? 22 : h < liftEnd + 0.2 ? 22 + (h - liftEnd) / 0.2 * 38 : 60;
+      out.push({ time: t, map: map, rpm: 2500, tps: 20, coolant: 90, lambdaTarget: 1.0, overrunState: 0, fuelCutCount: 5,
+        lambda: lam ? lam(t) : (t >= 3.3 && t < liftEnd + 0.2 ? 0.9 : t >= liftEnd + 0.3 && t < liftEnd + 0.6 ? 1.15 : 1.0) });
+    }
+    return out;
+  }
+
+  it('measures a lift and reopening as one event, not a tip-out and a rich-first tip-in', function () {
+    var ev = detectTransientEvents(shiftLog(3.8), TF_SETTINGS);
+    assert.equal(ev.length, 0, JSON.stringify(ev.map(function (e) { return e.type + '@' + e.time; })));
+    assert.equal(ev.lifts.length, 1);
+    var l = ev.lifts[0];
+    assert.equal(l.type, 'lift');
+    assert.ok(l.mapFrom === 55 && l.mapLow === 22 && l.mapTo === 60, JSON.stringify(l));
+    assert.closeTo(l.richDuring, 10, 0.1);
+    assert.closeTo(l.leanAfter, 15, 0.1);
+    assert.ok(l.liftS > 0.5 && l.liftS < 1, 'lift ' + l.liftS);
+    assert.closeTo(l.leanS, 0.3, 0.02);
+  });
+
+  it('a reopening more than 1.5 s after the lift is a separate tip-out and tip-in', function () {
+    var ev = detectTransientEvents(shiftLog(5.5), TF_SETTINGS);
+    assert.equal(ev.lifts.length, 0);
+    assert.deepEqual(ev.map(function (e) { return e.type; }), ['tip-out', 'tip-in']);
+    assert.ok(ev[0].mapTo <= 25, 'the tip-out ends at the low, not 2 s later: ' + ev[0].mapTo);
+  });
+
+  it('lifts rich and lean point at Slow Decrease, and the tip-out rules do not contradict it', function () {
+    var lift = { type: 'lift', richDuring: 10, leanAfter: 15, liftS: 0.65, leanS: 0.3, clRange: 1 };
+    var events = [];
+    events.lifts = [lift, lift, lift, lift];
+    var t = generateRecommendations(events, { currentTimeConstants: { fastPct: 30, fastIncrease: 0.1, fastDecrease: 0.2, slowIncrease: 0.5, slowDecrease: 2 } })
+      .map(function (r) { return r.text; }).join('\n');
+    assert.ok(/RICH DURING THE LIFT, LEAN AFTER REOPENING: 4 lifts/.test(t), t);
+    assert.ok(/Slow Decrease Time Constant 2 s → 0.8 s/.test(t) && /releases only 28% of the slow film/.test(t), t);
+    var few = []; few.lifts = [lift, lift];
+    assert.ok(/Too few to judge/.test(generateRecommendations(few, {}).map(function (r) { return r.text; }).join('\n')));
+  });
+
+  it('a tip-in that falls straight back is a blip, left out of the advice', function () {
+    var log = [];
+    for (var i = 0; i < 800; i++) {
+      var t = i * 0.01, h = Math.floor(t * 10) / 10;
+      var map = h < 3 ? 40 : h < 3.2 ? 40 + (h - 3) / 0.2 * 45 : h < 3.5 ? 85 : h < 3.7 ? 85 - (h - 3.5) / 0.2 * 45 : 40;
+      log.push({ time: t, map: map, rpm: 2000, tps: 10, coolant: 90, lambdaTarget: 1, overrunState: 0, fuelCutCount: 5,
+        lambda: t >= 3.1 && t < 3.4 ? 0.88 : t >= 3.4 && t < 3.7 ? 1.2 : 1.0 });
+    }
+    var ev = detectTransientEvents(log, TF_SETTINGS);
+    assert.ok(ev.length === 2 && ev.every(function (e) { return e.blip; }), JSON.stringify(ev));
+    var t = generateRecommendations(ev, {}).map(function (r) { return r.text; }).join('\n');
+    assert.ok(/1 tip-in above idle fell straight back/.test(t) && !/RICH, THEN LEAN/.test(t), t);
   });
 });

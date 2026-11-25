@@ -19,7 +19,7 @@ function computeFuelFilmCorrections(result, settings) {
         var evt = tipIns[e];
         if (evt.leanSpike <= 2) continue;
         if ((evt.richBefore || 0) > 3) continue;   // rich before the lean peak: not a shortage of film (see generateRecommendations)
-        if (evt.nearIdle) continue;                // near idle the lambda sensor is too slow to read film effects
+        if (evt.nearIdle || evt.blip) continue;    // near idle the lambda sensor is too slow to read film effects; a blip is no film test
 
         var bestIdx = 0;
         var bestDist = Math.abs(evt.mapTo - ffTable.breakpoints[0]);
@@ -41,8 +41,9 @@ function computeFuelFilmCorrections(result, settings) {
     }
 
     // Average corrections and apply with damping
+    var minEvents = typeof TF_MIN_ZONE_EVENTS === 'number' ? TF_MIN_ZONE_EVENTS : 3;
     for (var i = 0; i < corrected.length; i++) {
-        if (eventCounts[i] > 0) {
+        if (eventCounts[i] >= minEvents) {
             var avgCorrection = corrections[i] / eventCounts[i];
             corrected[i] = ffTable.values[i] + avgCorrection * 0.75;
             if (corrected[i] < 0) corrected[i] = 0;
@@ -63,7 +64,8 @@ function computeFuelFilmCorrections(result, settings) {
         breakpoints: ffTable.breakpoints,
         original: ffTable.values,
         corrected: corrected,
-        corrections: corrections.map(function(c, i) { return eventCounts[i] > 0 ? Math.round(c / eventCounts[i] * 10) / 10 : 0; }),
+        corrections: corrections.map(function(c, i) { return eventCounts[i] >= minEvents ? Math.round(c / eventCounts[i] * 10) / 10 : 0; }),
+        minEvents: minEvents,
         eventCounts: eventCounts,
         scaleOffsetAdvice: scaleOffsetAdvice,
     };

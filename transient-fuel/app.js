@@ -142,6 +142,7 @@ function renderResults(result) {
     renderSummary(result);
     renderTipInTable(result.tipIns);
     renderTipOutTable(result.tipOuts);
+    renderLiftTable(result.lifts || []);
     document.getElementById('log-check').hidden = typeof LogPanel === 'undefined';
     if (typeof rsSaveControl === 'function' && lastRun) {
         var run = lastRun;
@@ -165,6 +166,7 @@ function renderSummary(r) {
         stat(r.totalEvents, 'Total Events') +
         stat(r.tipInCount, 'Tip-In Events') +
         stat(r.tipOutCount, 'Tip-Out Events') +
+        stat(r.liftCount || 0, 'Lifts and reopenings' + (r.liftCount ? ' — median ' + r.liftRichMedian.toFixed(1) + '% rich, then ' + r.liftLeanMedian.toFixed(1) + '% lean' : '')) +
         stat(r.avgLeanSpike.toFixed(1) + '%', 'Avg Lean Spike') +
         stat(r.avgRichOvershoot.toFixed(1) + '%', 'Avg Rich Overshoot') +
         stat((r.unsettledTipIns ? '≥ ' : '') + Math.round(r.avgRecoveryTime) + 'ms', 'Avg Recovery Time' +
@@ -197,7 +199,7 @@ function fmtRecovery(e) {
 }
 
 /** Click an event row: show that event in the log panel. */
-['tipin-content', 'tipout-content'].forEach(function (id) {
+['tipin-content', 'tipout-content', 'lift-content'].forEach(function (id) {
     document.getElementById(id).addEventListener('click', function (e) {
         var tr = e.target.closest('tr[data-time]');
         if (tr && lastRun && typeof LogPanel !== 'undefined') showEventInLog(parseFloat(tr.dataset.time));
@@ -230,12 +232,35 @@ function renderTipInTable(events) {
         var firstCls = e.richBefore > 10 ? 'severity-high' : e.richBefore > 3 ? 'severity-med' : 'severity-low';
         var richCls = e.richOvershoot > 10 ? 'severity-high' : e.richOvershoot > 5 ? 'severity-med' : 'severity-low';
         var recCls = e.recoveryTime > 800 ? 'severity-high' : e.recoveryTime > 500 ? 'severity-med' : 'severity-low';
-        html += '<tr data-time="' + e.time + '" title="Show in the log"><td>' + e.time.toFixed(2) + 's</td><td>' + e.rpm + '</td><td>' + fmtMapChange(e) + '</td><td>' + e.mapRate + ' kPa/s</td><td class="' + firstCls + '">' + (e.richBefore || 0).toFixed(1) + '%</td><td class="' + leanCls + '">' + e.leanSpike.toFixed(1) + '%' + (isRichFirst(e) ? ' <span title="Follows a rich dip: not counted as a shortage of fuel film">*</span>' : '') + '</td><td class="' + richCls + '">' + e.richOvershoot.toFixed(1) + '%</td><td class="' + recCls + '">' + fmtRecovery(e) + '</td></tr>';
+        html += '<tr data-time="' + e.time + '" title="Show in the log"><td>' + e.time.toFixed(2) + 's' + fmtLeftOut(e) + '</td><td>' + e.rpm + '</td><td>' + fmtMapChange(e) + '</td><td>' + e.mapRate + ' kPa/s</td><td class="' + firstCls + '">' + (e.richBefore || 0).toFixed(1) + '%</td><td class="' + leanCls + '">' + e.leanSpike.toFixed(1) + '%' + (isRichFirst(e) ? ' <span title="Follows a rich dip: not counted as a shortage of fuel film">*</span>' : '') + '</td><td class="' + richCls + '">' + e.richOvershoot.toFixed(1) + '%</td><td class="' + recCls + '">' + fmtRecovery(e) + '</td></tr>';
     }
     html += '</tbody></table>';
     if (events.some(isRichFirst)) html += '<p style="color:#888;font-size:0.8rem;">* Lean spike after a rich dip: not counted as a shortage of fuel film.</p>';
     if (events.length > limit) html += '<p style="color:#888;font-size:0.8rem;">Showing top ' + limit + ' of ' + events.length + ' events.</p>';
     c.innerHTML = html;
+}
+
+/** " (blip)" / " (idle)" after an event's time when it is left out of the advice. */
+function fmtLeftOut(e) {
+    return e.blip ? ' <span style="color:#888" title="Throttle blip: left out of the advice">(blip)</span>'
+        : e.nearIdle ? ' <span style="color:#888" title="Near idle: left out of the advice">(idle)</span>' : '';
+}
+
+function renderLiftTable(events) {
+    var c = document.getElementById('lift-content');
+    if (events.length === 0) { c.innerHTML = '<p style="color:#888;">No lifts and reopenings detected.</p>'; return; }
+    function cls(v) { return v > 10 ? 'severity-high' : v > 5 ? 'severity-med' : 'severity-low'; }
+    var html = '<table class="event-table lv-clickable"><thead><tr><th>Time</th><th>RPM</th><th>MAP</th><th title="From MAP falling to the reopening">Lift</th>' +
+        '<th title="Richest during the lift, against lambda before it">Rich in Lift</th><th title="Time more than 5% rich">Rich for</th>' +
+        '<th title="Leanest in the second after reopening, against where lambda settles">Lean after Reopening</th><th title="Time more than 5% lean">Lean for</th>' +
+        '<th title="How far the closed-loop trim moved">CL Trim Moved</th></tr></thead><tbody>';
+    events.forEach(function (e) {
+        html += '<tr data-time="' + e.time + '" title="Show in the log"><td>' + e.time.toFixed(2) + 's' + fmtLeftOut(e) + '</td><td>' + e.rpm + '</td><td>' +
+            e.mapFrom + '→' + e.mapLow + '→' + e.mapTo + ' kPa</td><td>' + e.liftS.toFixed(2) + ' s</td><td class="' + cls(e.richDuring) + '">' +
+            e.richDuring.toFixed(1) + '%</td><td>' + e.richS.toFixed(2) + ' s</td><td class="' + cls(e.leanAfter) + '">' + e.leanAfter.toFixed(1) +
+            '%</td><td>' + e.leanS.toFixed(2) + ' s</td><td>' + (e.clRange === null || e.clRange === undefined ? '—' : e.clRange.toFixed(1) + '%') + '</td></tr>';
+    });
+    c.innerHTML = html + '</tbody></table>';
 }
 
 function renderTipOutTable(events) {
@@ -248,7 +273,7 @@ function renderTipOutTable(events) {
         var e = events[i];
         var richCls = e.richOvershoot > 10 ? 'severity-high' : e.richOvershoot > 5 ? 'severity-med' : 'severity-low';
         var recCls = e.recoveryTime > 800 ? 'severity-high' : e.recoveryTime > 500 ? 'severity-med' : 'severity-low';
-        html += '<tr data-time="' + e.time + '" title="Show in the log"><td>' + e.time.toFixed(2) + 's</td><td>' + e.rpm + '</td><td>' + e.mapFrom + '→' + e.mapTo + ' kPa</td><td>' + e.mapRate + ' kPa/s</td><td class="' + richCls + '">' + e.richOvershoot.toFixed(1) + '%</td><td class="' + recCls + '">' + fmtRecovery(e) + '</td></tr>';
+        html += '<tr data-time="' + e.time + '" title="Show in the log"><td>' + e.time.toFixed(2) + 's' + fmtLeftOut(e) + '</td><td>' + e.rpm + '</td><td>' + e.mapFrom + '→' + e.mapTo + ' kPa</td><td>' + e.mapRate + ' kPa/s</td><td class="' + richCls + '">' + e.richOvershoot.toFixed(1) + '%</td><td class="' + recCls + '">' + fmtRecovery(e) + '</td></tr>';
     }
     html += '</tbody></table>';
     if (events.length > limit) html += '<p style="color:#888;font-size:0.8rem;">Showing top ' + limit + ' of ' + events.length + ' events.</p>';

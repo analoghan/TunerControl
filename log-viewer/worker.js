@@ -77,7 +77,7 @@ function lvAnalyzeTf(settings) {
             coolant: v('COOLANT_TEMP', i), overrunState: v('OVERRUN_STATE', i), fuelCutCount: v('FUEL_CUT_COUNT', i) });
     }
     var r = analyzeTransientSamples(samples, settings);
-    return { events: r.tipIns.concat(r.tipOuts).sort(function (x, y) { return x.time - y.time; }), skipped: r.skipped,
+    return { events: r.tipIns.concat(r.tipOuts, r.lifts || []).sort(function (x, y) { return x.time - y.time; }), skipped: r.skipped,
              unsettledTipIns: r.unsettledTipIns };
 }
 

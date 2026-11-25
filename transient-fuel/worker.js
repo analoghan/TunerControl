@@ -11,6 +11,9 @@
  *   Events overlapping a fuel cut are skipped: the overrun cut (Engine Overrun State Enabled), the injectors switched
  *   off without it (pulse width 0 — on an M1 usually Minimum Volume), a fuel cut count change or lambda reading air.
  *   - MAP transition zone (from → to kPa)
+ *   Lifts: a tip-out followed within TF_LIFT_MAX_S by a reopening (a gear shift or a short lift) is one 'lift' event, not a
+ *   tip-out and a tip-in — the reopening's lambda starts from the lift's, so judged alone it reads as "rich, then lean".
+ *   Measured: rich during the lift (vs lambda before it) and lean after the reopening (vs where lambda settles).
  */
 
 // ---------------------------------------------------------------------------
@@ -132,7 +135,7 @@ function detectTransientEvents(samples, settings) {
     var mapWindowMs = (settings.mapWindow || 500) / 1000; // convert ms to seconds
     var defaultTarget = settings.lambdaTarget || 1.0;
 
-    var events = [];
+    var events = [], starts = [];   // starts: sample index of each event, for pairing lifts
     var skippedFuelCut = 0, skipped = [];
     var i = 0;
     var lastEventEndIdx = -20; // prevent overlapping detections
@@ -177,16 +180,22 @@ function detectTransientEvents(samples, settings) {
             // Find the end of the transient (MAP stabilizes or direction reverses)
             var j = i + 1;
             var peakMap = mapAtStart;
-            var troughMap = mapAtStart;
+            var troughMap = mapAtStart, troughIdx = i;
             while (j < samples.length - 1) {
                 if (isNaN(samples[j].map)) { j++; continue; }
                 if (samples[j].map > peakMap) peakMap = samples[j].map;
-                if (samples[j].map < troughMap) troughMap = samples[j].map;
+                if (samples[j].map < troughMap) { troughMap = samples[j].map; troughIdx = j; }
 
-                // Check if MAP has stabilized (rate drops to near zero)
-                var dtj = samples[j].time - samples[Math.max(j - 3, i)].time;
-                if (dtj > 0.1) { // need at least 100ms of data
-                    var recentRate = Math.abs(samples[j].map - samples[Math.max(j - 3, i)].map) / dtj;
+                // MAP falling, then turning back up (a lift and reopening): the fall ends at the trough; the rise is the next event.
+                if (mapAtStart - troughMap >= minMapChange / 2 && samples[j].map - troughMap >= TF_REVERSAL_KPA) { j = troughIdx; break; }
+
+                // Check if MAP has stabilized: rate over the last TF_SETTLE_MAP_S near zero (logs hold 10 Hz MAP at 100 Hz, so this
+                // spans two MAP readings)
+                var jb = j;
+                while (jb > i && samples[j].time - samples[jb].time < TF_SETTLE_MAP_S) jb--;
+                var dtj = samples[j].time - samples[jb].time;
+                if (dtj >= TF_SETTLE_MAP_S - 1e-6) {
+                    var recentRate = Math.abs(samples[j].map - samples[jb].map) / dtj;
                     if (recentRate < mapRateThreshold * 0.2 && (samples[j].time - timeAtStart) > 0.1) break;
                 }
                 // Time limit: don't look more than 2s ahead
@@ -202,7 +211,8 @@ function detectTransientEvents(samples, settings) {
             var maxChange = Math.max(peakMap - mapAtStart, mapAtStart - troughMap);
             if (maxChange > totalMapChange) totalMapChange = maxChange;
 
-            var excursion = totalMapChange >= minMapChange ? measureLambdaExcursion(samples, i, j, isTipIn, defaultTarget) : null;
+            var excursion = totalMapChange >= minMapChange ?
+                measureLambdaExcursion(samples, i, j, isTipIn, defaultTarget, isTipIn ? null : Math.min(mapAtEnd, troughMap) + TF_REVERSAL_KPA) : null;
             if (totalMapChange >= minMapChange && !excursion) {
                 skippedFuelCut++;
                 skipped.push({ type: isTipIn ? 'tip-in' : 'tip-out', time: timeAtStart, endTime: samples[j].time,
@@ -240,6 +250,7 @@ function detectTransientEvents(samples, settings) {
                     clRange: clHi >= clLo ? Math.round((clHi - clLo) * 10) / 10 : null,
                     nearIdle: !isNaN(s.rpm) && s.rpm < TF_NEAR_IDLE_RPM,
                 });
+                starts.push(i);
 
                 lastEventEndIdx = j + 5;
             }
@@ -250,9 +261,106 @@ function detectTransientEvents(samples, settings) {
         }
     }
 
-    events.skippedFuelCut = skippedFuelCut;
-    events.skipped = skipped;
-    return events;
+    var paired = tfPairLifts(samples, events, starts, minMapChange, defaultTarget, skipped);
+    paired.skippedFuelCut = skipped.length;   // including lifts over a fuel cut
+    paired.skipped = skipped;
+    return paired;
+}
+
+/** MAP has settled when it changed less than 20 % of the MAP rate threshold over this long (s). */
+var TF_SETTLE_MAP_S = 0.2;
+/** MAP rising this far (kPa) from its low during a falling event ends the event at the low. */
+var TF_REVERSAL_KPA = 5;
+/** A tip-in is the reopening of a lift when MAP was minMapChange higher at most this long before it began to rise. */
+var TF_LIFT_MAX_S = 1.5;
+/** Lambda lags the throttle: the lift's rich side is looked for until this long after the reopening. */
+var TF_LIFT_TAIL_S = 0.2;
+/** The reopening's lean side is looked for this long after it. */
+var TF_REOPEN_S = 1.0;
+/** A tip-out starting within this long after a tip-in makes both a blip. */
+var TF_BLIP_S = 1.0;
+/** Lambda more than this fraction off counts towards the rich / lean duration. */
+var TF_LIFT_DEV = 0.05;
+
+/**
+ * The lift before the tip-in starting at sample i, or null: { k (last sample with MAP minMapChange above the reopening's start —
+ * the lift is timed from there), kMax (the highest MAP in the TF_PRE_S before k), liftS (k → i) }.
+ */
+function tfFindLift(samples, i, minMapChange) {
+    var t0 = samples[i].time, m0 = samples[i].map, ks = -1, k;
+    for (k = i - 1; k >= 0 && samples[k].time >= t0 - TF_LIFT_MAX_S; k--) {
+        if (samples[k].map >= m0 + minMapChange) { ks = k; break; }
+    }
+    if (ks < 0) return null;
+    var kMax = ks;
+    for (k = ks - 1; k >= 0 && samples[k].time >= samples[ks].time - TF_PRE_S; k--) if (samples[k].map > samples[kMax].map) kMax = k;
+    return { k: ks, kMax: kMax, liftS: t0 - samples[ks].time };
+}
+
+/**
+ * Replaces each tip-in that reopens a lift (and the lift's own tip-out) with one 'lift' event. A lift overlapping a fuel cut
+ * is added to `skipped`. Returns the remaining events with `.lifts`.
+ */
+function tfPairLifts(samples, events, starts, minMapChange, defaultTarget, skipped) {
+    var drop = {}, lifts = [], k;
+    function r1(v) { return Math.round(v * 10) / 10; }
+    events.forEach(function (e, n) {
+        if (e.type !== 'tip-in') return;
+        var i = starts[n], lift = tfFindLift(samples, i, minMapChange);
+        if (!lift) return;
+        var tLift = samples[lift.k].time, tTop = samples[lift.kMax].time, t0 = e.time;
+        events.forEach(function (o, m) { if (o.type === 'tip-out' && o.time >= tTop - 0.2 && o.time < t0) drop[m] = true; });
+        for (k = skipped.length - 1; k >= 0; k--) if (skipped[k].type === 'tip-out' && skipped[k].time >= tTop - 0.2 && skipped[k].time < t0) skipped.splice(k, 1);
+        drop[n] = true;
+        // The tip-in's own window was checked for cuts; check the lift before it.
+        var cut = null;
+        for (k = lift.k; k >= 0 && samples[k].time >= tLift - TF_CUT_HOLDOFF_S && !cut; k--) cut = tfCutReason(samples, k);
+        for (k = lift.k; k < i && !cut; k++) cut = tfCutReason(samples, k);
+        var mapLow = Infinity;
+        for (k = lift.k; k <= i; k++) if (samples[k].map < mapLow) mapLow = samples[k].map;
+        var base = { type: 'lift', time: tLift, reopenTime: t0, endTime: e.endTime, rpm: e.rpm, mapFrom: Math.round(samples[lift.kMax].map),
+                     mapLow: Math.round(mapLow), mapTo: e.mapTo, liftS: Math.round(lift.liftS * 100) / 100 };
+        if (cut) {
+            skipped.push(Object.assign(base, { reason: tfCutReasonBetween(samples, tLift - TF_CUT_HOLDOFF_S, t0) || cut }));
+            return;
+        }
+        // Rich during the lift, against lambda just before it.
+        var pre = [];
+        for (k = lift.k - 1; k >= 0 && samples[k].time >= tLift - TF_PRE_S; k--) {
+            var pr = tfRatio(samples[k], defaultTarget);
+            if (!isNaN(pr)) pre.push(pr);
+        }
+        pre.sort(function (a, b) { return a - b; });
+        var preLevel = pre.length ? pre[Math.floor(pre.length / 2)] : 1;
+        var rich = 0, richS = 0, lean = 0, leanS = 0, clLo = Infinity, clHi = -Infinity;
+        for (k = lift.k; k < samples.length && samples[k].time <= e.windowEnd; k++) {
+            var s = samples[k], r = tfRatio(s, defaultTarget), dt = k + 1 < samples.length ? samples[k + 1].time - s.time : 0;
+            if (!isNaN(s.clTrim)) { clLo = Math.min(clLo, s.clTrim); clHi = Math.max(clHi, s.clTrim); }
+            if (isNaN(r)) continue;
+            if (s.time <= t0 + TF_LIFT_TAIL_S) {
+                rich = Math.max(rich, (1 - r / preLevel) * 100);
+                if (r / preLevel < 1 - TF_LIFT_DEV) richS += dt;
+            }
+            if (s.time >= t0 && s.time <= t0 + TF_REOPEN_S) {
+                lean = Math.max(lean, (r / e.baseline - 1) * 100);
+                if (r / e.baseline > 1 + TF_LIFT_DEV) leanS += dt;
+            }
+        }
+        lifts.push(Object.assign(base, {
+            richDuring: r1(rich), richS: Math.round(richS * 100) / 100, leanAfter: r1(lean), leanS: Math.round(leanS * 100) / 100,
+            lambdaTarget: e.lambdaTarget, windowEnd: e.windowEnd, baseline: e.baseline, preLevel: preLevel,
+            clRange: clHi >= clLo ? r1(clHi - clLo) : null, nearIdle: e.nearIdle
+        }));
+    });
+    var out = events.filter(function (e, n) { return !drop[n]; });
+    // A tip-in that MAP falls straight back from (a blip, e.g. a rev-match on a downshift): neither half is a film test on its own.
+    out.forEach(function (e) {
+        if (e.type !== 'tip-in') return;
+        var back = out.concat(skipped).filter(function (o) { return o.type === 'tip-out' && o.time > e.time && o.time < e.time + TF_BLIP_S; });
+        if (back.length) { e.blip = true; back.forEach(function (o) { o.blip = true; }); }
+    });
+    out.lifts = lifts;
+    return out;
 }
 
 /** Lambda above this is a fuel cut / free-air reading, not combustion. */
@@ -320,7 +428,7 @@ function tfCutReasonBetween(samples, t0, t1) {
  * matter, not fuel film. Returns null when overrun or a fuel cut overlaps the event (its lambda is not
  * combustion).
  */
-function measureLambdaExcursion(samples, startIdx, endIdx, isTipIn, defaultTarget) {
+function measureLambdaExcursion(samples, startIdx, endIdx, isTipIn, defaultTarget, reopenMap) {
     var t0 = samples[startIdx].time, tEnd = samples[endIdx].time + TF_WINDOW_S, k;
     for (k = startIdx; k >= 0 && samples[k].time >= t0 - TF_CUT_HOLDOFF_S; k--) if (tfCutAt(samples, k)) return null;
     for (k = startIdx; k < samples.length && samples[k].time <= tEnd; k++) if (tfCutAt(samples, k)) return null;
@@ -328,11 +436,11 @@ function measureLambdaExcursion(samples, startIdx, endIdx, isTipIn, defaultTarge
     var raw = [];
     for (k = startIdx; k < samples.length && samples[k].time <= tEnd; k++) {
         var r = tfRatio(samples[k], defaultTarget);
-        if (!isNaN(r)) raw.push({ t: samples[k].time, r: r });
+        if (!isNaN(r)) raw.push({ t: samples[k].time, r: r, map: samples[k].map });
     }
     var settled = raw.filter(function (p) { return p.t >= tEnd - TF_SETTLE_S; }).map(function (p) { return p.r; }).sort(function (a, b) { return a - b; });
     var base = settled.length ? settled[Math.floor(settled.length / 2)] : 1;
-    var pts = raw.map(function (p) { return { t: p.t, r: p.r / base }; });
+    var pts = raw.map(function (p) { return { t: p.t, r: p.r / base, map: p.map }; });
 
     // Where lambda was just before the event, relative to where it settles. A spike or dip only counts beyond both
     // levels, so a steady difference between the start and end loads (a VE matter) is not mistaken for one.
@@ -362,7 +470,12 @@ function measureLambdaExcursion(samples, startIdx, endIdx, isTipIn, defaultTarge
         rich = minAfter < Infinity ? Math.max(0, (1 - minAfter) * 100) : 0;
     } else {
         rich = Math.max(0, (1 - pts[iMin].r / lo) * 100);
-        for (k = iMin + 1; k < pts.length; k++) leanAfter = Math.max(leanAfter, (pts[k].r - 1) * 100);
+        // Lean after the tip-out, until the throttle opens again (MAP back up TF_REVERSAL_KPA from its low): that lean is the
+        // reopening's, not the tip-out's.
+        for (k = iMin + 1; k < pts.length; k++) {
+            if (reopenMap !== null && reopenMap !== undefined && pts[k].map > reopenMap) break;
+            leanAfter = Math.max(leanAfter, (pts[k].r - 1) * 100);
+        }
     }
     // Recovery: from the event start until lambda is back within TF_SETTLED after its largest deviation.
     var iDev = 0;
@@ -397,13 +510,79 @@ var TF_MAP_OVERSHOOT_KPA = 5;
 function isRichFirst(e) { return e.type === 'tip-in' && (e.richBefore || 0) > TF_RICH_FIRST; }
 function mapOvershoot(e) { return e.mapPeak !== undefined ? Math.max(0, e.mapPeak - e.mapTo) : 0; }
 
+/** Fewest tip-ins into a 20 kPa zone (and into a Fuel Film table site) the film amount is judged from. */
+var TF_MIN_ZONE_EVENTS = 3;
+/** Fewest lifts (above idle) the lift advice is given from. */
+var TF_LIFT_MIN_EVENTS = 3;
+/** Median rich during the lift and lean after the reopening (%) above which the lift advice is given. */
+var TF_LIFT_ERR = 5;
+
+function tfMedian(v) { v = v.slice().sort(function (a, b) { return a - b; }); return v.length ? v[Math.floor(v.length / 2)] : 0; }
+
+/**
+ * Advice from the lifts (gear shifts and short lifts): { recs, slowDec (suggested Slow Decrease s, or undefined) }. Rich during the
+ * lift and lean after reopening both point at the Decrease constants: the model takes the film out more slowly than the wall film
+ * really leaves, so the lift runs rich, and at the reopening the model still holds film that has gone, so it adds too little.
+ */
+function tfLiftAdvice(lifts, tc) {
+    var out = { recs: [] };
+    var used = lifts.filter(function (e) { return !e.nearIdle; });
+    if (!used.length) return out;
+    var rich = tfMedian(used.map(function (e) { return e.richDuring; })), lean = tfMedian(used.map(function (e) { return e.leanAfter; }));
+    var liftS = tfMedian(used.map(function (e) { return e.liftS; })), leanS = tfMedian(used.map(function (e) { return e.leanS; }));
+    var withCl = used.filter(function (e) { return e.clRange !== null && e.clRange !== undefined; });
+    var cl = withCl.length ? tfMedian(withCl.map(function (e) { return e.clRange; })) : null;
+    var both = used.filter(function (e) { return e.richDuring > TF_LIFT_ERR && e.leanAfter > TF_LIFT_ERR; }).length;
+    var facts = used.length + ' lift' + (used.length === 1 ? '' : 's') + ' and reopenings (gear shifts or short lifts, median ' + liftS.toFixed(2) +
+        ' s from MAP falling to the reopening): median ' + rich.toFixed(1) + '% rich during the lift and ' + lean.toFixed(1) + '% lean for ' +
+        leanS.toFixed(2) + ' s after reopening' + (cl !== null ? '; the closed-loop trim moved a median ' + cl.toFixed(1) + '% per lift' : '') + '.';
+    if (used.length < TF_LIFT_MIN_EVENTS) {
+        out.recs.push({ severity: 'info', text: facts + ' Too few to judge the Decrease time constants from (need ' + TF_LIFT_MIN_EVENTS + ').' });
+        return out;
+    }
+    var sd = typeof tc.slowDecrease === 'number' ? tc.slowDecrease : null;
+    function released(t) { return Math.round((1 - Math.exp(-liftS / t)) * 100); }
+    if (rich > TF_LIFT_ERR && lean > TF_LIFT_ERR) {
+        var text = 'RICH DURING THE LIFT, LEAN AFTER REOPENING: ' + facts + ' ' + both + ' of ' + used.length + ' lifts show both. ' +
+            'This is the film model releasing fuel more slowly than the wall film really leaves (on direct injection the film is on the piston and ' +
+            'cylinder wall): fuel comes off faster than the model takes it out, so the lift runs rich; at the reopening the model still holds ' +
+            'film that has already gone, so it adds too little and the engine runs lean. The Decrease time constants set this (they act whenever ' +
+            'the film shrinks). ';
+        if (sd !== null) {
+            var sug = Math.max(0.1, Math.round(sd * (sd > 1 ? 0.4 : 0.7) * 20) / 20);
+            out.slowDec = sug;
+            text += 'With Slow Decrease ' + sd + ' s the model releases only ' + released(sd) + '% of the slow film in a ' + liftS.toFixed(2) + ' s lift. ' +
+                'Suggested: Fuel Film Primary Slow Decrease Time Constant ' + sd + ' s → ' + sug + ' s (' + released(sug) + '% released), one step, ' +
+                'leaving the film table and the Increase constants alone. Then re-log the same kind of shifts: both sides should shrink together. ' +
+                'Trade-off: a shorter Decrease also empties the model faster on long lifts (coasting, then back on), which can turn lean on that ' +
+                'reopening — watch the lifts longer than about 2 s.';
+        } else {
+            text += 'Shorten the Slow Decrease time constant in a step and re-log the same kind of shifts.';
+        }
+        if (cl !== null && cl > TF_CL_ACTIVE_PCT) text += ' Closed loop was moving during the lifts, so confirm with closed loop off.';
+        out.recs.push({ severity: rich > 10 || lean > 10 ? 'critical' : 'warning', text: text });
+    } else if (rich > TF_LIFT_ERR) {
+        out.recs.push({ severity: 'warning', text: 'Rich during lifts: ' + facts + ' The film comes off the walls faster than the model takes it ' +
+            'out, without a lean reopening after it. Shorten the Decrease time constants in a small step' +
+            (sd !== null ? ' (Slow Decrease ' + sd + ' s releases ' + released(sd) + '% of the slow film in a ' + liftS.toFixed(2) + ' s lift)' : '') + '.' });
+    } else if (lean > TF_LIFT_ERR) {
+        out.recs.push({ severity: 'warning', text: 'Lean after reopening: ' + facts + ' The lift itself is not rich, so the film model is not ' +
+            'holding on too long. Either the film at the reopened load is too low (check the plain tip-ins into that load: lean there too → ' +
+            'raise Fuel Film Primary Main), or the Decrease constants empty the model faster than the wall film really leaves (plain tip-ins ' +
+            'fine → lengthen the Decrease time constants).' });
+    } else {
+        out.recs.push({ severity: 'good', text: 'Lifts and reopenings look good: ' + facts });
+    }
+    return out;
+}
+
 function generateRecommendations(events, settings) {
     var recs = [];
     var allTipIns = events.filter(function (e) { return e.type === 'tip-in'; });
     var allTipOuts = events.filter(function (e) { return e.type === 'tip-out'; });
     // Events near idle are reported but left out of the advice: the lambda sensor is too slow there to read film effects.
-    var tipIns = allTipIns.filter(function (e) { return !e.nearIdle; });
-    var tipOuts = allTipOuts.filter(function (e) { return !e.nearIdle; });
+    var tipIns = allTipIns.filter(function (e) { return !e.nearIdle && !e.blip; });
+    var tipOuts = allTipOuts.filter(function (e) { return !e.nearIdle && !e.blip; });
     function avg(list, f) { return list.length ? list.reduce(function (a, e) { return a + f(e); }, 0) / list.length : 0; }
     function median(list) { var v = list.slice().sort(function (a, b) { return a - b; }); return v.length ? v[Math.floor(v.length / 2)] : 0; }
     var tune = settings.tuneFilm || null;
@@ -433,6 +612,12 @@ function generateRecommendations(events, settings) {
                 'MoTeC calibrates the fuel film with closed loop disabled — log the film tests with Fuel Closed Loop Mode off.' });
     }
 
+    var blips = allTipIns.filter(function (e) { return e.blip && !e.nearIdle; });
+    if (blips.length) {
+        recs.push({ severity: 'info',
+            text: blips.length + ' tip-in' + (blips.length === 1 ? '' : 's') + ' above idle fell straight back within ' + TF_BLIP_S + ' s (throttle blips, ' +
+                'e.g. rev-matching): the tip-in and its tip-out are left out of the advice, as neither is a film test on its own.' });
+    }
     var nearIdle = allTipIns.concat(allTipOuts).filter(function (e) { return e.nearIdle; });
     if (nearIdle.length) {
         recs.push({ severity: 'info',
@@ -466,6 +651,10 @@ function generateRecommendations(events, settings) {
                 'make the reference speed the one you test at and zero the trim there.' });
     }
 
+    var tcLift = settings.currentTimeConstants || {};
+    var liftAdvice = tfLiftAdvice(events.lifts || [], tcLift);
+    recs = recs.concat(liftAdvice.recs);
+
     // Tip-ins that go rich before their lean peak: the lean spike follows too much fuel up front (or a MAP
     // overshoot), so they say nothing about the film being too low and are left out of the zone and table advice.
     var richFirst = tipIns.filter(isRichFirst);
@@ -492,6 +681,7 @@ function generateRecommendations(events, settings) {
     var leanZones = [], richZones = [];
     Object.keys(zones).forEach(function (z) {
         var list = zones[z], lean = avg(list, function (e) { return e.leanSpike; }), rich = avg(list, function (e) { return e.richOvershoot; });
+        if (list.length < TF_MIN_ZONE_EVENTS) return;   // one or two events are not enough to change the table
         if (lean > 5 && rich <= 3) leanZones.push({ zone: +z, avg: lean, count: list.length });
         if (rich > 5 && lean <= 3) richZones.push({ zone: +z, avg: rich, count: list.length });
     });
@@ -512,7 +702,8 @@ function generateRecommendations(events, settings) {
     var unsettled = tipIns.filter(function (e) { return e.settled === false; }).length;
     var tipOutRich = avg(tipOuts, function (e) { return e.richOvershoot; });
     var tipOutLean = avg(tipOuts, function (e) { return e.leanAfter || 0; });
-    var mismatch = tipIns.length > 3 && avgLean > 3 && avgRichTipIn > 3;
+    var mismatch = tipIns.length > 3 && avgLean > 5 && avgRichTipIn > 5;
+    var enoughOuts = tipOuts.length >= TF_MIN_ZONE_EVENTS, nOuts = ' (' + tipOuts.length + ' tip-outs above idle)';
     // Mostly rich-then-lean without MAP overshoot: the up-front compensation is too strong.
     var tooStrongFirst = !mismatch && tipIns.length > 3 && richFirst.length - overshoot.length >= tipIns.length / 2;
 
@@ -524,16 +715,18 @@ function generateRecommendations(events, settings) {
                 'Shorten the Increase time constants (Fast and Slow) and/or raise the Fast Percentage so more of the compensation is delivered at once. ' +
                 'On a tip-in the film is growing, so only the Increase constants act; the Decrease constants act on tip-out.' });
     }
-    if (tipOuts.length && tipOutRich > 5) {
+    if (enoughOuts && tipOutRich > 5) {
         recs.push({ severity: 'warning',
-            text: 'Rich on tip-out: ' + tipOutRich.toFixed(1) + '% on average. As the throttle closes, fuel coming off the walls (piston and ' +
+            text: 'Rich on tip-out: ' + tipOutRich.toFixed(1) + '% on average' + nOuts + '. As the throttle closes, fuel coming off the walls (piston and ' +
                 'cylinder on direct injection, ports on port injection) is not being taken out quickly enough. Shorten the Decrease time ' +
                 'constants (Fast and Slow), or check the Main values between the starting and ending MAP.' });
     }
-    if (tipOuts.length && tipOutLean > 5) {
+    if (enoughOuts && tipOutLean > 5) {
         recs.push({ severity: 'warning',
-            text: 'Lean after tip-out: ' + tipOutLean.toFixed(1) + '% on average. The compensation removes fuel faster than the wall film actually ' +
-                'releases it. Lengthen the Decrease time constants, or check that the fuel film primary values are not too high.' });
+            text: 'Lean after tip-out: ' + tipOutLean.toFixed(1) + '% on average' + nOuts + '. The compensation removes fuel faster than the wall film actually ' +
+                'releases it. Lengthen the Decrease time constants, or check that the fuel film primary values are not too high.' +
+                (liftAdvice.slowDec !== undefined ? ' The lifts point the other way (shorten Slow Decrease); they are the more direct test of the ' +
+                    'Decrease constants, so make that change first and see whether this lean remains.' : '') });
     }
     if (tipIns.length && avgRecovery > 500 && avgLean > 3) {
         recs.push({ severity: 'info',
@@ -553,8 +746,10 @@ function generateRecommendations(events, settings) {
         if (tooStrongFirst) { sug.fastInc = cur.fastInc * 1.3; sug.fastPct = Math.max(0, cur.fastPct - 10); }
         if (!clMostly && avgLean > 3 && avgRecovery > 800) sug.slowInc = Math.min(sug.slowInc, cur.slowInc * 0.5);
         else if (!clMostly && avgLean > 3 && avgRecovery > 500) sug.slowInc = Math.min(sug.slowInc, cur.slowInc * 0.7);
-        if (tipOuts.length && tipOutRich > 5) { sug.fastDec = cur.fastDec * 0.7; sug.slowDec = cur.slowDec * 0.7; }
-        else if (tipOuts.length && tipOutLean > 5) { sug.fastDec = cur.fastDec * 1.3; sug.slowDec = cur.slowDec * 1.3; }
+        // The lifts judge the Decrease constants more directly than plain tip-outs: their suggestion stands on its own.
+        if (liftAdvice.slowDec !== undefined) { /* see the lift advice */ }
+        else if (enoughOuts && tipOutRich > 5) { sug.fastDec = cur.fastDec * 0.7; sug.slowDec = cur.slowDec * 0.7; }
+        else if (enoughOuts && tipOutLean > 5) { sug.fastDec = cur.fastDec * 1.3; sug.slowDec = cur.slowDec * 1.3; }
         // Never suggest shortening a constant that is already at or below the firmware's typical minimum.
         var minimum = { fastInc: 0.1, fastDec: 0.1, slowInc: 0.5, slowDec: 0.5 };
         Object.keys(minimum).forEach(function (k) { if (sug[k] < cur[k] && cur[k] <= minimum[k] + 1e-9) sug[k] = cur[k]; });
@@ -569,7 +764,7 @@ function generateRecommendations(events, settings) {
         }
     }
 
-    if (recs.length === 0) {
+    if (recs.every(function (r) { return r.severity === "good"; })) {
         recs.push({ severity: 'good',
             text: 'Transient fueling looks well-calibrated. Lean spikes and rich overshoot are within acceptable limits across all MAP zones.' });
     }
@@ -679,7 +874,7 @@ function analyzeTransientSamples(samples, settings) {
     return {
         totalSamples: samples.length,
         warmSamples: warmSamples.length,
-        totalEvents: events.length,
+        totalEvents: events.length + (events.lifts || []).length,
         skippedFuelCut: events.skippedFuelCut || 0,
         skipped: events.skipped || [],
         skippedByReason: (events.skipped || []).reduce(function (acc, e) { var r = e.reason || 'other'; acc[r] = (acc[r] || 0) + 1; return acc; }, {}),
@@ -693,6 +888,10 @@ function analyzeTransientSamples(samples, settings) {
         avgRecoveryTime: tipIns.length > 0 ? tipIns.reduce(function(a, e) { return a + e.recoveryTime; }, 0) / tipIns.length : 0,
         tipIns: tipIns.sort(function(a, b) { return b.leanSpike - a.leanSpike; }),
         tipOuts: tipOuts.sort(function(a, b) { return b.richOvershoot - a.richOvershoot; }),
+        lifts: (events.lifts || []).slice().sort(function (a, b) { return a.time - b.time; }),
+        liftCount: (events.lifts || []).length,
+        liftRichMedian: tfMedian((events.lifts || []).filter(function (e) { return !e.nearIdle; }).map(function (e) { return e.richDuring; })),
+        liftLeanMedian: tfMedian((events.lifts || []).filter(function (e) { return !e.nearIdle; }).map(function (e) { return e.leanAfter; })),
         recommendations: recommendations,
     };
 }

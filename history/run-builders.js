@@ -53,7 +53,8 @@ function rbTransient(r) {
     return {
         summary: { tipIns: r.tipInCount, tipOuts: r.tipOutCount, skipped: r.skippedFuelCut || 0, avgLean: rbRound(r.avgLeanSpike, 1),
                    avgRich: rbRound(r.avgRichOvershoot, 1), richFirst: r.richFirstTipIns || 0, avgRecovery: Math.round(r.avgRecoveryTime || 0),
-                   unsettled: r.unsettledTipIns || 0 },
+                   unsettled: r.unsettledTipIns || 0, lifts: r.liftCount || 0, liftRich: rbRound(r.liftRichMedian || 0, 1),
+                   liftLean: rbRound(r.liftLeanMedian || 0, 1) },
         data: { zones: zoneList, recommendations: (r.recommendations || []).map(function (x) { return { severity: x.severity, text: x.text }; }) }
     };
 }

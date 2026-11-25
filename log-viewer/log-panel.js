@@ -343,17 +343,20 @@ LogPanel.prototype._overlays = function () {
         this.el.tfLegend.innerHTML = '<span style="color:#888">' + lvEsc(a.tf.error) + '</span>';
     } else {
         var ins = a.tf.events.filter(function (e) { return e.type === 'tip-in'; }).length;
+        var lifts = a.tf.events.filter(function (e) { return e.type === 'lift'; }).length;
         this.el.tfLegend.innerHTML =
             '<span class="lv-chip"><span class="sw" style="background:#4dd0e1"></span>Tip-in ' + ins + '</span>' +
-            '<span class="lv-chip"><span class="sw" style="background:#ffb74d"></span>Tip-out ' + (a.tf.events.length - ins) + '</span>' +
+            '<span class="lv-chip"><span class="sw" style="background:#ffb74d"></span>Tip-out ' + (a.tf.events.length - ins - lifts) + '</span>' +
+            '<span class="lv-chip" title="Throttle closed and reopened within 1.5 s (a gear shift)"><span class="sw" style="background:#ba68c8"></span>Lift ' + lifts + '</span>' +
             '<span class="lv-chip" title="Overlapping overrun or a fuel cut — not measured"><span class="sw" style="background:#777"></span>Skipped ' +
             a.tf.skipped.length + '</span>';
         if (this.showTf) {
             a.tf.events.forEach(function (e) {
-                var tipIn = e.type === 'tip-in';
-                markers.push({ t: e.time, t1: e.windowEnd, color: tipIn ? '#4dd0e1' : '#ffb74d',
+                var tipIn = e.type === 'tip-in', lift = e.type === 'lift';
+                markers.push({ t: e.time, t1: e.windowEnd, color: lift ? '#ba68c8' : tipIn ? '#4dd0e1' : '#ffb74d',
                     fill: e === self.selEvent ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.035)',
-                    label: (tipIn ? 'tip-in ' + (e.richBefore > 3 ? e.richBefore + '% rich, then ' : '') + e.leanSpike + '% lean'
+                    label: lift ? 'lift ' + e.richDuring + '% rich, then ' + e.leanAfter + '% lean'
+                        : (tipIn ? 'tip-in ' + (e.richBefore > 3 ? e.richBefore + '% rich, then ' : '') + e.leanSpike + '% lean'
                         : 'tip-out ' + e.richOvershoot + '% rich') });
             });
             a.tf.skipped.forEach(function (e) { markers.push({ t: e.time, t1: e.endTime, color: '#777', fill: 'rgba(120,120,120,0.08)', label: 'skipped' }); });
@@ -377,7 +380,12 @@ LogPanel.prototype._eventTable = function () {
                 return '<tr class="skipped" data-i="' + i + '"><td>' + lcClock(e.time) + '</td><td>' + e.type + ' — skipped (overrun / fuel cut)</td>' +
                     '<td></td><td></td><td></td><td></td><td></td></tr>';
             }
-            return '<tr data-i="' + i + '"' + (e === self.selEvent ? ' class="sel"' : '') + '><td>' + lcClock(e.time) + '</td><td>' + e.type + '</td><td>' +
+            if (e.type === 'lift') {
+                return '<tr data-i="' + i + '"' + (e === self.selEvent ? ' class="sel"' : '') + '><td>' + lcClock(e.time) + '</td><td>lift (' + e.liftS.toFixed(2) +
+                    ' s)</td><td>' + e.mapFrom + '→' + e.mapLow + '→' + e.mapTo + ' kPa</td><td></td><td>' + e.leanAfter.toFixed(1) + '%</td><td>' +
+                    e.richDuring.toFixed(1) + '%</td><td></td></tr>';
+            }
+            return '<tr data-i="' + i + '"' + (e === self.selEvent ? ' class="sel"' : '') + '><td>' + lcClock(e.time) + '</td><td>' + e.type + (e.blip ? ' (blip)' : '') + '</td><td>' +
                 e.mapFrom + '→' + e.mapTo + ' kPa' + (e.type === 'tip-in' && e.mapPeak - e.mapTo >= 5 ? ' (peak ' + e.mapPeak + ')' : '') + '</td><td>' +
                 (e.type === 'tip-in' ? (e.richBefore || 0).toFixed(1) + '%' : '') + '</td><td>' + (e.type === 'tip-in' ? e.leanSpike.toFixed(1) + '%' : '') + '</td><td>' +
                 e.richOvershoot.toFixed(1) + '%</td><td>' + (e.settled === false ? '&gt; ' : '') + e.recoveryTime + ' ms</td></tr>';

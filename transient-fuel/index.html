@@ -140,6 +140,14 @@
       </div>
 
       <div class="report-block">
+        <h2>Lifts and Reopenings (Gear Shifts)</h2>
+        <p class="section-desc">The throttle closing and opening again within 1.5 s — a gear shift or a short lift. Measured as one event: how rich
+          lambda goes during the lift (against just before it) and how lean after the reopening (against where it settles). Both together point at
+          the Decrease time constants: the model holds on to film that has already left the walls.</p>
+        <div id="lift-content"></div>
+      </div>
+
+      <div class="report-block">
         <h2>Tip-Out Events (Rich Overshoot)</h2>
         <p class="section-desc">Throttle closing events sorted by rich overshoot. Persistent rich after tip-out indicates fuel film decrease time constant is too slow.</p>
         <div id="tipout-content"></div>
